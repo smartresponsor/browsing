@@ -1,0 +1,12 @@
+{
+  "firstName": "Oleksandr",
+  "lastName": "Tishchenko",
+  "title": "Symfony / PHP / AI Automation Developer",
+  "location": "Houston, TX",
+  "email": "CHANGE_ME",
+  "phone": "CHANGE_ME",
+  "linkedinUrl": "CHANGE_ME",
+  "githubUrl": "CHANGE_ME",
+  "resumePath": "D:\\PhpstormProjects\\www\\network-mcp\\profile\\resume.pdf",
+  "skills": ["Symfony", "PHP", "JavaScript", "Python", "Cloudflare", "MCP", "AI automation"]
+}

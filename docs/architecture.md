@@ -1,0 +1,49 @@
+# Architecture
+
+`network-mcp` is a hybrid career-apply stack:
+
+- a Cloudflare Worker gateway in `cloudflare-worker/src/index.ts`
+- a local visible Playwright browser worker in `playwright-worker/src/worker.js`
+- a small MCP tool registry skeleton in `mcp-server/src/server.js`
+
+The product logic is intentionally supervised. The browser worker exposes only the safe career flow:
+
+1. open
+2. inspect
+3. extract form
+4. propose
+5. fill after approval
+6. review before submit
+
+Final submit is not auto-implemented.
+
+## Current entrypoints
+
+- `cloudflare-worker/src/index.ts` - public health, OIDC metadata, MCP gateway, and worker proxying.
+- `playwright-worker/src/worker.js` - local browser automation worker on port `8791`.
+- `mcp-server/src/server.js` - local registry stub that prints the supervised tool names.
+
+## Local ports
+
+- `playwright-worker` listens on `127.0.0.1:8791` by default.
+- `cloudflared` tunnel ports are ephemeral when using `cloudflared tunnel --url ...`.
+- `mcp-server` does not currently expose a network listener.
+
+## Auth model
+
+- `cloudflare-worker` accepts a bearer token through `NETWORK_MCP_TOKEN`.
+- The worker also proxies Auth0/OIDC metadata and userinfo for the public ChatGPT-style path.
+- The browser worker must remain local-only or be protected with `NETWORK_MCP_BROWSER_WORKER_TOKEN`.
+- If the browser worker is exposed through Cloudflare Tunnel, token protection is required.
+
+## Cloudflare usage
+
+- Deployment is through `cloudflare-worker/wrangler.jsonc`.
+- `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are expected from the environment.
+- `CAREER_WORKER_URL` points the Cloudflare Worker at the public tunnel for the local browser worker.
+
+## Operational notes
+
+- The browser launches with `headless: false`, so Playwright stays visible on Windows by default.
+- Local smoke checks use a data URL form to avoid depending on external sites.
+- Health and smoke commands are operational checks, not product features.
