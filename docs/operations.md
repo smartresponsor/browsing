@@ -60,6 +60,12 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `check-wrangler` resolves the local `wrangler` binary and reports Cloudflare env presence.
 - `deploy-worker` remains a manual command. It is not chained into doctor, status, start, restart, or startup tasks.
 
+## Local pre-commit hook
+
+The optional local Git hook at `C:\Users\Admin\.githooks\pre-commit` runs `vendor/bin/php-cs-fixer` only when staged PHP files exist and the binary is present.
+If staged PHP files exist but the fixer is missing, the hook prints a warning and lets the commit continue.
+Real php-cs-fixer failures still block the commit when the tool exists.
+
 ## Runtime guardrails
 
 - Reject or pause on denied hosts.

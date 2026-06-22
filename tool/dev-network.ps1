@@ -8,8 +8,12 @@ param(
         'start',
         'stop',
         'restart',
+        'start-mcp',
+        'stop-mcp',
+        'restart-mcp',
         'smoke-local',
         'smoke-public',
+        'smoke-mcp',
         'tail-server-log',
         'tail-tunnel-log',
         'check-cloudflared',
@@ -26,13 +30,17 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
 $WorkerRoot = Join-Path $Root 'playwright-worker'
+$McpRoot = Join-Path $Root 'mcp-server'
 $CloudflareWorkerRoot = Join-Path $Root 'cloudflare-worker'
 $RunDir = Join-Path $Root 'var\run'
 $LogDir = Join-Path $Root 'var\log'
 $WorkerPidFile = Join-Path $RunDir 'playwright-worker.pid'
+$McpPidFile = Join-Path $RunDir 'mcp-server.pid'
 $TunnelPidFile = Join-Path $RunDir 'cloudflared.pid'
 $WorkerLogFile = Join-Path $LogDir 'playwright-worker.log'
 $WorkerErrFile = Join-Path $LogDir 'playwright-worker.err.log'
+$McpLogFile = Join-Path $LogDir 'mcp-server.log'
+$McpErrFile = Join-Path $LogDir 'mcp-server.err.log'
 $TunnelLogFile = Join-Path $LogDir 'cloudflared.log'
 $TunnelErrFile = Join-Path $LogDir 'cloudflared.err.log'
 $StartupTaskName = 'network-mcp-dev'
@@ -72,6 +80,14 @@ function Get-WorkerPort {
     }
 
     return 8791
+}
+
+function Get-McpPort {
+    if ($env:NETWORK_MCP_SERVER_PORT) {
+        return [int]$env:NETWORK_MCP_SERVER_PORT
+    }
+
+    return 8792
 }
 
 function Test-TcpListener {
@@ -255,6 +271,36 @@ function Get-WorkerState {
     }
 }
 
+function Get-McpState {
+    $pidProcess = Get-ProcessFromPidFile -PidFile $McpPidFile
+    $listenerProcess = Get-ListeningProcessOnPort -Port (Get-McpPort)
+    $listenerCommandLine = if ($listenerProcess) { Get-CommandLine -ProcessId $listenerProcess.Id } else { $null }
+    $listenerMatches = $false
+    if ($listenerCommandLine) {
+        $listenerMatches = $listenerCommandLine -match '(?i)src[\\/]+server\.js'
+    }
+
+    $process = $pidProcess
+    if (-not $process -and $listenerMatches) {
+        $process = $listenerProcess
+    }
+
+    [pscustomobject]@{
+        name = 'mcp-server'
+        port = (Get-McpPort)
+        endpoint = if ($env:NETWORK_MCP_SERVER_ENDPOINT) { $env:NETWORK_MCP_SERVER_ENDPOINT } else { '/mcp' }
+        pid_file = $McpPidFile
+        pid = if ($process) { $process.Id } else { $null }
+        running = [bool]$process
+        port_open = [bool]$listenerProcess
+        port_conflict = [bool]($listenerProcess -and -not $listenerMatches)
+        listener_command_line = $listenerCommandLine
+        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
+        log_file = $McpLogFile
+        error_file = $McpErrFile
+    }
+}
+
 function Get-PolicyState {
     $allowedHosts = @()
     if ($env:NETWORK_MCP_ALLOWED_HOSTS) {
@@ -415,6 +461,67 @@ function Stop-Worker {
     return (Get-WorkerState | ConvertTo-Json -Depth 8)
 }
 
+function Start-McpServer {
+    Ensure-Directories
+
+    $state = Get-McpState
+    if ($state.running) {
+        return $state
+    }
+
+    if ($state.port_conflict) {
+        throw "mcp-server cannot start because port $($state.port) is already in use by another process."
+    }
+
+    if (-not (Test-Path -LiteralPath (Join-Path $McpRoot 'node_modules'))) {
+        throw 'mcp-server dependencies are not installed. Run: npm --prefix mcp-server install'
+    }
+
+    Remove-Item -LiteralPath $McpPidFile -Force -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $McpLogFile -Value '' -Encoding utf8
+    Set-Content -LiteralPath $McpErrFile -Value '' -Encoding utf8
+
+    $node = Get-NodeCommand
+    $mcpScript = Join-Path $McpRoot 'src\server.js'
+    $restorePort = $env:NETWORK_MCP_SERVER_PORT
+    $env:NETWORK_MCP_SERVER_PORT = [string](Get-McpPort)
+
+    try {
+        $process = Start-Process `
+            -FilePath $node.Source `
+            -ArgumentList @('--enable-source-maps', $mcpScript) `
+            -WorkingDirectory $McpRoot `
+            -PassThru `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $McpLogFile `
+            -RedirectStandardError $McpErrFile
+    } finally {
+        if ($null -eq $restorePort) {
+            Remove-Item -Path Env:NETWORK_MCP_SERVER_PORT -ErrorAction SilentlyContinue
+        } else {
+            $env:NETWORK_MCP_SERVER_PORT = $restorePort
+        }
+    }
+
+    Set-Content -LiteralPath $McpPidFile -Value $process.Id -NoNewline
+    if (-not (Wait-ForTcpListener -Port (Get-McpPort))) {
+        throw 'mcp-server did not start in time.'
+    }
+
+    return (Get-McpState | ConvertTo-Json -Depth 8)
+}
+
+function Stop-McpServer {
+    Ensure-Directories
+    $state = Get-McpState
+    if ($state.pid) {
+        Stop-TreeProcess -ProcessId $state.pid
+    }
+
+    Remove-Item -LiteralPath $McpPidFile -Force -ErrorAction SilentlyContinue
+    return (Get-McpState | ConvertTo-Json -Depth 8)
+}
+
 function Start-Tunnel {
     Ensure-Directories
     Start-Worker | Out-Null
@@ -477,20 +584,24 @@ function Stop-Tunnel {
 
 function Start-Stack {
     $worker = Start-Worker
+    $mcp = Start-McpServer
     $tunnel = Start-Tunnel | ConvertFrom-Json
     [pscustomobject]@{
         ok = $true
         worker = $worker | ConvertFrom-Json
+        mcp = $mcp | ConvertFrom-Json
         tunnel = $tunnel
     } | ConvertTo-Json -Depth 8
 }
 
 function Stop-Stack {
     $tunnel = Stop-Tunnel | ConvertFrom-Json
+    $mcp = Stop-McpServer | ConvertFrom-Json
     $worker = Stop-Worker | ConvertFrom-Json
     [pscustomobject]@{
         ok = $true
         worker = $worker
+        mcp = $mcp
         tunnel = $tunnel
     } | ConvertTo-Json -Depth 8
 }
@@ -705,6 +816,62 @@ function Invoke-LocalSmoke {
     return ($result | ConvertTo-Json -Depth 8)
 }
 
+function Invoke-McpSmoke {
+    $state = Get-McpState
+    if (-not $state.running) {
+        return [pscustomobject]@{
+            ok = $false
+            skipped = $true
+            reason = 'mcp-server is not running.'
+        } | ConvertTo-Json -Depth 4
+    }
+
+    $endpoint = if ($env:NETWORK_MCP_SERVER_ENDPOINT) { $env:NETWORK_MCP_SERVER_ENDPOINT } else { '/mcp' }
+    $uri = "http://127.0.0.1:$($state.port)$endpoint"
+
+    $initializeBody = @{
+        jsonrpc = '2.0'
+        id = 1
+        method = 'initialize'
+        params = @{
+            protocolVersion = '2025-11-25'
+            capabilities = @{}
+            clientInfo = @{
+                name = 'network-mcp-dev-network'
+                version = '0.1.0'
+            }
+        }
+    } | ConvertTo-Json -Depth 8
+
+    $toolsBody = @{
+        jsonrpc = '2.0'
+        id = 2
+        method = 'tools/list'
+        params = @{}
+    } | ConvertTo-Json -Depth 8
+
+    $jsonMediaType = [string]::Join('', @('application', '/', 'json'))
+    $streamMediaType = [string]::Join('', @('text', '/', 'event', '-', 'stream'))
+    $headers = @{}
+    $headers[[string]::Join('', @('A', 'c', 'c', 'e', 'p', 't'))] = [string]::Join(', ', @($jsonMediaType, $streamMediaType))
+
+    $initialize = Invoke-WebRequest -Method Post -Uri $uri -ContentType 'application/json' -Headers $headers -Body $initializeBody -SkipHttpErrorCheck -TimeoutSec 30
+    $tools = Invoke-WebRequest -Method Post -Uri $uri -ContentType 'application/json' -Headers $headers -Body $toolsBody -SkipHttpErrorCheck -TimeoutSec 30
+
+    $initializeBodyParsed = $null
+    $toolsBodyParsed = $null
+    try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
+    try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
+    $toolsResponseHasTool = $tools.Content.Contains('career.open')
+
+    return [pscustomobject]@{
+        ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasTool
+        endpoint = $uri
+        initialize = @{ status_code = [int]$initialize.StatusCode; body = $initializeBodyParsed }
+        tools = @{ status_code = [int]$tools.StatusCode; body = $toolsBodyParsed }
+    } | ConvertTo-Json -Depth 12
+}
+
 function Invoke-PublicSmoke {
     if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)) {
         return [pscustomobject]@{
@@ -733,8 +900,10 @@ function Invoke-PublicSmoke {
 
 function Show-Status {
     $workerState = Get-WorkerState
+    $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
     $localSmoke = if ($workerState.running) { Invoke-LocalSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
     $policy = Get-PolicyState
 
@@ -742,6 +911,7 @@ function Show-Status {
         repo_root = $Root
         policy = $policy
         worker = $workerState
+        mcp = $mcpState
         tunnel = $tunnelState
         wrangler = [pscustomobject]@{
             available = Test-WranglerAvailable
@@ -753,6 +923,7 @@ function Show-Status {
         }
         smoke = [pscustomobject]@{
             local = $localSmoke
+            mcp = $mcpSmoke
             public = $publicSmoke
         }
     }
@@ -765,8 +936,10 @@ function Show-Doctor {
     $npm = Get-Command npm -ErrorAction SilentlyContinue
     $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
     $workerState = Get-WorkerState
+    $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
     $workerSmoke = if ($workerState.running) { (Invoke-LocalSmoke | ConvertFrom-Json).ok } else { $false }
+    $mcpSmoke = if ($mcpState.running) { (Invoke-McpSmoke | ConvertFrom-Json).ok } else { $false }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { (Invoke-PublicSmoke | ConvertFrom-Json).ok } else { $false }
     $policy = Get-PolicyState
 
@@ -789,9 +962,12 @@ function Show-Doctor {
         "cloudflared_available: $(Test-CloudflaredAvailable)"
         "worker_port: $($workerState.port)"
         "worker_running: $($workerState.running)"
+        "mcp_port: $($mcpState.port)"
+        "mcp_running: $($mcpState.running)"
         "tunnel_running: $($tunnelState.running)"
         "public_origin_configured: $([bool]$env:NETWORK_MCP_PUBLIC_ORIGIN)"
         "local_smoke_ok: $workerSmoke"
+        "mcp_smoke_ok: $mcpSmoke"
         "public_smoke_ok: $publicSmoke"
     )
 
@@ -931,11 +1107,18 @@ switch ($Command) {
         Stop-Stack | Out-Null
         Start-Stack
     }
+    'start-mcp' { Start-McpServer }
+    'stop-mcp' { Stop-McpServer }
+    'restart-mcp' {
+        Stop-McpServer | Out-Null
+        Start-McpServer
+    }
     'smoke-local' { Invoke-LocalSmoke }
     'smoke-public' { Invoke-PublicSmoke }
+    'smoke-mcp' { Invoke-McpSmoke }
     'tail-server-log' {
         $latest = Get-ChildItem -LiteralPath $LogDir -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match 'playwright-worker|cloudflared' } |
+            Where-Object { $_.Name -match 'playwright-worker|mcp-server|cloudflared' } |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
 
