@@ -37,8 +37,12 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `start`
 - `stop`
 - `restart`
+- `start-mcp`
+- `stop-mcp`
+- `restart-mcp`
 - `smoke-local`
 - `smoke-public`
+- `smoke-mcp`
 - `check-cloudflared`
 - `check-wrangler`
 - `tail-server-log`
@@ -50,12 +54,16 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 ## What each command does
 
 - `doctor` summarizes prerequisites, worker state, tunnel state, and smoke readiness.
-- `status` returns JSON describing the local worker and tunnel.
-- `start` starts the browser worker and tunnel helper.
-- `stop` stops both managed processes.
-- `restart` restarts both managed processes.
+- `status` returns JSON describing the local worker, MCP server, tunnel, and smoke checks.
+- `start` starts the browser worker, MCP server, and tunnel helper.
+- `stop` stops all managed local processes.
+- `restart` restarts all managed local processes.
+- `start-mcp` starts only the local MCP server.
+- `stop-mcp` stops only the local MCP server.
+- `restart-mcp` restarts only the local MCP server.
 - `smoke-local` exercises the browser worker against a public sample form.
 - `smoke-public` checks `GET /healthz` on `NETWORK_MCP_PUBLIC_ORIGIN`.
+- `smoke-mcp` verifies local MCP initialize and tools/list responses.
 - `check-cloudflared` resolves `cloudflared` without using `%TEMP%`.
 - `check-wrangler` resolves the local `wrangler` binary and reports Cloudflare env presence.
 - `deploy-worker` remains a manual command. It is not chained into doctor, status, start, restart, or startup tasks.

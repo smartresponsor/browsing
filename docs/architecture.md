@@ -4,7 +4,7 @@
 
 - a Cloudflare Worker gateway in `cloudflare-worker/src/index.ts`
 - a local visible Playwright browser worker in `playwright-worker/src/worker.js`
-- a small MCP tool registry skeleton in `mcp-server/src/server.js`
+- a local MCP server in `mcp-server/src/server.js`
 
 The product logic is intentionally supervised. The browser worker exposes only the safe career flow:
 
@@ -21,13 +21,13 @@ Final submit is not auto-implemented.
 
 - `cloudflare-worker/src/index.ts` - public health, OIDC metadata, MCP gateway, and worker proxying.
 - `playwright-worker/src/worker.js` - local browser automation worker on port `8791`.
-- `mcp-server/src/server.js` - local registry stub that prints the supervised tool names.
+- `mcp-server/src/server.js` - local MCP endpoint on port `8792`.
 
 ## Local ports
 
 - `playwright-worker` listens on `127.0.0.1:8791` by default.
+- `mcp-server` listens on `127.0.0.1:8792/mcp` by default.
 - `cloudflared` tunnel ports are ephemeral when using `cloudflared tunnel --url ...`.
-- `mcp-server` does not currently expose a network listener.
 
 ## Auth model
 
