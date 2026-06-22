@@ -9,6 +9,7 @@ This repository is the implementation of the local `network-mcp` connector. Trea
 - Do not send non-unified wrapper patch formats to `console.apply_patch`; this connector rejects them.
 - Prefer `dryRun=true` first for non-trivial patches. Apply with `dryRun=false` only after the dry run reports `ok=true` and `applicable=true`.
 - Every hunk must have a valid unified-diff hunk header with correct old and new line counts.
+- Recalculate hunk counts from the exact lines inside the hunk; if unsure, use a smaller hunk.
 - Do not guess hunk ranges. Read the target file first when possible, then build the diff from the current content.
 - Keep each patch focused. Use `expectedChangedFiles` and list only the files that must change.
 - Do not patch generated or policy-forbidden output unless the repository policy explicitly allows it.
