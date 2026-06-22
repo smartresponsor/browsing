@@ -22,11 +22,11 @@ Use this as a bounded context inside `network-mcp`, not as a LinkedIn scraper.
 
 ## Supervised tools
 
-- `career.open`
-- `career.inspect`
-- `career.extract_form`
-- `career.propose`
-- `career.fill_after_approval`
-- `career.review_before_submit`
+- `network.open`
+- `network.inspect`
+- `network.extract_form`
+- `network.propose`
+- `network.fill_after_approval`
+- `network.review_before_submit`
 
 Final submit is intentionally not implemented in this layer.

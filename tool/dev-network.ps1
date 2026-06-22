@@ -862,7 +862,7 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $toolsResponseHasTool = $tools.Content.Contains('career.open')
+    $toolsResponseHasTool = $tools.Content.Contains('network.open')
 
     return [pscustomobject]@{
         ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasTool

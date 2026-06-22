@@ -25,7 +25,7 @@ type McpTool = {
 
 const MCP_TOOLS: McpTool[] = [
   {
-    name: 'career.open',
+    name: 'network.open',
     description: 'Open a target URL in the supervised browser worker.',
     route: '/open',
     inputSchema: {
@@ -38,7 +38,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'career.inspect',
+    name: 'network.inspect',
     description: 'Inspect visible form fields in the current page.',
     route: '/inspect',
     inputSchema: {
@@ -48,7 +48,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'career.extract_form',
+    name: 'network.extract_form',
     description: 'Extract the current form field snapshot.',
     route: '/extract-form',
     inputSchema: {
@@ -58,7 +58,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'career.propose',
+    name: 'network.propose',
     description: 'Produce supervised answer proposals before filling.',
     route: '/propose',
     inputSchema: {
@@ -77,7 +77,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'career.fill_after_approval',
+    name: 'network.fill_after_approval',
     description: 'Fill approved fields only after explicit approval.',
     route: '/fill-after-approval',
     inputSchema: {
@@ -98,7 +98,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'career.review_before_submit',
+    name: 'network.review_before_submit',
     description: 'Capture a manual review artifact before any final submit.',
     route: '/review-before-submit',
     inputSchema: {

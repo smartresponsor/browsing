@@ -6,12 +6,12 @@ export class CareerToolRegistry {
 
   listTools() {
     return [
-      'career.open',
-      'career.inspect',
-      'career.extract_form',
-      'career.propose',
-      'career.fill_after_approval',
-      'career.review_before_submit'
+      'network.open',
+      'network.inspect',
+      'network.extract_form',
+      'network.propose',
+      'network.fill_after_approval',
+      'network.review_before_submit'
     ];
   }
 
@@ -36,17 +36,17 @@ export class CareerToolRegistry {
 
   async callTool(toolName, payload) {
     const routes = {
-      'career.open': '/open',
-      'career.inspect': '/inspect',
-      'career.extract_form': '/extract-form',
-      'career.propose': '/propose',
-      'career.fill_after_approval': '/fill-after-approval',
-      'career.review_before_submit': '/review-before-submit'
+      'network.open': '/open',
+      'network.inspect': '/inspect',
+      'network.extract_form': '/extract-form',
+      'network.propose': '/propose',
+      'network.fill_after_approval': '/fill-after-approval',
+      'network.review_before_submit': '/review-before-submit'
     };
 
     const route = routes[toolName];
     if (!route) {
-      throw new Error(`Unknown career tool: ${toolName}`);
+      throw new Error(`Unknown network tool: ${toolName}`);
     }
 
     return this.callWorker(route, payload);

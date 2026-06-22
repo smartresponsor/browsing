@@ -105,47 +105,47 @@ function buildServer() {
 
 function registerCareerTools(mcpServer) {
   mcpServer.registerTool(
-    'career.open',
+    'network.open',
     {
       description: 'Open a target URL in the supervised browser worker.',
       inputSchema: z.object({
         url: z.string().url()
       }).strict()
     },
-    async ({ url }) => toolResult(await registry.callTool('career.open', { url }))
+    async ({ url }) => toolResult(await registry.callTool('network.open', { url }))
   );
 
   mcpServer.registerTool(
-    'career.inspect',
+    'network.inspect',
     {
       description: 'Inspect visible form fields in the current page.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('career.inspect', {}))
+    async () => toolResult(await registry.callTool('network.inspect', {}))
   );
 
   mcpServer.registerTool(
-    'career.extract_form',
+    'network.extract_form',
     {
       description: 'Extract the current form field snapshot.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('career.extract_form', {}))
+    async () => toolResult(await registry.callTool('network.extract_form', {}))
   );
 
   mcpServer.registerTool(
-    'career.propose',
+    'network.propose',
     {
       description: 'Produce supervised answer proposals before filling.',
       inputSchema: z.object({
         fields: z.array(z.record(z.unknown()))
       }).strict()
     },
-    async ({ fields }) => toolResult(await registry.callTool('career.propose', { fields }))
+    async ({ fields }) => toolResult(await registry.callTool('network.propose', { fields }))
   );
 
   mcpServer.registerTool(
-    'career.fill_after_approval',
+    'network.fill_after_approval',
     {
       description: 'Fill approved fields only after explicit approval.',
       inputSchema: z.object({
@@ -154,7 +154,7 @@ function registerCareerTools(mcpServer) {
         fields: z.array(z.record(z.unknown()))
       }).strict()
     },
-    async ({ approved, approvalText, fields }) => toolResult(await registry.callTool('career.fill_after_approval', {
+    async ({ approved, approvalText, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
       approved,
       approvalText,
       fields
@@ -162,12 +162,12 @@ function registerCareerTools(mcpServer) {
   );
 
   mcpServer.registerTool(
-    'career.review_before_submit',
+    'network.review_before_submit',
     {
       description: 'Capture a manual review artifact before any final submit.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('career.review_before_submit', {}))
+    async () => toolResult(await registry.callTool('network.review_before_submit', {}))
   );
 }
 
