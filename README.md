@@ -46,17 +46,14 @@ NETWORK_MCP_WORKER_PORT=8791
 
 ## Tool contract
 
-Current commands still use the `career_` prefix. That prefix is legacy/internal and will later migrate to `network_*`.
-
 Documented safe operations:
 
-- `network.open_url`
-- `network.discover_opportunity_links`
-- `network.open_opportunity`
-- `network.inspect_form`
-- `network.fill_approved_fields`
-- `network.save_draft` if supported later
-- `network.submit_form` only when explicitly enabled and gated
+- `network.open`
+- `network.inspect`
+- `network.extract_form`
+- `network.propose`
+- `network.fill_after_approval`
+- `network.review_before_submit`
 
 ## Safety defaults
 
@@ -89,5 +86,5 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 smoke-local
 ## Cloudflare
 
 - Worker config: `cloudflare-worker/wrangler.jsonc`
-- Public health check: `/healthz` returns `service: "network-career-gateway"`
+- Public health check: `/healthz` returns `service: "network-mcp"`
 - Worker deploy remains a manual action through the supervisor or `wrangler`

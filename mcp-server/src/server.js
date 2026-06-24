@@ -2,14 +2,17 @@ import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import { CareerToolRegistry } from './tool-registry.js';
+import { NetworkToolRegistry } from './tool-registry.js';
 
 const host = process.env.NETWORK_MCP_SERVER_HOST || '127.0.0.1';
 const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
 const endpoint = process.env.NETWORK_MCP_SERVER_ENDPOINT || '/mcp';
+const workerUrl = process.env.NETWORK_MCP_WORKER_URL
+  || process.env.CAREER_WORKER_URL
+  || 'http://127.0.0.1:8791';
 
-const registry = new CareerToolRegistry(
-  process.env.CAREER_WORKER_URL || 'http://127.0.0.1:8791',
+const registry = new NetworkToolRegistry(
+  workerUrl,
   process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || ''
 );
 
@@ -26,7 +29,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       ok: true,
-      service: 'network-career-mcp',
+      service: 'network-mcp',
       endpoint
     }));
     return;
@@ -85,7 +88,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`network-career-mcp listening on http://${host}:${port}${endpoint}`);
+  console.log(`network-mcp listening on http://${host}:${port}${endpoint}`);
 });
 
 process.on('SIGINT', () => {
@@ -94,16 +97,16 @@ process.on('SIGINT', () => {
 
 function buildServer() {
   const mcpServer = new McpServer({
-    name: 'network-career-mcp',
+    name: 'network-mcp',
     version: '0.1.0-rc1'
   });
 
-  registerCareerTools(mcpServer);
+  registerNetworkTools(mcpServer);
 
   return mcpServer;
 }
 
-function registerCareerTools(mcpServer) {
+function registerNetworkTools(mcpServer) {
   mcpServer.registerTool(
     'network.open',
     {

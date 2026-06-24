@@ -891,7 +891,7 @@ function Invoke-PublicSmoke {
     }
 
     return [pscustomobject]@{
-        ok = [int]$response.StatusCode -eq 200 -and $body.ok -eq $true -and $body.service -eq 'network-career-gateway'
+        ok = [int]$response.StatusCode -eq 200 -and $body.ok -eq $true -and $body.service -eq 'network-mcp'
         status_code = [int]$response.StatusCode
         body = $body
         origin = $origin

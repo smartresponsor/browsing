@@ -1,5 +1,6 @@
-interface Env {
+﻿interface Env {
   NETWORK_MCP_TOKEN?: string;
+  NETWORK_MCP_WORKER_URL?: string;
   CAREER_WORKER_URL?: string;
   NETWORK_MCP_BROWSER_WORKER_TOKEN?: string;
   NETWORK_MCP_AUTH0_ISSUER?: string;
@@ -176,7 +177,7 @@ function getMcpDebugInfo(env: Env) {
 
   return {
     ok: true,
-    service: 'network-career-gateway',
+    service: 'network-mcp',
     protocolVersion: MCP_PROTOCOL_VERSION,
     auth: {
       legacyBearer: true,
@@ -186,7 +187,7 @@ function getMcpDebugInfo(env: Env) {
       allowedEmailConfigured
     },
     tools: MCP_TOOLS.map(({ route, ...tool }) => tool),
-    careerWorkerUrlConfigured: Boolean(env.CAREER_WORKER_URL)
+    networkWorkerUrlConfigured: Boolean(env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL)
   };
 }
 
@@ -275,9 +276,9 @@ async function authorizeMcpRequest(request: Request, env: Env): Promise<Response
 }
 
 async function callCareerWorkerTool(env: Env, route: string, payload: unknown): Promise<{ ok: boolean; body: string }> {
-  const workerUrl = env.CAREER_WORKER_URL;
+  const workerUrl = env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL;
   if (!workerUrl) {
-    return { ok: false, body: 'CAREER_WORKER_URL is not configured' };
+    return { ok: false, body: 'NETWORK_MCP_WORKER_URL is not configured' };
   }
 
   try {
@@ -370,7 +371,7 @@ async function handleMcpRequest(request: Request, env: Env): Promise<Response> {
         tools: { listChanged: false }
       },
       serverInfo: {
-        name: 'network-career-gateway',
+        name: 'network-mcp',
         version: '1.0.0'
       },
       instructions: 'Supervised career apply gateway.'
@@ -413,7 +414,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/healthz') {
-      return json(200, { ok: true, service: 'network-career-gateway' });
+      return json(200, { ok: true, service: 'network-mcp' });
     }
 
     if (url.pathname === '/.well-known/openid-configuration' || url.pathname === '/.well-known/oauth-authorization-server') {
@@ -484,9 +485,10 @@ export default {
         return json(401, { ok: false, error: 'Unauthorized' });
       }
 
-      return json(200, { ok: true, service: 'network-career-gateway' });
+      return json(200, { ok: true, service: 'network-mcp' });
     }
 
     return json(404, { ok: false, error: 'Not found' });
   }
 };
+

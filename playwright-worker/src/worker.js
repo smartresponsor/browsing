@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { chromium } from '@playwright/test';
 import { mkdir } from 'fs/promises';
 import path from 'path';
@@ -359,7 +359,7 @@ async function describeSelectorField(target, selector) {
 app.get('/healthz', (_req, res) => {
   res.json({
     ok: true,
-    service: 'network-career-gateway',
+    service: 'network-mcp',
     browserVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true'
   });
 });
@@ -503,4 +503,5 @@ app.post('/review-before-submit', async (_req, res) => {
 });
 
 const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || 8791);
-app.listen(port, '127.0.0.1', () => console.log(`Career browser worker listening on http://127.0.0.1:${port}`));
+app.listen(port, '127.0.0.1', () => console.log(`Network browser worker listening on http://127.0.0.1:${port}`));
+

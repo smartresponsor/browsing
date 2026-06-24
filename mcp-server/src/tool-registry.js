@@ -1,4 +1,4 @@
-export class CareerToolRegistry {
+export class NetworkToolRegistry {
   constructor(workerUrl, browserWorkerToken = '') {
     this.workerUrl = workerUrl;
     this.browserWorkerToken = browserWorkerToken;
@@ -28,7 +28,7 @@ export class CareerToolRegistry {
     });
 
     if (!response.ok) {
-      throw new Error(`Career worker failed: ${response.status} ${await response.text()}`);
+      throw new Error(`Network browser worker failed: ${response.status} ${await response.text()}`);
     }
 
     return response.json();

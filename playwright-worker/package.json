@@ -1,5 +1,5 @@
 {
-  "name": "network-career-browser-worker",
+  "name": "network-browser-worker",
   "version": "0.1.0-rc1",
   "private": true,
   "type": "module",
