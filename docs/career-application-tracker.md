@@ -37,6 +37,7 @@ Default application answers:
 | OpenAI | Backend Software Engineer (Evals) | https://jobs.ashbyhq.com/openai/3d064454-c0c3-4225-bc2c-6d8c0f8735b2/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_Software_Engineer_Evals.pdf | Evaluation-oriented backend systems, support automation, human-in-the-loop validation |
 | OpenAI | Software Engineer, Backend (Cooperative AI) | https://jobs.ashbyhq.com/openai/bd190cad-99ec-4fe7-8f8f-de96b5aa5969/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_Cooperative_AI.pdf | Backend knowledge systems, cooperative workflows, model-powered internal platform |
 | OpenAI | Backend Software Engineer, GTM Innovation | https://jobs.ashbyhq.com/openai/43174eb6-0ffe-4744-9323-c7969e7ea2e1/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_GTM_Innovation.pdf | Internal AI applications, GTM workflow automation, backend platform engineering |
+| OpenAI | Software Engineer, API SDK | https://jobs.ashbyhq.com/openai/77fbf383-bb97-4006-9b2d-e5de2d6f79d3/application | Submitted | Oleksandr_Tishchenko_OpenAI_API_SDK_Software_Engineer.pdf | Developer platform, API/SDK integration, backend reliability |
 
 ## Follow-up checklist
 
