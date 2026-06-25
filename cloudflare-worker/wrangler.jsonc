@@ -8,13 +8,14 @@
   "compatibility_date": "2026-06-20",
   "workers_dev": true,
   "vars": {
-    "NETWORK_MCP_WORKER_URL": "https://pee-vegetables-pct-filing.trycloudflare.com"
+    "NETWORK_MCP_WORKER_URL": "https://leonard-oem-barbara-decision.trycloudflare.com"
   },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   }
 }
+
 
 
 
