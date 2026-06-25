@@ -36,6 +36,7 @@ Default application answers:
 | OpenAI | Software Engineer, Cooperative AI | https://jobs.ashbyhq.com/openai/7613aca3-9dd8-41cd-b114-06ef4de967a9/application | Submitted | Oleksandr_Tishchenko_OpenAI_Cooperative_AI_Software_Engineer.pdf | Cooperative agent systems, human-AI coordination, safe tool workflows |
 | OpenAI | Backend Software Engineer (Evals) | https://jobs.ashbyhq.com/openai/3d064454-c0c3-4225-bc2c-6d8c0f8735b2/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_Software_Engineer_Evals.pdf | Evaluation-oriented backend systems, support automation, human-in-the-loop validation |
 | OpenAI | Software Engineer, Backend (Cooperative AI) | https://jobs.ashbyhq.com/openai/bd190cad-99ec-4fe7-8f8f-de96b5aa5969/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_Cooperative_AI.pdf | Backend knowledge systems, cooperative workflows, model-powered internal platform |
+| OpenAI | Backend Software Engineer, GTM Innovation | https://jobs.ashbyhq.com/openai/43174eb6-0ffe-4744-9323-c7969e7ea2e1/application | Submitted | Oleksandr_Tishchenko_OpenAI_Backend_GTM_Innovation.pdf | Internal AI applications, GTM workflow automation, backend platform engineering |
 
 ## Follow-up checklist
 
