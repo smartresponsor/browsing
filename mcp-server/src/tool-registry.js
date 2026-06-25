@@ -7,6 +7,7 @@ export class NetworkToolRegistry {
   listTools() {
     return [
       'network.open',
+      'network.open_job',
       'network.inspect',
       'network.extract_form',
       'network.propose',
@@ -37,6 +38,7 @@ export class NetworkToolRegistry {
   async callTool(toolName, payload) {
     const routes = {
       'network.open': '/open',
+      'network.open_job': '/open-job',
       'network.inspect': '/inspect',
       'network.extract_form': '/extract-form',
       'network.propose': '/propose',

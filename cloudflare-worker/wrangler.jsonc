@@ -2,12 +2,19 @@
   "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
   "name": "network-mcp",
   "main": "./src/index.ts",
+  "account_id": "ea89ff31882730b6044b8e0a1df0eb2b",
   // NETWORK_MCP_WORKER_URL must point to the public Cloudflare Tunnel URL for the local playwright-worker.
   // If the browser worker is token-protected, set NETWORK_MCP_BROWSER_WORKER_TOKEN as a wrangler secret or environment variable before deploying this Worker.
   "compatibility_date": "2026-06-20",
   "workers_dev": true,
+  "vars": {
+    "NETWORK_MCP_WORKER_URL": "https://impression-separately-adapted-marco.trycloudflare.com"
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   }
 }
+
+
+

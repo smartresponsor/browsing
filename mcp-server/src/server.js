@@ -119,6 +119,17 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.open_job',
+    {
+      description: 'Open a normalized job URL in the supervised browser worker.',
+      inputSchema: z.object({
+        url: z.string().url()
+      }).strict()
+    },
+    async ({ url }) => toolResult(await registry.callTool('network.open_job', { url }))
+  );
+
+  mcpServer.registerTool(
     'network.inspect',
     {
       description: 'Inspect visible form fields in the current page.',

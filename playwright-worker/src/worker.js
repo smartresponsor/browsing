@@ -14,6 +14,29 @@ let formFillCount = 0;
 let fieldWriteCount = 0;
 const SAFE_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
 const UNSAFE_INPUT_TYPES = new Set(['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset']);
+const JOB_BOARD_HOSTS = new Set([
+  'job-boards.greenhouse.io',
+  'boards.greenhouse.io',
+  'jobs.lever.co',
+  'ashbyhq.com',
+  'jobs.ashbyhq.com',
+  'workable.com',
+  'bamboohr.com',
+  'smartrecruiters.com',
+  'myworkdayjobs.com'
+]);
+const TRACKING_QUERY_PARAMS = new Set([
+  'gh_src',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_content',
+  'utm_term',
+  'ref',
+  'src',
+  'source',
+  'trk'
+]);
 
 function parseList(value) {
   return String(value || '')
@@ -32,9 +55,9 @@ function getPolicy() {
     requireApprovalForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
     requireApprovalForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
     submitEnabled: String(process.env.NETWORK_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
-    maxSessionSeconds: Number(process.env.NETWORK_MCP_MAX_SESSION_SECONDS || 900),
-    maxPageVisits: Number(process.env.NETWORK_MCP_MAX_PAGE_VISITS || 20),
-    maxFormFills: Number(process.env.NETWORK_MCP_MAX_FORM_FILLS || 1),
+    maxSessionSeconds: Number(process.env.NETWORK_MCP_MAX_SESSION_SECONDS || 7200),
+    maxPageVisits: Number(process.env.NETWORK_MCP_MAX_PAGE_VISITS || 100),
+    maxFormFills: Number(process.env.NETWORK_MCP_MAX_FORM_FILLS || 20),
     maxFieldWrites: Number(process.env.NETWORK_MCP_MAX_FIELD_WRITES || 80),
     allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS)
@@ -166,6 +189,41 @@ function validateTargetUrl(rawUrl, policy) {
   }
 
   return targetUrl;
+}
+
+function normalizeJobUrl(rawUrl) {
+  const targetUrl = new URL(String(rawUrl || '').trim());
+
+  for (const key of Array.from(targetUrl.searchParams.keys())) {
+    if (TRACKING_QUERY_PARAMS.has(key.toLowerCase())) {
+      targetUrl.searchParams.delete(key);
+    }
+  }
+
+  targetUrl.hash = '';
+  return targetUrl;
+}
+
+function validateJobBoardUrl(rawUrl, policy) {
+  const targetUrl = normalizeJobUrl(rawUrl);
+  const host = targetUrl.hostname.toLowerCase();
+
+  validateTargetUrl(targetUrl.toString(), policy);
+
+  if (!Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(host, pattern))) {
+    throw new Error(`Host is not an approved job board: ${host}`);
+  }
+
+  return targetUrl;
+}
+
+function describePageType(targetUrl) {
+  const host = targetUrl.hostname.toLowerCase();
+  if (hostMatches(host, 'job-boards.greenhouse.io') || hostMatches(host, 'boards.greenhouse.io')) {
+    return 'greenhouse-job';
+  }
+
+  return 'job-board';
 }
 
 async function ensureNotChallenge(target) {
@@ -381,18 +439,53 @@ app.post('/open', async (req, res) => {
     const policy = getPolicy();
     const target = await ensurePage();
     const requestedUrl = String(req.body?.url || '').trim();
-    validateTargetUrl(requestedUrl, policy);
+    const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
+    const isJobBoardUrl = Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(rawTargetUrl.hostname.toLowerCase(), pattern));
+    const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
 
     if (pageVisitCount >= policy.maxPageVisits) {
       throw new Error(`Page visit limit reached (${policy.maxPageVisits}). Restart the worker.`);
     }
 
-    await target.goto(requestedUrl, { waitUntil: 'domcontentloaded' });
+    await target.goto(targetUrl.toString(), { waitUntil: 'domcontentloaded' });
     pageVisitCount += 1;
     await ensureNotChallenge(target);
-    res.json({ ok: true, url: target.url(), title: await target.title() });
+    const response = { ok: true, url: target.url(), title: await target.title() };
+
+    if (isJobBoardUrl) {
+      response.normalizedUrl = targetUrl.toString();
+      response.pageType = describePageType(targetUrl);
+    }
+
+    res.json(response);
   } catch (error) {
     res.status(409).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/open-job', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const target = await ensurePage();
+    const requestedUrl = String(req.body?.url || '').trim();
+    const normalizedUrl = validateJobBoardUrl(requestedUrl, policy);
+
+    if (pageVisitCount >= policy.maxPageVisits) {
+      throw new Error(`Page visit limit reached (${policy.maxPageVisits}). Restart the worker.`);
+    }
+
+    await target.goto(normalizedUrl.toString(), { waitUntil: 'domcontentloaded' });
+    pageVisitCount += 1;
+    await ensureNotChallenge(target);
+    res.json({
+      ok: true,
+      url: target.url(),
+      normalizedUrl: normalizedUrl.toString(),
+      title: await target.title(),
+      pageType: describePageType(normalizedUrl)
+    });
+  } catch (error) {
+    res.status(409).json({ ok: false, errorType: 'OPEN_JOB_FAILED', error: error.message });
   }
 });
 

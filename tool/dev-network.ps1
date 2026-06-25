@@ -8,6 +8,7 @@ param(
         'start',
         'stop',
         'restart',
+        'restart-deploy-worker',
         'start-mcp',
         'stop-mcp',
         'restart-mcp',
@@ -329,9 +330,9 @@ function Get-PolicyState {
         $warnings += 'NETWORK_MCP_ENABLE_SUBMIT is true; submit mode should remain off unless explicitly enabled later.'
     }
 
-    $maxSessionSeconds = if ($env:NETWORK_MCP_MAX_SESSION_SECONDS) { [int]$env:NETWORK_MCP_MAX_SESSION_SECONDS } else { 900 }
-    $maxPageVisits = if ($env:NETWORK_MCP_MAX_PAGE_VISITS) { [int]$env:NETWORK_MCP_MAX_PAGE_VISITS } else { 20 }
-    $maxFormFills = if ($env:NETWORK_MCP_MAX_FORM_FILLS) { [int]$env:NETWORK_MCP_MAX_FORM_FILLS } else { 1 }
+    $maxSessionSeconds = if ($env:NETWORK_MCP_MAX_SESSION_SECONDS) { [int]$env:NETWORK_MCP_MAX_SESSION_SECONDS } else { 7200 }
+    $maxPageVisits = if ($env:NETWORK_MCP_MAX_PAGE_VISITS) { [int]$env:NETWORK_MCP_MAX_PAGE_VISITS } else { 100 }
+    $maxFormFills = if ($env:NETWORK_MCP_MAX_FORM_FILLS) { [int]$env:NETWORK_MCP_MAX_FORM_FILLS } else { 20 }
     $maxFieldWrites = if ($env:NETWORK_MCP_MAX_FIELD_WRITES) { [int]$env:NETWORK_MCP_MAX_FIELD_WRITES } else { 80 }
 
     if ($maxSessionSeconds -le 0) {
@@ -1107,6 +1108,7 @@ switch ($Command) {
         Stop-Stack | Out-Null
         Start-Stack
     }
+    'restart-deploy-worker' { & (Join-Path $PSScriptRoot 'restart-deploy-worker.ps1') }
     'start-mcp' { Start-McpServer }
     'stop-mcp' { Stop-McpServer }
     'restart-mcp' {

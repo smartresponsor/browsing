@@ -39,6 +39,19 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.open_job',
+    description: 'Open a normalized job URL in the supervised browser worker.',
+    route: '/open-job',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        url: { type: 'string', description: 'Job-board URL to open.' }
+      },
+      required: ['url']
+    }
+  },
+  {
     name: 'network.inspect',
     description: 'Inspect visible form fields in the current page.',
     route: '/inspect',
