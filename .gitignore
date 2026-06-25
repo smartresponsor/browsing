@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 var/
+var/browser/profile/
+var/browser/review-*.png
 storage/
 playwright-worker/storage/
 *.log

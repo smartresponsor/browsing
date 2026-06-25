@@ -8,13 +8,14 @@
   "compatibility_date": "2026-06-20",
   "workers_dev": true,
   "vars": {
-    "NETWORK_MCP_WORKER_URL": "https://impression-separately-adapted-marco.trycloudflare.com"
+    "NETWORK_MCP_WORKER_URL": "https://fwd-theology-flexibility-baker.trycloudflare.com"
   },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
   }
 }
+
 
 
 

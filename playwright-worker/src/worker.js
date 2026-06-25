@@ -60,7 +60,9 @@ function getPolicy() {
     maxFormFills: Number(process.env.NETWORK_MCP_MAX_FORM_FILLS || 20),
     maxFieldWrites: Number(process.env.NETWORK_MCP_MAX_FIELD_WRITES || 80),
     allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
-    deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS)
+    deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS),
+    browserChannel: String(process.env.NETWORK_MCP_BROWSER_CHANNEL || 'chrome').trim(),
+    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim()
   };
 }
 
@@ -243,11 +245,37 @@ async function ensurePage() {
   await assertSessionWindow(policy);
 
   if (!browser) {
-    browser = await chromium.launch({ headless: policy.headless });
+    const userDataDir = path.isAbsolute(policy.userDataDir)
+      ? policy.userDataDir
+      : path.join(process.cwd(), policy.userDataDir);
+
+    await mkdir(userDataDir, { recursive: true });
+
+    const launchOptions = {
+      headless: policy.headless
+    };
+
+    if (policy.browserChannel) {
+      launchOptions.channel = policy.browserChannel;
+    }
+
+    try {
+      browser = await chromium.launchPersistentContext(userDataDir, launchOptions);
+    } catch (error) {
+      if (!policy.browserChannel) {
+        throw error;
+      }
+
+      console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
+      browser = await chromium.launchPersistentContext(userDataDir, { headless: policy.headless });
+    }
   }
+
   if (!page) {
-    page = await browser.newPage();
+    const existingPages = browser.pages();
+    page = existingPages.length > 0 ? existingPages[0] : await browser.newPage();
   }
+
   return page;
 }
 
@@ -418,7 +446,10 @@ app.get('/healthz', (_req, res) => {
   res.json({
     ok: true,
     service: 'network-mcp',
-    browserVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true'
+    browserVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
+    browserChannel: String(process.env.NETWORK_MCP_BROWSER_CHANNEL || 'chrome').trim(),
+    persistentProfile: true,
+    userDataDirConfigured: Boolean(String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim())
   });
 });
 
