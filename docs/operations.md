@@ -47,6 +47,10 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `check-wrangler`
 - `tail-server-log`
 - `tail-tunnel-log`
+- `start-named-tunnel`
+- `stop-named-tunnel`
+- `named-tunnel-status`
+- `install-named-tunnel-service`
 - `install-startup-task`
 - `uninstall-startup-task`
 - `show-startup-task`
@@ -67,6 +71,10 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `check-cloudflared` resolves `cloudflared` without using `%TEMP%`.
 - `check-wrangler` resolves the local `wrangler` binary and reports Cloudflare env presence.
 - `deploy-worker` remains a manual command. It is not chained into doctor, status, start, restart, or startup tasks.
+- `start-named-tunnel` starts the stable named Cloudflare tunnel for the local visible browser worker.
+- `stop-named-tunnel` stops the named tunnel process started by this supervisor.
+- `named-tunnel-status` reports the named tunnel process, config path, and hostname.
+- `install-named-tunnel-service` installs `cloudflared` as a Windows service using the named tunnel config.
 
 ## Local pre-commit hook
 
@@ -101,6 +109,32 @@ Real php-cs-fixer failures still block the commit when the tool exists.
 
 ## Tunnel notes
 
+The target production path is a Cloudflare named tunnel. Quick `trycloudflare.com` URLs are transitional only and must not be treated as stable application configuration.
+
+Named tunnel local configuration:
+
+```env
+NETWORK_MCP_TUNNEL_NAME=network-mcp-worker
+NETWORK_MCP_TUNNEL_HOSTNAME=network.smartresponsor.com
+NETWORK_MCP_TUNNEL_CONFIG=C:\Users\Admin\.cloudflared\network-mcp-worker.yml
+NETWORK_MCP_WORKER_URL=https://network.smartresponsor.com
+```
+
+Use `ops/cloudflare/cloudflared.named.example.yml` as the template. Keep the real credential JSON outside Git.
+
+Stable local run:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start-named-tunnel
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 named-tunnel-status
+```
+
+Stable Windows service install:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 install-named-tunnel-service
+```
+
 - `cloudflared.exe` resolves in this order:
   - `NETWORK_MCP_CLOUDFLARED_BIN`
   - `C:\Tools\cloudflared\cloudflared.exe`
@@ -108,6 +142,8 @@ Real php-cs-fixer failures still block the commit when the tool exists.
   - fail closed
 - Do not use `%TEMP%\cloudflared.exe`.
 - Keep any named-tunnel credentials outside Git.
+
+After the stable named tunnel is cut over, remove quick-tunnel startup from the supervisor instead of keeping it as a permanent fallback.
 
 ## Logs
 

@@ -44,6 +44,32 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start
 
 This starts the visible browser worker and the Cloudflare tunnel helper.
 
+## Stable Cloudflare named tunnel
+
+Use a named tunnel for the durable Network MCP path. Quick `trycloudflare.com` URLs are transition-only and should be removed after cutover.
+
+Create the local config from `ops/cloudflare/cloudflared.named.example.yml`, keep the real credential JSON outside Git, then set:
+
+```powershell
+$env:NETWORK_MCP_TUNNEL_NAME = 'network-mcp-worker'
+$env:NETWORK_MCP_TUNNEL_HOSTNAME = 'network.smartresponsor.com'
+$env:NETWORK_MCP_TUNNEL_CONFIG = 'C:\Users\Admin\.cloudflared\network-mcp-worker.yml'
+$env:NETWORK_MCP_WORKER_URL = 'https://network.smartresponsor.com'
+```
+
+Run the stable tunnel locally:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start-named-tunnel
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 named-tunnel-status
+```
+
+Install the stable tunnel as a Windows service:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 install-named-tunnel-service
+```
+
 ## Smoke
 
 ```powershell

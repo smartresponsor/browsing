@@ -20,6 +20,10 @@
     "dev:deploy-worker": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 deploy-worker",
     "dev:tail-server-log": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 tail-server-log",
     "dev:tail-tunnel-log": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 tail-tunnel-log",
+    "dev:start-named-tunnel": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start-named-tunnel",
+    "dev:stop-named-tunnel": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop-named-tunnel",
+    "dev:named-tunnel-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 named-tunnel-status",
+    "dev:named-tunnel-service-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-named-tunnel-service",
     "dev:task-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-startup-task",
     "dev:task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 uninstall-startup-task",
     "dev:task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-startup-task"

@@ -17,6 +17,10 @@ param(
         'smoke-mcp',
         'tail-server-log',
         'tail-tunnel-log',
+        'start-named-tunnel',
+        'stop-named-tunnel',
+        'named-tunnel-status',
+        'install-named-tunnel-service',
         'check-cloudflared',
         'check-wrangler',
         'deploy-worker',
@@ -44,6 +48,9 @@ $McpLogFile = Join-Path $LogDir 'mcp-server.log'
 $McpErrFile = Join-Path $LogDir 'mcp-server.err.log'
 $TunnelLogFile = Join-Path $LogDir 'cloudflared.log'
 $TunnelErrFile = Join-Path $LogDir 'cloudflared.err.log'
+$NamedTunnelPidFile = Join-Path $RunDir 'cloudflared-named.pid'
+$NamedTunnelLogFile = Join-Path $LogDir 'cloudflared-named.log'
+$NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
 $StartupTaskName = 'network-mcp-dev'
 $StartupTaskPath = '\'
 
@@ -403,6 +410,130 @@ function Read-TunnelUrl {
     }
 
     return $null
+}
+
+function Get-NamedTunnelName {
+    if ($env:NETWORK_MCP_TUNNEL_NAME) {
+        return $env:NETWORK_MCP_TUNNEL_NAME.Trim()
+    }
+
+    return 'network-mcp-worker'
+}
+
+function Get-NamedTunnelHostname {
+    if ($env:NETWORK_MCP_TUNNEL_HOSTNAME) {
+        return $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim()
+    }
+
+    return $null
+}
+
+function Get-NamedTunnelConfigPath {
+    if ($env:NETWORK_MCP_TUNNEL_CONFIG) {
+        return $env:NETWORK_MCP_TUNNEL_CONFIG.Trim()
+    }
+
+    $profile = $env:USERPROFILE
+    if (-not $profile) {
+        throw 'USERPROFILE is not available. Set NETWORK_MCP_TUNNEL_CONFIG explicitly.'
+    }
+
+    return (Join-Path $profile '.cloudflared\network-mcp-worker.yml')
+}
+
+function Get-NamedTunnelState {
+    $pidProcess = Get-ProcessFromPidFile -PidFile $NamedTunnelPidFile
+    $commandLineProcess = $null
+    if (-not $pidProcess) {
+        $tunnelName = [regex]::Escape((Get-NamedTunnelName))
+        $commandLineProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -match "cloudflared.*tunnel.*run.*$tunnelName" } |
+            Select-Object -First 1
+    }
+
+    $process = $pidProcess
+    if (-not $process -and $commandLineProcess) {
+        $process = Get-Process -Id $commandLineProcess.ProcessId -ErrorAction SilentlyContinue
+    }
+
+    [pscustomobject]@{
+        name = 'cloudflared-named'
+        tunnel_name = Get-NamedTunnelName
+        hostname = Get-NamedTunnelHostname
+        config_file = Get-NamedTunnelConfigPath
+        pid_file = $NamedTunnelPidFile
+        pid = if ($process) { $process.Id } else { $null }
+        running = [bool]$process
+        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
+        log_file = $NamedTunnelLogFile
+        error_file = $NamedTunnelErrFile
+    }
+}
+
+function Start-NamedTunnel {
+    Ensure-Directories
+    Start-Worker | Out-Null
+
+    $state = Get-NamedTunnelState
+    if ($state.running) {
+        return ($state | ConvertTo-Json -Depth 8)
+    }
+
+    $cloudflared = Resolve-CloudflaredExe
+    $configPath = Get-NamedTunnelConfigPath
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        throw "Named tunnel config was not found: $configPath. Create it from ops\cloudflare\cloudflared.named.example.yml and keep credentials outside Git."
+    }
+
+    Remove-Item -LiteralPath $NamedTunnelPidFile -Force -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $NamedTunnelLogFile -Value '' -Encoding utf8
+    Set-Content -LiteralPath $NamedTunnelErrFile -Value '' -Encoding utf8
+
+    $process = Start-Process `
+        -FilePath $cloudflared `
+        -ArgumentList @(
+            'tunnel',
+            '--config',
+            $configPath,
+            'run',
+            (Get-NamedTunnelName)
+        ) `
+        -WorkingDirectory $Root `
+        -PassThru `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $NamedTunnelLogFile `
+        -RedirectStandardError $NamedTunnelErrFile
+
+    Set-Content -LiteralPath $NamedTunnelPidFile -Value $process.Id -NoNewline
+    Start-Sleep -Seconds 2
+
+    $state = Get-NamedTunnelState
+    if (-not $state.running) {
+        throw 'Named Cloudflare tunnel did not stay running.'
+    }
+
+    return ($state | ConvertTo-Json -Depth 8)
+}
+
+function Stop-NamedTunnel {
+    Ensure-Directories
+    $state = Get-NamedTunnelState
+    if ($state.pid) {
+        Stop-TreeProcess -ProcessId $state.pid
+    }
+
+    Remove-Item -LiteralPath $NamedTunnelPidFile -Force -ErrorAction SilentlyContinue
+    return (Get-NamedTunnelState | ConvertTo-Json -Depth 8)
+}
+
+function Install-NamedTunnelService {
+    $cloudflared = Resolve-CloudflaredExe
+    $configPath = Get-NamedTunnelConfigPath
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        throw "Named tunnel config was not found: $configPath. Create it from ops\cloudflare\cloudflared.named.example.yml first."
+    }
+
+    & $cloudflared service install --config $configPath
 }
 
 function Start-Worker {
@@ -914,6 +1045,7 @@ function Show-Status {
         worker = $workerState
         mcp = $mcpState
         tunnel = $tunnelState
+        named_tunnel = Get-NamedTunnelState
         wrangler = [pscustomobject]@{
             available = Test-WranglerAvailable
             binary = Get-WranglerBinary
@@ -1139,6 +1271,10 @@ switch ($Command) {
             Write-Output 'No tunnel log found.'
         }
     }
+    'start-named-tunnel' { Start-NamedTunnel }
+    'stop-named-tunnel' { Stop-NamedTunnel }
+    'named-tunnel-status' { Get-NamedTunnelState | ConvertTo-Json -Depth 8 }
+    'install-named-tunnel-service' { Install-NamedTunnelService }
     'check-cloudflared' { Check-Cloudflared }
     'check-wrangler' { Check-Wrangler }
     'deploy-worker' { Deploy-Worker }

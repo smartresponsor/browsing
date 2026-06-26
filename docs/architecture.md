@@ -27,7 +27,7 @@ Final submit is not auto-implemented.
 
 - `playwright-worker` listens on `127.0.0.1:8791` by default.
 - `mcp-server` listens on `127.0.0.1:8792/mcp` by default.
-- `cloudflared` tunnel ports are ephemeral when using `cloudflared tunnel --url ...`.
+- The durable public browser-worker path should use a Cloudflare named tunnel hostname; quick `cloudflared tunnel --url ...` tunnels are transition-only.
 
 ## Auth model
 

@@ -1,0 +1,7 @@
+tunnel: <TUNNEL_ID_OR_NAME>
+credentials-file: C:\Users\<USER>\.cloudflared\<TUNNEL_ID>.json
+
+ingress:
+  - hostname: network.smartresponsor.com
+    service: http://127.0.0.1:8791
+  - service: http_status:404

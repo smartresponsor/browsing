@@ -44,3 +44,4 @@ If you switch to a named tunnel, keep the YAML template in Git and keep the cred
 If the browser worker is exposed through the tunnel, set `NETWORK_MCP_BROWSER_WORKER_TOKEN` and forward it from the caller.
 
 See `ops/cloudflare/cloudflared.example.yml` for the template shape.
+Use `ops/cloudflare/cloudflared.named.example.yml` for the stable named tunnel cutover path.
