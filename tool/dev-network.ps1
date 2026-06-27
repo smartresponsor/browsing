@@ -425,7 +425,7 @@ function Get-NamedTunnelHostname {
         return $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim()
     }
 
-    return $null
+    return 'network.smartresponsor.com'
 }
 
 function Get-NamedTunnelConfigPath {
@@ -717,24 +717,28 @@ function Stop-Tunnel {
 function Start-Stack {
     $worker = Start-Worker
     $mcp = Start-McpServer
-    $tunnel = Start-Tunnel | ConvertFrom-Json
+    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
+    $namedTunnel = Start-NamedTunnel | ConvertFrom-Json
     [pscustomobject]@{
         ok = $true
         worker = $worker | ConvertFrom-Json
         mcp = $mcp | ConvertFrom-Json
-        tunnel = $tunnel
+        legacy_quick_tunnel = $legacyTunnel
+        named_tunnel = $namedTunnel
     } | ConvertTo-Json -Depth 8
 }
 
 function Stop-Stack {
-    $tunnel = Stop-Tunnel | ConvertFrom-Json
+    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
+    $namedTunnel = Stop-NamedTunnel | ConvertFrom-Json
     $mcp = Stop-McpServer | ConvertFrom-Json
     $worker = Stop-Worker | ConvertFrom-Json
     [pscustomobject]@{
         ok = $true
         worker = $worker
         mcp = $mcp
-        tunnel = $tunnel
+        legacy_quick_tunnel = $legacyTunnel
+        named_tunnel = $namedTunnel
     } | ConvertTo-Json -Depth 8
 }
 
@@ -1034,7 +1038,7 @@ function Show-Status {
     $workerState = Get-WorkerState
     $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
-    $localSmoke = if ($workerState.running) { Invoke-LocalSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $localSmoke = [pscustomobject]@{ ok = $false; skipped = $true; reason = 'Run dev:smoke-local explicitly for browser form smoke.' }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
     $policy = Get-PolicyState

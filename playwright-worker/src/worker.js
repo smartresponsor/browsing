@@ -131,6 +131,10 @@ function isBuiltInDeniedHost(host) {
   return false;
 }
 
+function isAllowedHostOverride(host, policy) {
+  return policy.allowedHosts.some(pattern => hostMatches(host, pattern));
+}
+
 function isSafeEditableInputType(type) {
   return !UNSAFE_INPUT_TYPES.has(type);
 }
@@ -178,7 +182,7 @@ function validateTargetUrl(rawUrl, policy) {
 
   const host = targetUrl.hostname.toLowerCase();
 
-  if (isBuiltInDeniedHost(host)) {
+  if (isBuiltInDeniedHost(host) && !isAllowedHostOverride(host, policy)) {
     throw new Error(`Denied host: ${host}`);
   }
 
@@ -288,6 +292,23 @@ async function snapshotFields(target) {
     id: node.getAttribute('id') || '',
     placeholder: node.getAttribute('placeholder') || '',
     ariaLabel: node.getAttribute('aria-label') || '',
+    labelText: (() => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+      const id = node.getAttribute('id') || '';
+      const explicit = id ? document.querySelector('label[for="' + id.replace(/"/g, '\\"') + '"]') : null;
+      const wrapping = node.closest('label');
+      const labelledBy = String(node.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(item => document.getElementById(item)).filter(Boolean).map(element => normalize(element.innerText || element.textContent || '')).join(' ');
+      return normalize(labelledBy || explicit?.innerText || explicit?.textContent || wrapping?.innerText || wrapping?.textContent || '');
+    })(),
+    contextText: (() => {
+      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+      const container = node.closest('fieldset, li, tr, .question, .form-group, .form-row, .field, .field-wrapper, .formField, .questionWrapper, .questionContainer, section, article, div');
+      if (!container) {
+        return '';
+      }
+
+      return normalize(container.innerText || container.textContent || '');
+    })(),
     required: node.hasAttribute('required'),
     visible: (() => {
       const style = window.getComputedStyle(node);
@@ -607,6 +628,39 @@ app.post('/fill-after-approval', async (req, res) => {
     fieldWriteCount += requestedFields.length;
 
     res.json({ ok: true, filled });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/click', async (req, res) => {
+  try {
+    const target = await ensurePage();
+    await ensureNotChallenge(target);
+    const text = String(req.body?.text || '').trim();
+    const selector = String(req.body?.selector || '').trim();
+    const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
+    if (!text && !selector) {
+      throw new Error('Either text or selector is required for click.');
+    }
+    if (/submit|final|delete|withdraw|payment|purchase|confirm/i.test(text)) {
+      throw new Error('Final submit or destructive clicks are not allowed through network.click.');
+    }
+    let locator = selector ? target.locator(selector) : target.getByRole('button', { name: text, exact: true });
+    if (!selector && await locator.count() === 0) {
+      locator = target.getByRole('link', { name: text, exact: true });
+    }
+    if (!selector && await locator.count() === 0) {
+      locator = target.getByText(text, { exact: true });
+    }
+    const count = await locator.count();
+    if (count <= nth) {
+      throw new Error(`Click target not found. Matches: ${count}. Requested index: ${nth}.`);
+    }
+    await locator.nth(nth).click();
+    await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+    await ensureNotChallenge(target);
+    res.json({ ok: true, url: target.url(), title: await target.title(), clicked: selector || text, nth });
   } catch (error) {
     res.status(409).json({ ok: false, error: error.message });
   }

@@ -8,6 +8,7 @@ export class NetworkToolRegistry {
     return [
       'network.open',
       'network.open_job',
+      'network.click',
       'network.inspect',
       'network.extract_form',
       'network.propose',
@@ -39,6 +40,7 @@ export class NetworkToolRegistry {
     const routes = {
       'network.open': '/open',
       'network.open_job': '/open-job',
+      'network.click': '/click',
       'network.inspect': '/inspect',
       'network.extract_form': '/extract-form',
       'network.propose': '/propose',

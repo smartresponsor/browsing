@@ -139,6 +139,19 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.click',
+    {
+      description: 'Click a non-final visible button or link in the supervised browser worker.',
+      inputSchema: z.object({
+        text: z.string().optional(),
+        selector: z.string().optional(),
+        nth: z.number().int().nonnegative().optional()
+      }).strict()
+    },
+    async ({ text, selector, nth }) => toolResult(await registry.callTool('network.click', { text, selector, nth }))
+  );
+
+  mcpServer.registerTool(
     'network.extract_form',
     {
       description: 'Extract the current form field snapshot.',

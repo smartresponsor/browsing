@@ -52,6 +52,20 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.click',
+    description: 'Click a non-final visible button or link in the supervised browser worker.',
+    route: '/click',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        text: { type: 'string' },
+        selector: { type: 'string' },
+        nth: { type: 'integer', minimum: 0 }
+      }
+    }
+  },
+  {
     name: 'network.inspect',
     description: 'Inspect visible form fields in the current page.',
     route: '/inspect',
@@ -381,11 +395,11 @@ async function handleMcpRequest(request: Request, env: Env): Promise<Response> {
     return jsonRpcResult(id, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {
-        tools: { listChanged: false }
+        tools: { listChanged: true }
       },
       serverInfo: {
         name: 'network-mcp',
-        version: '1.0.0'
+        version: '1.0.1'
       },
       instructions: 'Supervised career apply gateway.'
     });
