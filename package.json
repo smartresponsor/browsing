@@ -12,12 +12,9 @@
     "dev:start": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start",
     "dev:stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop",
     "dev:restart": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 restart",
-    "dev:restart-deploy-worker": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\restart-deploy-worker.ps1",
     "dev:smoke-local": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 smoke-local",
     "dev:smoke-public": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 smoke-public",
     "dev:check-cloudflared": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 check-cloudflared",
-    "dev:check-wrangler": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 check-wrangler",
-    "dev:deploy-worker": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 deploy-worker",
     "dev:tail-server-log": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 tail-server-log",
     "dev:tail-tunnel-log": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 tail-tunnel-log",
     "dev:start-named-tunnel": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start-named-tunnel",
@@ -27,8 +24,5 @@
     "dev:task-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-startup-task",
     "dev:task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 uninstall-startup-task",
     "dev:task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-startup-task"
-  },
-  "devDependencies": {
-    "wrangler": "^4.103.0"
   }
 }

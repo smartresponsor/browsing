@@ -7,9 +7,7 @@ import { NetworkToolRegistry } from './tool-registry.js';
 const host = process.env.NETWORK_MCP_SERVER_HOST || '127.0.0.1';
 const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
 const endpoint = process.env.NETWORK_MCP_SERVER_ENDPOINT || '/mcp';
-const workerUrl = process.env.NETWORK_MCP_WORKER_URL
-  || process.env.CAREER_WORKER_URL
-  || 'http://127.0.0.1:8791';
+const workerUrl = process.env.NETWORK_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
 
 const registry = new NetworkToolRegistry(
   workerUrl,

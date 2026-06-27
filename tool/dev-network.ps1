@@ -8,7 +8,6 @@ param(
         'start',
         'stop',
         'restart',
-        'restart-deploy-worker',
         'start-mcp',
         'stop-mcp',
         'restart-mcp',
@@ -23,7 +22,6 @@ param(
         'install-named-tunnel-service',
         'check-cloudflared',
         'check-wrangler',
-        'deploy-worker',
         'install-startup-task',
         'uninstall-startup-task',
         'show-startup-task'
@@ -426,6 +424,18 @@ function Get-NamedTunnelHostname {
     }
 
     return 'network.smartresponsor.com'
+}
+
+function Get-PublicOrigin {
+    if ($env:NETWORK_MCP_PUBLIC_ORIGIN) {
+        return $env:NETWORK_MCP_PUBLIC_ORIGIN.TrimEnd('/')
+    }
+
+    return ('https://' + (Get-NamedTunnelHostname)).TrimEnd('/')
+}
+
+if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
+    Set-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
 }
 
 function Get-NamedTunnelConfigPath {
@@ -1026,11 +1036,14 @@ function Invoke-PublicSmoke {
         $body = $response.Content
     }
 
+    $expectedHealth = $body.ok -eq $true -and $body.service -eq 'network-mcp' -and $body.endpoint -eq '/mcp'
+
     return [pscustomobject]@{
-        ok = [int]$response.StatusCode -eq 200 -and $body.ok -eq $true -and $body.service -eq 'network-mcp'
+        ok = [int]$response.StatusCode -eq 200 -and $expectedHealth
         status_code = [int]$response.StatusCode
         body = $body
         origin = $origin
+        expected_health = $expectedHealth
     } | ConvertTo-Json -Depth 8
 }
 
@@ -1151,7 +1164,7 @@ function Check-Wrangler {
 }
 
 function Deploy-Worker {
-    $wrangler = Resolve-WranglerExe
+    throw 'Cloudflare Worker deploy is not part of the active network-mcp runtime. Use the named Cloudflare Tunnel to local mcp-server on port 8792.'
     $config = Join-Path $CloudflareWorkerRoot 'wrangler.jsonc'
     if (-not (Test-Path -LiteralPath $config)) {
         throw "wrangler config not found: $config"
@@ -1244,7 +1257,6 @@ switch ($Command) {
         Stop-Stack | Out-Null
         Start-Stack
     }
-    'restart-deploy-worker' { & (Join-Path $PSScriptRoot 'restart-deploy-worker.ps1') }
     'start-mcp' { Start-McpServer }
     'stop-mcp' { Stop-McpServer }
     'restart-mcp' {
@@ -1281,7 +1293,6 @@ switch ($Command) {
     'install-named-tunnel-service' { Install-NamedTunnelService }
     'check-cloudflared' { Check-Cloudflared }
     'check-wrangler' { Check-Wrangler }
-    'deploy-worker' { Deploy-Worker }
     'install-startup-task' { Install-StartupTask }
     'uninstall-startup-task' { Uninstall-StartupTask }
     'show-startup-task' { Show-StartupTask }
