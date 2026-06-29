@@ -32,3 +32,17 @@ This repository is the implementation of the local `network-mcp` connector. Trea
 
 - Treat `network-mcp` as its own connector project.
 - Do not mix `network-mcp` runtime fixes with `console-mcp` runtime fixes unless the user explicitly asks for a cross-connector change.
+
+## Architecture guardrails
+
+- Do not collapse the three runtime roles into one process:
+  - Cloudflare Worker: public gateway, OAuth/OIDC surface, bearer-token gate, and proxy.
+  - Local MCP server: MCP schema owner and tool registry.
+  - Local browser worker: supervised visible browser automation on loopback.
+- Do not move browser automation, form filling, cookies, persistent browser profiles, or approval-gated actions into the Cloudflare Worker.
+- Do not expose the browser worker directly without `NETWORK_MCP_BROWSER_WORKER_TOKEN` or an equivalent tunnel-side control.
+- Do not make final submit automatic. Submit remains disabled by default and requires an explicit future policy change.
+- Do not bypass approval gates for fill or submit flows.
+- Startup is allowed to open only a safe local readiness page by default: `http://127.0.0.1:8791/healthz`.
+- External Chrome/CDP mode is opt-in. The default Windows startup path is Playwright-managed visible Chromium unless the environment explicitly overrides it.
+- If a browser profile lock is present after reboot, kill only managed browser processes using the configured `NETWORK_MCP_USER_DATA_DIR`; do not kill arbitrary user Chrome/Edge sessions.

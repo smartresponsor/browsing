@@ -23,6 +23,15 @@ Final submit is not auto-implemented.
 - `playwright-worker/src/worker.js` - local browser automation worker on port `8791`.
 - `mcp-server/src/server.js` - local MCP endpoint on port `8792`.
 
+## Architectural guardrails
+
+- Keep the Cloudflare Worker as a public gateway and proxy. It must not own browser automation, persistent browser profiles, cookies, form-fill logic, or the MCP tool schema.
+- Keep the local MCP server as the schema owner for MCP tools. Cloudflare may proxy `/mcp`, but it must not fork or duplicate the tool registry.
+- Keep the browser worker local and supervised. It owns visible browser control, profile locking recovery, click/open/inspect/extract/fill endpoints, and challenge-page pauses.
+- Keep startup passive. The default startup page is the local worker health endpoint, `http://127.0.0.1:8791/healthz`; startup must not click, fill, submit, or navigate to third-party sites unless an operator explicitly sets `NETWORK_MCP_START_URL`.
+- Keep destructive actions out of automation. Final submit remains disabled by default and cannot be added without an explicit policy and documentation change.
+- Keep profile cleanup scoped to managed processes for the configured `NETWORK_MCP_USER_DATA_DIR`; do not terminate unrelated user browser sessions.
+
 ## Local ports
 
 - `playwright-worker` listens on `127.0.0.1:8791` by default.
@@ -45,5 +54,7 @@ Final submit is not auto-implemented.
 ## Operational notes
 
 - The browser launches with `headless: false`, so Playwright stays visible on Windows by default.
+- The default browser mode is Playwright-managed bundled Chromium. Set `NETWORK_MCP_BROWSER_CHANNEL=chrome` or `NETWORK_MCP_BROWSER_CHANNEL=msedge` to use installed Chrome or Edge through Playwright.
+- The external Chrome/CDP launcher is opt-in through `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true`.
 - Local smoke checks use a data URL form to avoid depending on external sites.
 - Health and smoke commands are operational checks, not product features.

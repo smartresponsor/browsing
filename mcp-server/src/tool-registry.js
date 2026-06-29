@@ -6,8 +6,12 @@ export class NetworkToolRegistry {
 
   listTools() {
     return [
+      'network.browser_status',
+      'network.browser_restart',
+      'network.browser_kill',
       'network.open',
       'network.open_job',
+      'network.open_fresh',
       'network.click',
       'network.inspect',
       'network.extract_form',
@@ -38,8 +42,12 @@ export class NetworkToolRegistry {
 
   async callTool(toolName, payload) {
     const routes = {
+      'network.browser_status': '/browser-status',
+      'network.browser_restart': '/browser-restart',
+      'network.browser_kill': '/browser-kill',
       'network.open': '/open',
       'network.open_job': '/open-job',
+      'network.open_fresh': '/open-fresh',
       'network.click': '/click',
       'network.inspect': '/inspect',
       'network.extract_form': '/extract-form',

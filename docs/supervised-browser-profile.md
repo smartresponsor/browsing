@@ -7,7 +7,7 @@ This is not a bypass mechanism. CAPTCHA, two-factor authentication, security cha
 ## Defaults
 
 - Browser profile: `var/browser/profile`
-- Browser channel: `chrome`
+- Browser channel: `chromium`
 - Headless mode: disabled by default
 - Submit actions: disabled by default
 - Fill actions: approval-gated by default
@@ -16,11 +16,15 @@ This is not a bypass mechanism. CAPTCHA, two-factor authentication, security cha
 
 ```text
 NETWORK_MCP_USER_DATA_DIR=var/browser/profile
-NETWORK_MCP_BROWSER_CHANNEL=chrome
+NETWORK_MCP_BROWSER_CHANNEL=chromium
+NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=false
 NETWORK_MCP_HEADLESS=false
 ```
 
-If the configured browser channel is unavailable, the worker retries with bundled Chromium using the same profile directory.
+Supported Playwright-managed channels are `chromium`, `chrome`, and `msedge`.
+Use `chromium` for the bundled Playwright browser, `chrome` for installed Google Chrome, or `msedge` for installed Microsoft Edge.
+If `chrome` or `msedge` is unavailable, the worker retries with bundled Chromium using the same profile directory.
+The older external Chrome/CDP launcher remains available only when `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true`.
 
 ## Manual warm-up
 

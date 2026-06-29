@@ -8,6 +8,7 @@ const host = process.env.NETWORK_MCP_SERVER_HOST || '127.0.0.1';
 const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
 const endpoint = process.env.NETWORK_MCP_SERVER_ENDPOINT || '/mcp';
 const workerUrl = process.env.NETWORK_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
+const upstreamToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN || '';
 
 const registry = new NetworkToolRegistry(
   workerUrl,
@@ -33,10 +34,21 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname !== endpoint) {
+  const requestPath = url.pathname === '/' ? '/' : url.pathname.replace(/\/+$/, '');
+  const endpointPath = endpoint === '/' ? '/' : endpoint.replace(/\/+$/, '');
+  if (requestPath !== endpointPath && !(req.method === 'POST' && requestPath === '/')) {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('Not found.');
     return;
+  }
+
+  if (upstreamToken) {
+    const auth = String(req.headers.authorization || '');
+    if (auth !== `Bearer ${upstreamToken}`) {
+      res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
+      return;
+    }
   }
 
   if (req.method !== 'POST') {
@@ -105,6 +117,43 @@ function buildServer() {
 }
 
 function registerNetworkTools(mcpServer) {
+  mcpServer.registerTool(
+    'network.browser_status',
+    {
+      description: 'Inspect the supervised browser runtime state.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.browser_status', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_restart',
+    {
+      description: 'Restart the supervised browser session.',
+      inputSchema: z.object({
+        hard: z.boolean().optional(),
+        reopen: z.boolean().optional(),
+        reason: z.string().max(200).optional()
+      }).strict()
+    },
+    async ({ hard, reopen, reason }) => toolResult(await registry.callTool('network.browser_restart', {
+      force: hard === true,
+      reopen,
+      reason
+    }))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_kill',
+    {
+      description: 'Close the supervised browser session and kill managed browser processes for the configured profile.',
+      inputSchema: z.object({
+        reason: z.string().max(200).optional()
+      }).strict()
+    },
+    async ({ reason }) => toolResult(await registry.callTool('network.browser_kill', { reason }))
+  );
+
   mcpServer.registerTool(
     'network.open',
     {

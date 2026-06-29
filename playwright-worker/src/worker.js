@@ -1,12 +1,16 @@
 ﻿import express from 'express';
 import { chromium } from '@playwright/test';
-import { mkdir } from 'fs/promises';
+import { execFile } from 'node:child_process';
+import { access, mkdir } from 'fs/promises';
 import path from 'path';
+import { promisify } from 'node:util';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+const execFileAsync = promisify(execFile);
 
 let browser;
+let connectedBrowser;
 let page;
 let sessionStartedAt = null;
 let pageVisitCount = 0;
@@ -14,6 +18,7 @@ let formFillCount = 0;
 let fieldWriteCount = 0;
 const SAFE_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
 const UNSAFE_INPUT_TYPES = new Set(['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset']);
+const DEFAULT_WORKER_PORT = 8791;
 const JOB_BOARD_HOSTS = new Set([
   'job-boards.greenhouse.io',
   'boards.greenhouse.io',
@@ -37,6 +42,8 @@ const TRACKING_QUERY_PARAMS = new Set([
   'source',
   'trk'
 ]);
+const DEFAULT_BROWSER_CHANNEL = 'chromium';
+const PLAYWRIGHT_BROWSER_CHANNELS = new Set(['chromium', 'chrome', 'msedge']);
 
 function parseList(value) {
   return String(value || '')
@@ -49,9 +56,47 @@ function parseBrowserWorkerToken() {
   return String(process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || '').trim();
 }
 
+function getManagedUserDataDir(policy = getPolicy()) {
+  return path.resolve(path.isAbsolute(policy.userDataDir)
+    ? policy.userDataDir
+    : path.join(process.cwd(), policy.userDataDir));
+}
+
+function normalizeError(error) {
+  if (!error) {
+    return '';
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeBrowserChannel(value) {
+  const browserChannel = String(value || DEFAULT_BROWSER_CHANNEL).trim().toLowerCase();
+  if (browserChannel === 'edge') {
+    return 'msedge';
+  }
+
+  if (!PLAYWRIGHT_BROWSER_CHANNELS.has(browserChannel)) {
+    throw new Error(`Unsupported NETWORK_MCP_BROWSER_CHANNEL "${browserChannel}". Use chromium, chrome, or msedge.`);
+  }
+
+  return browserChannel;
+}
+
+function getBrowserMode(policy) {
+  if (policy.externalVisibleChrome) {
+    return 'external-chrome-cdp';
+  }
+
+  return `playwright-${policy.browserChannel}`;
+}
+
 function getPolicy() {
+  const headless = String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true';
+  const browserChannel = normalizeBrowserChannel(process.env.NETWORK_MCP_BROWSER_CHANNEL);
+
   return {
-    headless: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true',
+    headless,
     requireApprovalForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
     requireApprovalForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
     submitEnabled: String(process.env.NETWORK_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
@@ -61,9 +106,20 @@ function getPolicy() {
     maxFieldWrites: Number(process.env.NETWORK_MCP_MAX_FIELD_WRITES || 80),
     allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS),
-    browserChannel: String(process.env.NETWORK_MCP_BROWSER_CHANNEL || 'chrome').trim(),
-    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim()
+    browserChannel,
+    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim(),
+    externalVisibleChrome: process.platform === 'win32' && !headless && String(process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME || 'false').toLowerCase() === 'true',
+    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223)
   };
+}
+
+function getStartupUrl() {
+  const workerPort = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
+  return String(
+    process.env.NETWORK_MCP_START_URL ||
+      process.env.NETWORK_MCP_VISIBLE_CHROME_URL ||
+      `http://127.0.0.1:${workerPort}/healthz`
+  ).trim();
 }
 
 function hostMatches(host, pattern) {
@@ -144,6 +200,13 @@ function isChallengeText(text) {
 }
 
 async function closeSession() {
+  if (connectedBrowser) {
+    await connectedBrowser.close().catch(() => {});
+    connectedBrowser = undefined;
+    browser = undefined;
+    page = undefined;
+  }
+
   if (page) {
     await page.close().catch(() => {});
     page = undefined;
@@ -158,6 +221,98 @@ async function closeSession() {
   pageVisitCount = 0;
   formFillCount = 0;
   fieldWriteCount = 0;
+}
+
+async function closeSessionWithTimeout(timeoutMs = 10000) {
+  let timedOut = false;
+  const timeout = new Promise(resolve => setTimeout(() => {
+    timedOut = true;
+    resolve({ ok: false, error: `Timed out while closing browser session after ${timeoutMs} ms.` });
+  }, timeoutMs));
+
+  const closed = closeSession()
+    .then(() => ({ ok: true, error: null }))
+    .catch(error => ({ ok: false, error: normalizeError(error) }));
+
+  const result = await Promise.race([closed, timeout]);
+  return { ...result, timedOut };
+}
+
+function buildBrowserRuntimeStatus(policy = getPolicy()) {
+  const pages = browser ? browser.pages() : [];
+  const activePage = page && !page.isClosed() ? page : null;
+  return {
+    policy: {
+      headless: policy.headless,
+      browserChannel: policy.browserChannel,
+      browserMode: getBrowserMode(policy),
+      userDataDir: getManagedUserDataDir(policy),
+      maxSessionSeconds: policy.maxSessionSeconds,
+      maxPageVisits: policy.maxPageVisits,
+      maxFormFills: policy.maxFormFills,
+      maxFieldWrites: policy.maxFieldWrites,
+      externalVisibleChrome: policy.externalVisibleChrome,
+      remoteDebuggingPort: policy.remoteDebuggingPort
+    },
+    session: {
+      startedAt: sessionStartedAt ? new Date(sessionStartedAt).toISOString() : null,
+      elapsedSeconds: sessionStartedAt ? Math.round((Date.now() - sessionStartedAt) / 1000) : null,
+      pageVisitCount,
+      formFillCount,
+      fieldWriteCount
+    },
+    browser: {
+      contextOpen: Boolean(browser),
+      pageOpen: Boolean(activePage),
+      pageCount: pages.length,
+      currentUrl: activePage ? activePage.url() : null
+    }
+  };
+}
+
+async function getBrowserStatus() {
+  const policy = getPolicy();
+  const runtime = buildBrowserRuntimeStatus(policy);
+  const managedProcesses = await listManagedBrowserProcesses(policy);
+  const detectedVisibleWindow = Boolean(
+    managedProcesses?.ok &&
+      Array.isArray(managedProcesses.processes) &&
+      managedProcesses.processes.some(item => Number(item.mainWindowHandle || 0) > 0 || String(item.mainWindowTitle || '').trim() !== '')
+  );
+  return {
+    ok: true,
+    service: 'network-mcp-browser-worker',
+    configuredVisible: !policy.headless,
+    detectedVisibleWindow,
+    browserVisible: detectedVisibleWindow,
+    runtime,
+    managedProcesses
+  };
+}
+
+async function restartBrowserSession({ force = false, reopen = true, reason = '' } = {}) {
+  const policy = getPolicy();
+  const before = await getBrowserStatus();
+  const close = await closeSessionWithTimeout();
+  const forced = force ? await killManagedBrowserProcesses(policy) : { attempted: false, killed: [] };
+  let reopened = null;
+
+  if (reopen) {
+    await ensurePage();
+    reopened = await getBrowserStatus();
+  }
+
+  return {
+    ok: close.ok && (!force || forced.ok !== false),
+    action: 'browser_restart',
+    reason,
+    force,
+    reopen,
+    before,
+    close,
+    forced,
+    after: reopened ?? await getBrowserStatus()
+  };
 }
 
 async function assertSessionWindow(policy) {
@@ -249,38 +404,196 @@ async function ensurePage() {
   await assertSessionWindow(policy);
 
   if (!browser) {
-    const userDataDir = path.isAbsolute(policy.userDataDir)
-      ? policy.userDataDir
-      : path.join(process.cwd(), policy.userDataDir);
+    const userDataDir = getManagedUserDataDir(policy);
 
     await mkdir(userDataDir, { recursive: true });
 
-    const launchOptions = {
-      headless: policy.headless
-    };
-
-    if (policy.browserChannel) {
-      launchOptions.channel = policy.browserChannel;
+    if (policy.externalVisibleChrome) {
+      try {
+        const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
+        connectedBrowser = externalRuntime.connectedBrowser;
+        browser = externalRuntime.context;
+      } catch (error) {
+        connectedBrowser = undefined;
+        console.warn(`External browser CDP mode failed; falling back to launchPersistentContext. ${normalizeError(error)}`);
+      }
     }
 
-    try {
-      browser = await chromium.launchPersistentContext(userDataDir, launchOptions);
-    } catch (error) {
-      if (!policy.browserChannel) {
-        throw error;
+    if (!browser) {
+      await killManagedBrowserProcesses(policy);
+
+      const launchOptions = {
+        headless: policy.headless,
+        args: [
+          '--new-window',
+          '--start-maximized',
+          '--window-position=80,80',
+          '--window-size=1400,1000'
+        ]
+      };
+
+      if (policy.browserChannel !== 'chromium') {
+        launchOptions.channel = policy.browserChannel;
       }
 
-      console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
-      browser = await chromium.launchPersistentContext(userDataDir, { headless: policy.headless });
+      try {
+        browser = await chromium.launchPersistentContext(userDataDir, launchOptions);
+      } catch (error) {
+        if (policy.browserChannel === 'chromium') {
+          throw error;
+        }
+
+        console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
+        browser = await chromium.launchPersistentContext(userDataDir, {
+          headless: policy.headless,
+          args: [
+            '--new-window',
+            '--start-maximized',
+            '--window-position=80,80',
+            '--window-size=1400,1000'
+          ]
+        });
+      }
     }
   }
 
   if (!page) {
     const existingPages = browser.pages();
     page = existingPages.length > 0 ? existingPages[0] : await browser.newPage();
+    await page.bringToFront().catch(() => {});
+    if (page.url() === 'about:blank') {
+      await page.goto(getStartupUrl(), { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(error => {
+        console.warn(`Startup page open failed. ${normalizeError(error)}`);
+      });
+    }
   }
 
   return page;
+}
+
+async function connectToExistingCdpEndpoint(endpoint) {
+  const cdpBrowser = await chromium.connectOverCDP(endpoint);
+  const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+  return { connectedBrowser: cdpBrowser, context };
+}
+
+async function connectExternalVisibleChrome(policy, userDataDir) {
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const existingRuntime = await connectToExistingCdpEndpoint(endpoint).catch(() => null);
+
+  if (existingRuntime) {
+    return existingRuntime;
+  }
+
+  const executablePath = await resolveExternalBrowserExecutable();
+  let lastError = null;
+
+  await launchExternalVisibleChrome(policy, userDataDir, executablePath, getStartupUrl());
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      return await connectToExistingCdpEndpoint(endpoint);
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  throw new Error(`Unable to connect to browser CDP endpoint ${endpoint}. ${normalizeError(lastError)}`);
+}
+
+async function launchExternalVisibleChrome(policy, userDataDir, executablePath, startupUrl) {
+  const scriptPath = path.join(process.cwd(), 'var', 'run', `external-visible-browser-${process.pid}.ps1`);
+  const script = `
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$ExecutablePath,
+  [Parameter(Mandatory = $true)]
+  [string]$UserDataDir,
+  [Parameter(Mandatory = $true)]
+  [int]$Port,
+  [Parameter(Mandatory = $true)]
+  [string]$StartupUrl
+)
+$ErrorActionPreference = 'Stop'
+$arguments = @(
+  "--remote-debugging-port=$Port",
+  "--user-data-dir=$UserDataDir",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-background-mode",
+  "--new-window",
+  "--start-maximized",
+  "--window-position=80,80",
+  "--window-size=1400,1000",
+  $StartupUrl
+)
+$commandLine = 'start "" "' + $ExecutablePath + '" ' + (($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+# cmd launcher disabled; shortcut launcher below is the active path.
+$shortcutPath = Join-Path ([System.IO.Path]::GetDirectoryName($UserDataDir)) 'network-mcp-visible-browser.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $ExecutablePath
+$shortcut.Arguments = (($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+$shortcut.WindowStyle = 3
+$shortcut.Save()
+Invoke-Item $shortcutPath
+`;
+
+  const { writeFile: writeTextFile } = await import('node:fs/promises');
+  await mkdir(path.dirname(scriptPath), { recursive: true });
+  await writeTextFile(scriptPath, script, 'utf8');
+  await execFileAsync(resolvePowerShellExecutable(), [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-ExecutablePath',
+    executablePath,
+    '-UserDataDir',
+    userDataDir,
+    '-Port',
+    String(policy.remoteDebuggingPort),
+    '-StartupUrl',
+    startupUrl
+  ], { timeout: 15000, maxBuffer: 1024 * 1024 });
+  await new Promise(resolve => setTimeout(resolve, 1000));
+}
+
+async function resolveExternalBrowserExecutable() {
+  const override = String(process.env.NETWORK_MCP_BROWSER_EXECUTABLE || '').trim();
+  if (override) {
+    if (await fileExists(override)) {
+      return override;
+    }
+
+    throw new Error(`Configured NETWORK_MCP_BROWSER_EXECUTABLE does not exist: ${override}`);
+  }
+
+  const candidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+  ];
+
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error('No supported browser executable was found. Set NETWORK_MCP_BROWSER_EXECUTABLE to chrome.exe or msedge.exe.');
+}
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function snapshotFields(target) {
@@ -464,13 +777,17 @@ async function describeSelectorField(target, selector) {
 }
 
 app.get('/healthz', (_req, res) => {
+  const policy = getPolicy();
   res.json({
     ok: true,
     service: 'network-mcp',
+    configuredVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
     browserVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
-    browserChannel: String(process.env.NETWORK_MCP_BROWSER_CHANNEL || 'chrome').trim(),
+    browserChannel: policy.browserChannel,
+    browserMode: getBrowserMode(policy),
     persistentProfile: true,
-    userDataDirConfigured: Boolean(String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim())
+    userDataDirConfigured: Boolean(String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim()),
+    currentUrl: page && !page.isClosed() ? page.url() : null
   });
 });
 
@@ -484,6 +801,81 @@ app.use((req, res, next) => {
   }
 
   return next();
+});
+
+app.post('/browser-status', async (_req, res) => {
+  try {
+    res.json(await getBrowserStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-restart', async (req, res) => {
+  try {
+    const force = req.body?.force === true;
+    const reopen = req.body?.reopen !== false;
+    const reason = String(req.body?.reason || '').slice(0, 200);
+    res.json(await restartBrowserSession({ force, reopen, reason }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-kill', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const reason = String(req.body?.reason || '').slice(0, 200);
+    const before = await getBrowserStatus();
+    const close = await closeSessionWithTimeout();
+    const forced = await killManagedBrowserProcesses(policy);
+    res.json({
+      ok: close.ok && forced.ok !== false,
+      action: 'browser_kill',
+      reason,
+      before,
+      close,
+      forced,
+      after: await getBrowserStatus()
+    });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/open-fresh', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const requestedUrl = String(req.body?.url || '').trim();
+    const force = req.body?.force === true;
+    const reason = String(req.body?.reason || '').slice(0, 200);
+    const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
+    const isJobBoardUrl = Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(rawTargetUrl.hostname.toLowerCase(), pattern));
+    const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
+
+    const restart = await restartBrowserSession({ force, reopen: false, reason: reason || 'open_fresh' });
+    const target = await ensurePage();
+
+    await target.goto(targetUrl.toString(), { waitUntil: 'domcontentloaded' });
+    await target.bringToFront().catch(() => {});
+    pageVisitCount += 1;
+    await ensureNotChallenge(target);
+    const response = {
+      ok: true,
+      action: 'open_fresh',
+      url: target.url(),
+      restart
+    };
+
+    if (isJobBoardUrl) {
+      response.normalizedUrl = targetUrl.toString();
+      response.pageType = describePageType(targetUrl);
+    }
+
+    res.json(response);
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
 });
 
 app.post('/open', async (req, res) => {
@@ -500,9 +892,10 @@ app.post('/open', async (req, res) => {
     }
 
     await target.goto(targetUrl.toString(), { waitUntil: 'domcontentloaded' });
+    await target.bringToFront().catch(() => {});
     pageVisitCount += 1;
     await ensureNotChallenge(target);
-    const response = { ok: true, url: target.url(), title: await target.title() };
+    const response = { ok: true, url: target.url() };
 
     if (isJobBoardUrl) {
       response.normalizedUrl = targetUrl.toString();
@@ -527,13 +920,13 @@ app.post('/open-job', async (req, res) => {
     }
 
     await target.goto(normalizedUrl.toString(), { waitUntil: 'domcontentloaded' });
+    await target.bringToFront().catch(() => {});
     pageVisitCount += 1;
     await ensureNotChallenge(target);
     res.json({
       ok: true,
       url: target.url(),
       normalizedUrl: normalizedUrl.toString(),
-      title: await target.title(),
       pageType: describePageType(normalizedUrl)
     });
   } catch (error) {
@@ -658,6 +1051,7 @@ app.post('/click', async (req, res) => {
       throw new Error(`Click target not found. Matches: ${count}. Requested index: ${nth}.`);
     }
     await locator.nth(nth).click();
+    await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
     await ensureNotChallenge(target);
     res.json({ ok: true, url: target.url(), title: await target.title(), clicked: selector || text, nth });
@@ -680,6 +1074,133 @@ app.post('/review-before-submit', async (_req, res) => {
   }
 });
 
-const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || 8791);
-app.listen(port, '127.0.0.1', () => console.log(`Network browser worker listening on http://127.0.0.1:${port}`));
+async function listManagedBrowserProcesses(policy = getPolicy()) {
+  if (process.platform !== 'win32') {
+    return { ok: true, platform: process.platform, supported: false, processes: [] };
+  }
+
+  const userDataDir = getManagedUserDataDir(policy);
+  const scriptPath = path.join(process.cwd(), 'var', 'run', `browser-process-list-${process.pid}.ps1`);
+  const script = `
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$UserDataDir
+)
+$ErrorActionPreference = 'Stop'
+$windowApi = @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class NetworkMcpWindowApi {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+}
+"@
+Add-Type -TypeDefinition $windowApi -ErrorAction SilentlyContinue
+function Get-WindowInfoForProcessId {
+  param([int]$ProcessId)
+  $result = [PSCustomObject]@{ MainWindowHandle = 0; MainWindowTitle = '' }
+  $callback = [NetworkMcpWindowApi+EnumWindowsProc]{
+    param([IntPtr]$handle, [IntPtr]$lParam)
+    [uint32]$windowProcessId = 0
+    [NetworkMcpWindowApi]::GetWindowThreadProcessId($handle, [ref]$windowProcessId) | Out-Null
+    if ($windowProcessId -eq [uint32]$ProcessId -and [NetworkMcpWindowApi]::IsWindowVisible($handle)) {
+      $length = [NetworkMcpWindowApi]::GetWindowTextLength($handle)
+      $builder = New-Object System.Text.StringBuilder ([Math]::Max($length + 1, 256))
+      [NetworkMcpWindowApi]::GetWindowText($handle, $builder, $builder.Capacity) | Out-Null
+      $title = $builder.ToString()
+      if ($title.Trim() -ne '') {
+        $result.MainWindowHandle = $handle.ToInt64()
+        $result.MainWindowTitle = $title
+        return $false
+      }
+    }
+    return $true
+  }
+  [NetworkMcpWindowApi]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+  return $result
+}
+$full = [System.IO.Path]::GetFullPath($UserDataDir).TrimEnd('\\')
+$names = @('chrome.exe', 'msedge.exe', 'chromium.exe')
+$items = Get-CimInstance Win32_Process | Where-Object {
+  $names -contains $_.Name -and $_.CommandLine -and (
+    $_.CommandLine -like ('*--user-data-dir=' + $full + '*') -or
+    $_.CommandLine -like ('*--user-data-dir="' + $full + '"*') -or
+    $_.CommandLine -like ('*' + $full + '*')
+  )
+} | ForEach-Object {
+  $process = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+  $window = if ($process) { Get-WindowInfoForProcessId -ProcessId $_.ProcessId } else { $null }
+  [PSCustomObject]@{
+    ProcessId = $_.ProcessId
+    Name = $_.Name
+    ExecutablePath = $_.ExecutablePath
+    CommandLine = $_.CommandLine
+    MainWindowHandle = if ($window -and $window.MainWindowHandle) { [int64]$window.MainWindowHandle } elseif ($process) { [int64]$process.MainWindowHandle } else { 0 }
+    MainWindowTitle = if ($window -and $window.MainWindowTitle) { [string]$window.MainWindowTitle } elseif ($process) { [string]$process.MainWindowTitle } else { '' }
+  }
+}
+$items | ConvertTo-Json -Depth 4
+`;
+
+  try {
+    const { writeFile: writeTextFile } = await import('node:fs/promises');
+    await mkdir(path.dirname(scriptPath), { recursive: true });
+    await writeTextFile(scriptPath, script, 'utf8');
+    const { stdout } = await execFileAsync(resolvePowerShellExecutable(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-UserDataDir', userDataDir], { timeout: 15000, maxBuffer: 1024 * 1024 });
+    const parsed = parsePowerShellJson(stdout);
+    return { ok: true, platform: process.platform, supported: true, userDataDir, processes: Array.isArray(parsed) ? parsed.map(sanitizeProcessInfo) : parsed ? [sanitizeProcessInfo(parsed)] : [] };
+  } catch (error) {
+    return { ok: false, platform: process.platform, supported: true, userDataDir, error: normalizeError(error), processes: [] };
+  }
+}
+
+async function killManagedBrowserProcesses(policy = getPolicy()) {
+  const listed = await listManagedBrowserProcesses(policy);
+  const killed = [];
+  const failed = [];
+
+  for (const item of listed.processes || []) {
+    try {
+      process.kill(item.processId);
+      killed.push(item);
+    } catch (error) {
+      failed.push({ ...item, error: normalizeError(error) });
+    }
+  }
+
+  return { ok: listed.ok && failed.length === 0, attempted: true, listed, killed, failed };
+}
+
+function resolvePowerShellExecutable() {
+  return process.env.PWSH || process.env.POWERSHELL || 'pwsh';
+}
+
+function parsePowerShellJson(stdout) {
+  const raw = String(stdout || '').trim();
+  return raw ? JSON.parse(raw) : null;
+}
+
+function sanitizeProcessInfo(item) {
+  return {
+    processId: Number(item.ProcessId),
+    name: String(item.Name || ''),
+    executablePath: String(item.ExecutablePath || ''),
+    commandLine: String(item.CommandLine || ''),
+    mainWindowHandle: Number(item.MainWindowHandle || 0),
+    mainWindowTitle: String(item.MainWindowTitle || '')
+  };
+}
+
+const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
+app.listen(port, '127.0.0.1', () => {
+  console.log(`Network browser worker listening on http://127.0.0.1:${port}`);
+  ensurePage().catch(error => {
+    console.warn(`Startup browser open failed. ${normalizeError(error)}`);
+  });
+});
 

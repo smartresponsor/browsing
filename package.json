@@ -11,6 +11,7 @@
     "dev:status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 status",
     "dev:start": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start",
     "dev:stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop",
+    "dev:start-visible-worker": ".\\tool\\start-visible-worker.cmd",
     "dev:restart": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 restart",
     "dev:smoke-local": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 smoke-local",
     "dev:smoke-public": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 smoke-public",

@@ -7,6 +7,7 @@ param(
         'status',
         'start',
         'stop',
+        'start-visible-worker',
         'restart',
         'start-mcp',
         'stop-mcp',
@@ -22,6 +23,7 @@ param(
         'install-named-tunnel-service',
         'check-cloudflared',
         'check-wrangler',
+        'deploy-worker',
         'install-startup-task',
         'uninstall-startup-task',
         'show-startup-task'
@@ -51,6 +53,18 @@ $NamedTunnelLogFile = Join-Path $LogDir 'cloudflared-named.log'
 $NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
 $StartupTaskName = 'network-mcp-dev'
 $StartupTaskPath = '\'
+$DefaultMcpPublicOrigin = 'https://network-mcp.taa0662621456.workers.dev'
+$LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
+
+function Test-LegacySmartresponsorOrigin {
+    param([AllowNull()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    return $Value.TrimEnd('/') -eq $LegacySmartresponsorOrigin
+}
 
 function Ensure-Directories {
     foreach ($path in @($RunDir, $LogDir)) {
@@ -420,10 +434,14 @@ function Get-NamedTunnelName {
 
 function Get-NamedTunnelHostname {
     if ($env:NETWORK_MCP_TUNNEL_HOSTNAME) {
+        if (Test-LegacySmartresponsorOrigin -Value ('https://' + $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim())) {
+            return ''
+        }
+
         return $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim()
     }
 
-    return 'network.smartresponsor.com'
+    return ''
 }
 
 function Get-PublicOrigin {
@@ -431,7 +449,7 @@ function Get-PublicOrigin {
         return $env:NETWORK_MCP_PUBLIC_ORIGIN.TrimEnd('/')
     }
 
-    return ('https://' + (Get-NamedTunnelHostname)).TrimEnd('/')
+    return $DefaultMcpPublicOrigin
 }
 
 if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
@@ -572,10 +590,7 @@ function Start-Worker {
             -FilePath $node.Source `
             -ArgumentList @('--enable-source-maps', $workerScript) `
             -WorkingDirectory $Root `
-            -PassThru `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $WorkerLogFile `
-            -RedirectStandardError $WorkerErrFile
+            -PassThru
     } finally {
         if ($null -eq $restorePort) {
             Remove-Item -Path Env:PORT -ErrorAction SilentlyContinue
@@ -771,6 +786,23 @@ function Invoke-WorkerRequest {
         status_code = [int]$response.StatusCode
         content = $response.Content
     }
+}
+
+function Invoke-WorkerBrowserStatus {
+    $state = Get-WorkerState
+    if (-not $state.running) {
+        return [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' }
+    }
+
+    $response = Invoke-WorkerRequest -Path '/browser-status' -Body '{}'
+    $body = $null
+    try {
+        $body = $response.content | ConvertFrom-Json
+    } catch {
+        $body = $response.content
+    }
+
+    return [pscustomobject]@{ ok = $response.status_code -eq 200; status_code = $response.status_code; body = $body }
 }
 
 function Get-FreeTcpPort {
@@ -1036,7 +1068,7 @@ function Invoke-PublicSmoke {
         $body = $response.Content
     }
 
-    $expectedHealth = $body.ok -eq $true -and $body.service -eq 'network-mcp' -and $body.endpoint -eq '/mcp'
+    $expectedHealth = $body.ok -eq $true -and $body.service -eq 'network-mcp'
 
     return [pscustomobject]@{
         ok = [int]$response.StatusCode -eq 200 -and $expectedHealth
@@ -1054,6 +1086,7 @@ function Show-Status {
     $localSmoke = [pscustomobject]@{ ok = $false; skipped = $true; reason = 'Run dev:smoke-local explicitly for browser form smoke.' }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
+    $browserStatus = Invoke-WorkerBrowserStatus
     $policy = Get-PolicyState
 
     $status = [pscustomobject]@{
@@ -1061,6 +1094,7 @@ function Show-Status {
         policy = $policy
         worker = $workerState
         mcp = $mcpState
+        browser = $browserStatus
         tunnel = $tunnelState
         named_tunnel = Get-NamedTunnelState
         wrangler = [pscustomobject]@{
@@ -1088,9 +1122,9 @@ function Show-Doctor {
     $workerState = Get-WorkerState
     $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
-    $workerSmoke = if ($workerState.running) { (Invoke-LocalSmoke | ConvertFrom-Json).ok } else { $false }
     $mcpSmoke = if ($mcpState.running) { (Invoke-McpSmoke | ConvertFrom-Json).ok } else { $false }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { (Invoke-PublicSmoke | ConvertFrom-Json).ok } else { $false }
+    $browserStatus = Invoke-WorkerBrowserStatus
     $policy = Get-PolicyState
 
     $summary = @(
@@ -1116,7 +1150,9 @@ function Show-Doctor {
         "mcp_running: $($mcpState.running)"
         "tunnel_running: $($tunnelState.running)"
         "public_origin_configured: $([bool]$env:NETWORK_MCP_PUBLIC_ORIGIN)"
-        "local_smoke_ok: $workerSmoke"
+        "local_smoke_ok: skipped"
+        "browser_visible: $(if ($browserStatus.body) { $browserStatus.body.browserVisible } else { $false })"
+        "browser_detected_visible_window: $(if ($browserStatus.body) { $browserStatus.body.detectedVisibleWindow } else { $false })"
         "mcp_smoke_ok: $mcpSmoke"
         "public_smoke_ok: $publicSmoke"
     )
@@ -1164,7 +1200,7 @@ function Check-Wrangler {
 }
 
 function Deploy-Worker {
-    throw 'Cloudflare Worker deploy is not part of the active network-mcp runtime. Use the named Cloudflare Tunnel to local mcp-server on port 8792.'
+    $wrangler = Resolve-WranglerExe
     $config = Join-Path $CloudflareWorkerRoot 'wrangler.jsonc'
     if (-not (Test-Path -LiteralPath $config)) {
         throw "wrangler config not found: $config"
@@ -1180,14 +1216,14 @@ function Deploy-Worker {
 
 function Install-StartupTask {
     Import-Module ScheduledTasks -ErrorAction Stop
-    $pwsh = Get-PwshCommand
-    $scriptPath = Join-Path $Root 'tool\dev-network.ps1'
-    $action = New-ScheduledTaskAction -Execute $pwsh.Source -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" start" -WorkingDirectory $Root
+    $cmd = Get-Command cmd.exe -ErrorAction Stop
+    $launcherPath = Join-Path $Root 'tool\start-visible-worker.cmd'
+    $action = New-ScheduledTaskAction -Execute $cmd.Source -Argument "/c start `"network-mcp visible worker`" `"$launcherPath`"" -WorkingDirectory $Root
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
 
-    Register-ScheduledTask -TaskName $StartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start the network-mcp local worker and tunnel at logon.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $StartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start the network-mcp visible Playwright worker at logon.' -Force | Out-Null
     return (Show-StartupTask)
 }
 
@@ -1252,6 +1288,7 @@ switch ($Command) {
     'doctor-json' { Show-DoctorJson }
     'status' { Show-Status }
     'start' { Start-Stack }
+    'start-visible-worker' { & (Join-Path $Root 'tool\start-visible-worker.cmd') }
     'stop' { Stop-Stack }
     'restart' {
         Stop-Stack | Out-Null
@@ -1293,6 +1330,7 @@ switch ($Command) {
     'install-named-tunnel-service' { Install-NamedTunnelService }
     'check-cloudflared' { Check-Cloudflared }
     'check-wrangler' { Check-Wrangler }
+    'deploy-worker' { Deploy-Worker }
     'install-startup-task' { Install-StartupTask }
     'uninstall-startup-task' { Uninstall-StartupTask }
     'show-startup-task' { Show-StartupTask }

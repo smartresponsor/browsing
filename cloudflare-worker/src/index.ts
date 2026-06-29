@@ -1,8 +1,10 @@
-﻿interface Env {
+interface Env {
   NETWORK_MCP_TOKEN?: string;
   NETWORK_MCP_WORKER_URL?: string;
   CAREER_WORKER_URL?: string;
   NETWORK_MCP_BROWSER_WORKER_TOKEN?: string;
+  NETWORK_MCP_SERVER_URL?: string;
+  NETWORK_MCP_UPSTREAM_TOKEN?: string;
   NETWORK_MCP_AUTH0_ISSUER?: string;
   NETWORK_MCP_OIDC_CLIENT_ID?: string;
   NETWORK_MCP_ALLOWED_EMAIL?: string;
@@ -213,8 +215,7 @@ function getMcpDebugInfo(env: Env) {
       oidcClientIdConfigured,
       allowedEmailConfigured
     },
-    tools: MCP_TOOLS.map(({ route, ...tool }) => tool),
-    networkWorkerUrlConfigured: Boolean(env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL)
+    schemaOwner: 'upstream-mcp-server', networkMcpServerUrlConfigured: Boolean(getMcpServerUrl(env)), upstreamTokenConfigured: Boolean(getRequiredEnvValue(env, 'NETWORK_MCP_UPSTREAM_TOKEN')), networkWorkerUrlConfigured: Boolean(env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL)
   };
 }
 
@@ -300,6 +301,43 @@ async function authorizeMcpRequest(request: Request, env: Env): Promise<Response
   }
 
   return null;
+}
+
+function getMcpServerUrl(env: Env): string | null {
+  return getRequiredEnvValue(env, 'NETWORK_MCP_SERVER_URL');
+}
+
+async function proxyMcpRequest(request: Request, env: Env): Promise<Response> {
+  const upstreamUrl = getMcpServerUrl(env);
+  if (!upstreamUrl) {
+    return json(500, { ok: false, error: 'NETWORK_MCP_SERVER_URL is not configured' });
+  }
+
+  const target = new URL(upstreamUrl);
+  const source = new URL(request.url);
+  target.search = source.search;
+
+  const headers = new Headers(request.headers);
+  headers.delete('host');
+
+  const upstreamToken = getRequiredEnvValue(env, 'NETWORK_MCP_UPSTREAM_TOKEN');
+  if (upstreamToken) {
+    headers.set('authorization', `Bearer ${upstreamToken}`);
+  } else {
+    headers.delete('authorization');
+  }
+
+  const response = await fetch(target.toString(), {
+    method: request.method,
+    headers,
+    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer(),
+    redirect: 'manual'
+  });
+
+  return new Response(response.body, {
+    status: response.status,
+    headers: new Headers(response.headers)
+  });
 }
 
 async function callCareerWorkerTool(env: Env, route: string, payload: unknown): Promise<{ ok: boolean; body: string }> {
@@ -489,7 +527,7 @@ export default {
         return unauthorized;
       }
 
-      return handleMcpRequest(request, env);
+      return proxyMcpRequest(request, env);
     }
 
     if (url.pathname === '/mcp-debug') {
