@@ -108,7 +108,7 @@ process.on('SIGINT', () => {
 function buildServer() {
   const mcpServer = new McpServer({
     name: 'network-mcp',
-    version: '0.1.0-rc1'
+    version: '0.1.0-rc2'
   });
 
   registerNetworkTools(mcpServer);
@@ -174,6 +174,15 @@ function registerNetworkTools(mcpServer) {
       }).strict()
     },
     async ({ url }) => toolResult(await registry.callTool('network.open_job', { url }))
+  );
+
+  mcpServer.registerTool(
+    'network.chatgpt_snapshot',
+    {
+      description: 'Read the current supervised ChatGPT Web tab URL and message snapshot for semantic execution gating.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.chatgpt_snapshot', {}))
   );
 
   mcpServer.registerTool(

@@ -1,5 +1,6 @@
 ﻿import express from 'express';
 import { chromium } from '@playwright/test';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, mkdir } from 'fs/promises';
 import path from 'path';
@@ -596,6 +597,70 @@ async function fileExists(filePath) {
   }
 }
 
+function isChatGptUrl(rawUrl) {
+  try {
+    const host = new URL(rawUrl).hostname.toLowerCase();
+    return host === 'chatgpt.com' || host.endsWith('.chatgpt.com');
+  } catch (_error) {
+    return false;
+  }
+}
+
+function normalizeSnapshotText(value, maxLength = 8000) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function hashChatGptSnapshotText(text) {
+  return createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n').trim(), 'utf8').digest('hex');
+}
+
+async function snapshotChatGptPage(target) {
+  const currentUrl = target.url();
+  if (!isChatGptUrl(currentUrl)) {
+    return { ok: false, status: 'NOT_CHATGPT_PAGE', url: currentUrl, messages: [] };
+  }
+
+  const pageSnapshot = await target.evaluate(() => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 8000);
+    const classifyRole = node => {
+      const explicit = String(node.getAttribute('data-message-author-role') || '').toLowerCase();
+      if (explicit === 'user' || explicit === 'assistant' || explicit === 'system') return explicit;
+      const testId = String(node.getAttribute('data-testid') || '').toLowerCase();
+      if (testId.includes('user')) return 'user';
+      if (testId.includes('assistant')) return 'assistant';
+      const aria = String(node.getAttribute('aria-label') || '').toLowerCase();
+      if (aria.includes('you')) return 'user';
+      if (aria.includes('chatgpt')) return 'assistant';
+      return 'unknown';
+    };
+    const selectors = ['[data-message-author-role]', '[data-testid^="conversation-turn"]', 'article'];
+    const nodes = Array.from(new Set(selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)))));
+    const messages = nodes
+      .map((node, index) => ({ index, role: classifyRole(node), text: normalize(node.innerText || node.textContent || '') }))
+      .filter(item => item.text.length > 0)
+      .filter((item, index, items) => items.findIndex(other => other.role === item.role && other.text === item.text) === index)
+      .slice(-200);
+    return { title: document.title || '', messages };
+  });
+
+  const messages = pageSnapshot.messages.map((message, index) => ({
+    ...message,
+    index,
+    hash: hashChatGptSnapshotText(message.text),
+  }));
+  const assistantMessages = messages.filter(message => message.role === 'assistant');
+  const latestAssistant = assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
+  return {
+    ok: true,
+    status: latestAssistant ? 'ASSISTANT_MESSAGE_AVAILABLE' : 'NO_ASSISTANT_MESSAGE',
+    url: currentUrl,
+    title: normalizeSnapshotText(pageSnapshot.title, 500),
+    messageCount: messages.length,
+    latestAssistant,
+    messages,
+  };
+}
+
 async function snapshotFields(target) {
   return target.locator('input, textarea, select').evaluateAll(nodes => nodes.map((node, index) => ({
     index,
@@ -931,6 +996,16 @@ app.post('/open-job', async (req, res) => {
     });
   } catch (error) {
     res.status(409).json({ ok: false, errorType: 'OPEN_JOB_FAILED', error: error.message });
+  }
+});
+
+app.post('/chatgpt-snapshot', async (_req, res) => {
+  try {
+    const target = await ensurePage();
+    await target.bringToFront().catch(() => {});
+    res.json(await snapshotChatGptPage(target));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
   }
 });
 
