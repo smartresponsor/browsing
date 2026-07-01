@@ -583,7 +583,15 @@ function Start-Worker {
     $node = Get-NodeCommand
     $workerScript = Join-Path $WorkerRoot 'src\worker.js'
     $restorePort = $env:PORT
+    $restoreExternalVisibleChrome = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
+    $restoreRemoteDebuggingPort = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
     $env:PORT = [string](Get-WorkerPort)
+    if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME)) {
+        $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = 'true'
+    }
+    if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_REMOTE_DEBUGGING_PORT)) {
+        $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT = '9223'
+    }
 
     try {
         $process = Start-Process `
@@ -596,6 +604,16 @@ function Start-Worker {
             Remove-Item -Path Env:PORT -ErrorAction SilentlyContinue
         } else {
             $env:PORT = $restorePort
+        }
+        if ($null -eq $restoreExternalVisibleChrome) {
+            Remove-Item -Path Env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME -ErrorAction SilentlyContinue
+        } else {
+            $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = $restoreExternalVisibleChrome
+        }
+        if ($null -eq $restoreRemoteDebuggingPort) {
+            Remove-Item -Path Env:NETWORK_MCP_REMOTE_DEBUGGING_PORT -ErrorAction SilentlyContinue
+        } else {
+            $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT = $restoreRemoteDebuggingPort
         }
     }
 
