@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { chromium } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -202,7 +202,9 @@ function isChallengeText(text) {
 
 async function closeSession() {
   if (connectedBrowser) {
-    await connectedBrowser.close().catch(() => {});
+    if (typeof connectedBrowser.disconnect === 'function') {
+      await Promise.resolve(connectedBrowser.disconnect()).catch(() => {});
+    }
     connectedBrowser = undefined;
     browser = undefined;
     page = undefined;
@@ -416,7 +418,7 @@ async function ensurePage() {
         browser = externalRuntime.context;
       } catch (error) {
         connectedBrowser = undefined;
-        console.warn(`External browser CDP mode failed; falling back to launchPersistentContext. ${normalizeError(error)}`);
+        throw new Error(`External browser CDP mode failed and fallback launch is disabled for visible browser mode. ${normalizeError(error)}`);
       }
     }
 
@@ -1278,4 +1280,3 @@ app.listen(port, '127.0.0.1', () => {
     console.warn(`Startup browser open failed. ${normalizeError(error)}`);
   });
 });
-
