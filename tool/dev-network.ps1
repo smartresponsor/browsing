@@ -56,6 +56,12 @@ $StartupTaskPath = '\'
 $DefaultMcpPublicOrigin = 'https://network-mcp.taa0662621456.workers.dev'
 $LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
 
+$McpWorkspaceRoot = Split-Path -Parent $Root
+$SharedSecretRuntime = Join-Path $McpWorkspaceRoot 'AwsSecretContract\tool\secret-runtime.ps1'
+if (Test-Path -LiteralPath $SharedSecretRuntime -PathType Leaf) {
+    . $SharedSecretRuntime -Command export-env -Consumer network-mcp -IncludePrevious
+}
+
 function Test-LegacySmartresponsorOrigin {
     param([AllowNull()][string]$Value)
 

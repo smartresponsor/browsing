@@ -9,6 +9,7 @@ const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
 const endpoint = process.env.NETWORK_MCP_SERVER_ENDPOINT || '/mcp';
 const workerUrl = process.env.NETWORK_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
 const upstreamToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN || '';
+const upstreamPreviousToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
 
 const registry = new NetworkToolRegistry(
   workerUrl,
@@ -44,7 +45,8 @@ const server = createServer(async (req, res) => {
 
   if (upstreamToken) {
     const auth = String(req.headers.authorization || '');
-    if (auth !== `Bearer ${upstreamToken}`) {
+    const acceptedTokens = [upstreamToken, upstreamPreviousToken].filter(Boolean);
+    if (!acceptedTokens.some((token) => auth === `Bearer ${token}`)) {
       res.writeHead(401, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
       return;

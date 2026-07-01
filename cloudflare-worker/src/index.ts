@@ -5,6 +5,9 @@ interface Env {
   NETWORK_MCP_BROWSER_WORKER_TOKEN?: string;
   NETWORK_MCP_SERVER_URL?: string;
   NETWORK_MCP_UPSTREAM_TOKEN?: string;
+  NETWORK_MCP_TOKEN_PREVIOUS?: string;
+  NETWORK_MCP_UPSTREAM_TOKEN_PREVIOUS?: string;
+  NETWORK_MCP_BROWSER_WORKER_TOKEN_PREVIOUS?: string;
   NETWORK_MCP_AUTH0_ISSUER?: string;
   NETWORK_MCP_OIDC_CLIENT_ID?: string;
   NETWORK_MCP_ALLOWED_EMAIL?: string;
@@ -259,7 +262,7 @@ async function authorizeMcpRequest(request: Request, env: Env): Promise<Response
     return json(401, { ok: false, error: 'Unauthorized' });
   }
 
-  if (presentedToken === configuredToken) {
+  if (matchesAnyToken(presentedToken, [configuredToken, env.NETWORK_MCP_TOKEN_PREVIOUS])) {
     return null;
   }
 
@@ -338,6 +341,10 @@ async function proxyMcpRequest(request: Request, env: Env): Promise<Response> {
     status: response.status,
     headers: new Headers(response.headers)
   });
+}
+
+function matchesAnyToken(presentedToken: string, candidates: Array<string | undefined>): boolean {
+  return candidates.some((candidate) => Boolean(candidate) && presentedToken === candidate);
 }
 
 async function callCareerWorkerTool(env: Env, route: string, payload: unknown): Promise<{ ok: boolean; body: string }> {
@@ -546,7 +553,7 @@ export default {
       const auth = request.headers.get('authorization') || '';
       const presentedToken = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
 
-      if (!presentedToken || presentedToken !== configuredToken) {
+      if (!presentedToken || !matchesAnyToken(presentedToken, [configuredToken, env.NETWORK_MCP_TOKEN_PREVIOUS])) {
         return json(401, { ok: false, error: 'Unauthorized' });
       }
 
