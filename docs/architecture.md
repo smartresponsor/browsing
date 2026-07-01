@@ -54,7 +54,7 @@ Final submit is not auto-implemented.
 ## Operational notes
 
 - The browser launches with `headless: false`, so Playwright stays visible on Windows by default.
-- The default browser mode is Playwright-managed bundled Chromium. Set `NETWORK_MCP_BROWSER_CHANNEL=chrome` or `NETWORK_MCP_BROWSER_CHANNEL=msedge` to use installed Chrome or Edge through Playwright.
-- The external Chrome/CDP launcher is opt-in through `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true`.
+- The default browser mode is Playwright-managed Microsoft Edge (`NETWORK_MCP_BROWSER_CHANNEL=msedge`) with a persistent supervised profile. Chrome is a fallback through `NETWORK_MCP_BROWSER_CHANNEL=chrome`; bundled Chromium is only for explicit development testing.
+- The external browser/CDP launcher is opt-in through `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true`.
 - Local smoke checks use a data URL form to avoid depending on external sites.
 - Health and smoke commands are operational checks, not product features.

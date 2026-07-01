@@ -16,7 +16,7 @@ This is not a bypass mechanism. CAPTCHA, two-factor authentication, security cha
 
 ```text
 NETWORK_MCP_USER_DATA_DIR=var/browser/profile
-NETWORK_MCP_BROWSER_CHANNEL=chromium
+NETWORK_MCP_BROWSER_CHANNEL=msedge
 NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=false
 NETWORK_MCP_HEADLESS=false
 ```

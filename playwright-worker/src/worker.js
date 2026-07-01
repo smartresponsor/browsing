@@ -43,7 +43,7 @@ const TRACKING_QUERY_PARAMS = new Set([
   'source',
   'trk'
 ]);
-const DEFAULT_BROWSER_CHANNEL = 'chromium';
+const DEFAULT_BROWSER_CHANNEL = 'msedge';
 const PLAYWRIGHT_BROWSER_CHANNELS = new Set(['chromium', 'chrome', 'msedge']);
 
 function parseList(value) {
@@ -86,7 +86,7 @@ function normalizeBrowserChannel(value) {
 
 function getBrowserMode(policy) {
   if (policy.externalVisibleChrome) {
-    return 'external-chrome-cdp';
+    return 'external-browser-cdp';
   }
 
   return `playwright-${policy.browserChannel}`;
@@ -446,16 +446,7 @@ async function ensurePage() {
           throw error;
         }
 
-        console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
-        browser = await chromium.launchPersistentContext(userDataDir, {
-          headless: policy.headless,
-          args: [
-            '--new-window',
-            '--start-maximized',
-            '--window-position=80,80',
-            '--window-size=1400,1000'
-          ]
-        });
+        throw new Error(`Failed to launch configured browser channel ${policy.browserChannel}. Set NETWORK_MCP_BROWSER_CHANNEL or NETWORK_MCP_BROWSER_EXECUTABLE explicitly. ${normalizeError(error)}`);
       }
     }
   }
@@ -575,10 +566,10 @@ async function resolveExternalBrowserExecutable() {
   }
 
   const candidates = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
   ];
 
   for (const candidate of candidates) {
