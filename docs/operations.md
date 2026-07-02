@@ -22,7 +22,8 @@ NETWORK_MCP_DENIED_HOSTS=
 NETWORK_MCP_PUBLIC_ORIGIN=
 NETWORK_MCP_WORKER_PORT=8791
 NETWORK_MCP_BROWSER_CHANNEL=msedge
-NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=false
+NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true
+NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true
 NETWORK_MCP_BROWSER_WORKER_TOKEN=
 NETWORK_MCP_AUTH0_ISSUER=https://example.auth0.com
 NETWORK_MCP_OIDC_CLIENT_ID=replace-with-auth0-client-id
@@ -158,7 +159,7 @@ After the stable named tunnel is cut over, remove quick-tunnel startup from the 
 ## Startup task
 
 The startup task is user-level and starts the visible Playwright worker at logon through `tool\start-visible-worker.cmd`.
-It uses `NETWORK_MCP_BROWSER_CHANNEL=msedge` and `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=false` unless the environment overrides the channel.
+It uses `NETWORK_MCP_BROWSER_CHANNEL=msedge` and `NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true`; `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true` remains a legacy alias.
 Visible startup logs are written to `var\log\playwright-worker.visible.log` and `var\log\playwright-worker.visible.err.log`.
 On worker startup, the browser opens only `http://127.0.0.1:8791/healthz` by default. Override this only with an intentional `NETWORK_MCP_START_URL`.
 If Chromium reports a profile lock after reboot, cleanup is limited to browser processes using the configured `NETWORK_MCP_USER_DATA_DIR`.

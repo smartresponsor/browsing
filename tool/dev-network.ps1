@@ -9,6 +9,10 @@ param(
         'runtime-recover',
         'watch-tick',
         'watch-status',
+        'shared-browser-status',
+        'shared-browser-start',
+        'shared-browser-stop',
+        'shared-browser-restart',
         'start',
         'stop',
         'start-visible-worker',
@@ -67,6 +71,8 @@ $DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
 $DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
 $DefaultSharedBrowserLogDir = Join-Path $DefaultSharedBrowserRoot 'log'
 $SharedBrowserRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-runtime.json'
+$NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'network-mcp-browser-client.json'
+$SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 
 function Test-LegacySmartresponsorOrigin {
     param([AllowNull()][string]$Value)
@@ -115,8 +121,12 @@ function Ensure-SharedBrowserEnvironment {
         $env:NETWORK_MCP_USER_DATA_DIR = $DefaultSharedBrowserProfile
     }
 
+    if (-not $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER) {
+        $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER = if ($env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME) { $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME } else { 'true' }
+    }
+
     if (-not $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME) {
-        $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = 'true'
+        $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER
     }
 
     if (-not $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT) {
@@ -599,6 +609,35 @@ function Install-NamedTunnelService {
     & $cloudflared service install --config $configPath
 }
 
+function Invoke-SharedBrowserOwner {
+    param([Parameter(Mandatory = $true)][string]$BrowserCommand)
+
+    Ensure-SharedBrowserEnvironment
+    if (-not (Test-Path -LiteralPath $SharedBrowserOwnerScript)) {
+        throw "Shared browser owner script was not found: $SharedBrowserOwnerScript"
+    }
+
+    $pwsh = Get-PwshCommand
+    $output = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -File $SharedBrowserOwnerScript $BrowserCommand
+    return ($output | ConvertFrom-Json)
+}
+
+function Start-SharedBrowserOwner {
+    return Invoke-SharedBrowserOwner -BrowserCommand 'start'
+}
+
+function Stop-SharedBrowserOwner {
+    return Invoke-SharedBrowserOwner -BrowserCommand 'stop'
+}
+
+function Restart-SharedBrowserOwner {
+    return Invoke-SharedBrowserOwner -BrowserCommand 'restart'
+}
+
+function Get-SharedBrowserOwnerStatus {
+    return Invoke-SharedBrowserOwner -BrowserCommand 'status'
+}
+
 function Start-Worker {
     Ensure-Directories
     Ensure-SharedBrowserEnvironment
@@ -776,12 +815,14 @@ function Stop-Tunnel {
 }
 
 function Start-Stack {
+    $sharedBrowser = Start-SharedBrowserOwner
     $worker = Start-Worker
     $mcp = Start-McpServer
     $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
     $namedTunnel = Start-NamedTunnel | ConvertFrom-Json
     [pscustomobject]@{
         ok = $true
+        shared_browser = $sharedBrowser
         worker = $worker | ConvertFrom-Json
         mcp = $mcp | ConvertFrom-Json
         legacy_quick_tunnel = $legacyTunnel
@@ -1152,10 +1193,20 @@ function Resolve-RuntimeVerdict {
     $browserPolicy = $browserBody.runtime.policy
     $browserConfiguredVisible = [bool]($browserBody -and $browserBody.configuredVisible -eq $true)
     $browserDetectedVisible = [bool]($browserBody -and ($browserBody.detectedVisibleWindow -eq $true -or $browserBody.browserVisible -eq $true))
-    $externalCdpAttached = [bool]($BrowserStatus.ok -and $browserPolicy.externalVisibleChrome -eq $true -and $browserRuntime.contextOpen -eq $true -and $browserRuntime.pageCount -gt 0)
-    $browserVisibilityOk = [bool]((-not $browserConfiguredVisible) -or $browserDetectedVisible -or $externalCdpAttached)
-    $browserVisibilityReason = if (-not $browserVisibilityOk) { 'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' } elseif ($externalCdpAttached -and -not $browserDetectedVisible) { 'EXTERNAL_CDP_ATTACHED_WINDOW_OWNER_NOT_DETECTED' } else { $null }
-    $checks['browserVisibility'] = ConvertTo-HealthCheckResult -Name 'browser-visibility' -Ok $browserVisibilityOk -Reason $browserVisibilityReason -Detail ([pscustomobject]@{ configured_visible = $browserConfiguredVisible; detected_visible = $browserDetectedVisible; external_cdp_attached = $externalCdpAttached; page_count = $browserRuntime.pageCount; current_url = $browserRuntime.currentUrl; browser = $BrowserStatus })
+    $sharedBrowserOwner = $null
+    try {
+        if (Test-Path -LiteralPath $SharedBrowserRuntimeFile) {
+            $sharedBrowserOwner = Get-Content -LiteralPath $SharedBrowserRuntimeFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+    } catch {
+        $sharedBrowserOwner = $null
+    }
+    $sharedBrowserOwnerReady = [bool]($sharedBrowserOwner -and $sharedBrowserOwner.ok -eq $true)
+    $externalCdpAttached = [bool]($BrowserStatus.ok -and ($browserPolicy.externalVisibleBrowser -eq $true -or $browserPolicy.externalVisibleChrome -eq $true) -and $browserRuntime.contextOpen -eq $true -and $browserRuntime.pageCount -gt 0)
+    $externalBrowserReady = [bool]($externalCdpAttached -or $sharedBrowserOwnerReady)
+    $browserVisibilityOk = [bool]((-not $browserConfiguredVisible) -or $browserDetectedVisible -or $externalBrowserReady)
+    $browserVisibilityReason = if (-not $browserVisibilityOk) { 'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' } elseif ($externalCdpAttached -and -not $browserDetectedVisible) { 'EXTERNAL_CDP_ATTACHED_WINDOW_OWNER_NOT_DETECTED' } elseif ($sharedBrowserOwnerReady -and -not $externalCdpAttached) { 'SHARED_BROWSER_OWNER_READY_CLIENT_NOT_ATTACHED' } else { $null }
+    $checks['browserVisibility'] = ConvertTo-HealthCheckResult -Name 'browser-visibility' -Ok $browserVisibilityOk -Reason $browserVisibilityReason -Detail ([pscustomobject]@{ configured_visible = $browserConfiguredVisible; detected_visible = $browserDetectedVisible; external_cdp_attached = $externalCdpAttached; shared_browser_owner_ready = $sharedBrowserOwnerReady; page_count = $browserRuntime.pageCount; current_url = $browserRuntime.currentUrl; shared_browser_owner = $sharedBrowserOwner; browser = $BrowserStatus })
     $checks['mcpSmoke'] = ConvertTo-HealthCheckResult -Name 'mcp-smoke' -Ok ([bool]($McpSmoke.ok)) -Reason $(if (-not $McpState.running) { 'MCP_SMOKE_SKIPPED_SERVER_DOWN' } elseif (-not $McpSmoke.ok) { 'MCP_SMOKE_FAILED' } else { $null }) -Detail $McpSmoke
 
     $publicConfigured = -not [string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)
@@ -1178,7 +1229,7 @@ function Resolve-RuntimeVerdict {
             'MCP_PORT_CONFLICT' { $recommendedAction = 'STOP_CONFLICTING_MCP_PORT_PROCESS' }
             'BROWSER_STATUS_FAILED' { $recommendedAction = 'RESTART_WORKER' }
             'MCP_SMOKE_FAILED' { $recommendedAction = 'RESTART_MCP_SERVER' }
-            'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' { $recommendedAction = 'START_VISIBLE_BROWSER_OR_ENABLE_EXTERNAL_CHROME' }
+            'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' { $recommendedAction = 'START_SHARED_BROWSER_OR_ENABLE_EXTERNAL_BROWSER' }
             'PUBLIC_SMOKE_FAILED' { $recommendedAction = 'CHECK_PUBLIC_ORIGIN_OR_TUNNEL' }
             'NAMED_TUNNEL_DOWN' { $recommendedAction = 'START_NAMED_TUNNEL' }
             default { $recommendedAction = 'INSPECT_RUNTIME' }
@@ -1216,7 +1267,8 @@ function Get-RuntimeDoctorSnapshot {
         browser_runtime = [pscustomobject]@{
             root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
             profile = $env:NETWORK_MCP_USER_DATA_DIR
-            mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
+            mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER
+            legacy_mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
             port = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
         }
         runtime_file = $RuntimeStateFile
@@ -1268,7 +1320,7 @@ function Save-SharedBrowserRuntimeSnapshot {
         external_cdp_attached = $visibilityCheck.external_cdp_attached
         updated_at = (Get-Date).ToUniversalTime().ToString('o')
     }
-    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $SharedBrowserRuntimeFile -Encoding utf8
+    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $NetworkBrowserClientRuntimeFile -Encoding utf8
 }
 
 function Save-RuntimeSnapshot {
@@ -1317,8 +1369,10 @@ function Invoke-RuntimeRecover {
         'START_NAMED_TUNNEL' {
             $actions += [pscustomobject]@{ action = 'START_NAMED_TUNNEL'; result = (Start-NamedTunnel | ConvertFrom-Json) }
         }
-        'START_VISIBLE_BROWSER_OR_ENABLE_EXTERNAL_CHROME' {
-            $actions += [pscustomobject]@{ action = 'NO_AUTOMATIC_VISIBLE_BROWSER_RECOVERY'; reason = 'Visible browser requires interactive Windows session or NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true.' }
+        'START_SHARED_BROWSER_OR_ENABLE_EXTERNAL_BROWSER' {
+            $actions += [pscustomobject]@{ action = 'START_SHARED_BROWSER'; result = Start-SharedBrowserOwner }
+            $actions += [pscustomobject]@{ action = 'RESTART_WORKER'; result = (Stop-Worker | ConvertFrom-Json) }
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
         }
         default {
             $actions += [pscustomobject]@{ action = 'NO_AUTOMATIC_RECOVERY'; reason = $before.reason; recommended_action = $before.recommended_action }
@@ -1596,6 +1650,10 @@ switch ($Command) {
     'runtime-recover' { Invoke-RuntimeRecover }
     'watch-tick' { Invoke-WatchTick }
     'watch-status' { Show-WatchStatus }
+    'shared-browser-status' { Get-SharedBrowserOwnerStatus | ConvertTo-Json -Depth 8 }
+    'shared-browser-start' { Start-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
+    'shared-browser-stop' { Stop-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
+    'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'start' { Start-Stack }
     'start-visible-worker' { & (Join-Path $Root 'tool\start-visible-worker.cmd') }
     'stop' { Stop-Stack }

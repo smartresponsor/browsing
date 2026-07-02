@@ -17,6 +17,7 @@ let sessionStartedAt = null;
 let pageVisitCount = 0;
 let formFillCount = 0;
 let fieldWriteCount = 0;
+let lastExternalAttachError = '';
 const SAFE_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
 const UNSAFE_INPUT_TYPES = new Set(['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset']);
 const DEFAULT_WORKER_PORT = 8791;
@@ -97,8 +98,8 @@ function normalizeBrowserChannel(value) {
 }
 
 function getBrowserMode(policy) {
-  if (policy.externalVisibleChrome) {
-    return 'external-chrome-cdp';
+  if (policy.externalVisibleBrowser) {
+    return 'external-browser-cdp';
   }
 
   return `playwright-${policy.browserChannel}`;
@@ -154,6 +155,11 @@ async function getDevToolsStatus(policy = getPolicy()) {
 function getPolicy() {
   const headless = String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true';
   const browserChannel = normalizeBrowserChannel(process.env.NETWORK_MCP_BROWSER_CHANNEL);
+  const externalVisibleBrowser = process.platform === 'win32' && !headless && String(
+    process.env.NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER ??
+      process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME ??
+      'true'
+  ).toLowerCase() === 'true';
 
   return {
     headless,
@@ -169,7 +175,8 @@ function getPolicy() {
     browserChannel,
     sharedBrowserRoot: getSharedBrowserRoot(),
     userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
-    externalVisibleChrome: process.platform === 'win32' && !headless && String(process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME || 'true').toLowerCase() === 'true',
+    externalVisibleBrowser,
+    externalVisibleChrome: externalVisibleBrowser,
     remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223)
   };
 }
@@ -312,6 +319,7 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       maxPageVisits: policy.maxPageVisits,
       maxFormFills: policy.maxFormFills,
       maxFieldWrites: policy.maxFieldWrites,
+      externalVisibleBrowser: policy.externalVisibleBrowser,
       externalVisibleChrome: policy.externalVisibleChrome,
       remoteDebuggingPort: policy.remoteDebuggingPort
     },
@@ -347,6 +355,7 @@ async function getBrowserStatus() {
     configuredVisible: !policy.headless,
     detectedVisibleWindow,
     browserVisible: detectedVisibleWindow,
+    lastExternalAttachError,
     runtime,
     managedProcesses
   };
@@ -521,9 +530,11 @@ async function ensurePage() {
         const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
         connectedBrowser = externalRuntime.connectedBrowser;
         browser = externalRuntime.context;
+        lastExternalAttachError = '';
       } catch (error) {
         connectedBrowser = undefined;
-        console.warn(`External browser CDP mode failed; falling back to launchPersistentContext. ${normalizeError(error)}`);
+        lastExternalAttachError = normalizeError(error);
+        throw new Error(`Shared browser CDP attach failed. ${lastExternalAttachError}`);
       }
     }
 
@@ -580,34 +591,29 @@ async function ensurePage() {
 }
 
 async function connectToExistingCdpEndpoint(endpoint) {
-  const cdpBrowser = await chromium.connectOverCDP(endpoint);
+  let connectEndpoint = endpoint;
+  try {
+    const versionResponse = await fetch(`${endpoint.replace(/\/$/, '')}/json/version`);
+    const version = await versionResponse.json();
+    if (typeof version.webSocketDebuggerUrl === 'string' && version.webSocketDebuggerUrl.trim()) {
+      connectEndpoint = version.webSocketDebuggerUrl.trim();
+    }
+  } catch (_error) {
+    connectEndpoint = endpoint;
+  }
+
+  const cdpBrowser = await chromium.connectOverCDP(connectEndpoint);
   const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
   return { connectedBrowser: cdpBrowser, context };
 }
 
-async function connectExternalVisibleChrome(policy, userDataDir) {
+async function connectExternalVisibleChrome(policy, _userDataDir) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
-  const existingRuntime = await connectToExistingCdpEndpoint(endpoint).catch(() => null);
-
-  if (existingRuntime) {
-    return existingRuntime;
+  try {
+    return await connectToExistingCdpEndpoint(endpoint);
+  } catch (error) {
+    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint}. ${normalizeError(error)}`);
   }
-
-  const executablePath = await resolveExternalBrowserExecutable();
-  let lastError = null;
-
-  await launchExternalVisibleChrome(policy, userDataDir, executablePath, getStartupUrl());
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      return await connectToExistingCdpEndpoint(endpoint);
-    } catch (error) {
-      lastError = error;
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-
-  throw new Error(`Unable to connect to browser CDP endpoint ${endpoint}. ${normalizeError(lastError)}`);
 }
 
 async function launchExternalVisibleChrome(policy, userDataDir, executablePath, startupUrl) {
