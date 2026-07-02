@@ -43,7 +43,7 @@ const TRACKING_QUERY_PARAMS = new Set([
   'source',
   'trk'
 ]);
-const DEFAULT_BROWSER_CHANNEL = 'chromium';
+const DEFAULT_BROWSER_CHANNEL = 'msedge';
 const PLAYWRIGHT_BROWSER_CHANNELS = new Set(['chromium', 'chrome', 'msedge']);
 
 function parseList(value) {
@@ -55,6 +55,14 @@ function parseList(value) {
 
 function parseBrowserWorkerToken() {
   return String(process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || '').trim();
+}
+
+function getSharedBrowserRoot() {
+  return path.resolve(String(process.env.NETWORK_MCP_SHARED_BROWSER_ROOT || path.join(process.cwd(), '..', 'mcp', 'browser')).trim());
+}
+
+function getDefaultUserDataDir() {
+  return path.join(getSharedBrowserRoot(), 'profile');
 }
 
 function getManagedUserDataDir(policy = getPolicy()) {
@@ -92,6 +100,53 @@ function getBrowserMode(policy) {
   return `playwright-${policy.browserChannel}`;
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableJson(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function hashStableJson(value) {
+  return createHash('sha256').update(stableJson(value), 'utf8').digest('hex');
+}
+
+async function writeReviewScreenshot(target, prefix = 'review') {
+  const outputDir = path.join('var', 'browser');
+  await mkdir(outputDir, { recursive: true });
+  const screenshotPath = path.join(outputDir, `${prefix}-${Date.now()}.png`);
+  await target.screenshot({ path: screenshotPath, fullPage: true });
+  return screenshotPath;
+}
+
+async function getDevToolsStatus(policy = getPolicy()) {
+  if (!policy.externalVisibleChrome) {
+    return { ok: true, enabled: false, reason: 'External visible Chrome mode is disabled.' };
+  }
+
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}/json/version`;
+  try {
+    const response = await fetch(endpoint);
+    const bodyText = await response.text();
+    let parsed = null;
+    try {
+      parsed = bodyText ? JSON.parse(bodyText) : null;
+    } catch (_error) {
+      parsed = null;
+    }
+    const userAgent = parsed?.['User-Agent'] || '';
+    const product = userAgent.includes('Edg/') ? 'msedge' : userAgent.includes('Chrome/') ? 'chrome' : '';
+    return { ok: response.ok, enabled: true, endpoint, status: response.status, product, userAgent, body: bodyText };
+  } catch (error) {
+    return { ok: false, enabled: true, endpoint, error: normalizeError(error) };
+  }
+}
+
 function getPolicy() {
   const headless = String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true';
   const browserChannel = normalizeBrowserChannel(process.env.NETWORK_MCP_BROWSER_CHANNEL);
@@ -108,8 +163,9 @@ function getPolicy() {
     allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS),
     browserChannel,
-    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim(),
-    externalVisibleChrome: process.platform === 'win32' && !headless && String(process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME || 'false').toLowerCase() === 'true',
+    sharedBrowserRoot: getSharedBrowserRoot(),
+    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
+    externalVisibleChrome: process.platform === 'win32' && !headless && String(process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME || 'true').toLowerCase() === 'true',
     remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223)
   };
 }
@@ -266,6 +322,7 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       contextOpen: Boolean(browser),
       pageOpen: Boolean(activePage),
       pageCount: pages.length,
+      activePageIndex: activePage ? pages.findIndex(item => item === activePage) : null,
       currentUrl: activePage ? activePage.url() : null
     }
   };
@@ -288,6 +345,23 @@ async function getBrowserStatus() {
     browserVisible: detectedVisibleWindow,
     runtime,
     managedProcesses
+  };
+}
+
+async function getFullHealthStatus() {
+  const policy = getPolicy();
+  const browserStatus = await getBrowserStatus().catch(error => ({ ok: false, error: normalizeError(error) }));
+  const devTools = await getDevToolsStatus(policy);
+  const activePage = page && !page.isClosed() ? page : null;
+  return {
+    ok: Boolean(browserStatus.ok) && (devTools.enabled ? devTools.ok : true),
+    service: 'network-mcp-browser-worker',
+    worker: { ok: true, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), port },
+    browser: browserStatus,
+    devTools,
+    target: activePage ? { ok: true, url: activePage.url(), closed: activePage.isClosed() } : { ok: false, reason: 'No active page bound.' },
+    profile: { userDataDir: getManagedUserDataDir(policy), externalVisibleChrome: policy.externalVisibleChrome, configuredBrowserChannel: policy.browserChannel },
+    actualBrowser: devTools.enabled ? { product: devTools.product || '', userAgent: devTools.userAgent || '' } : null
   };
 }
 
@@ -573,10 +647,10 @@ async function resolveExternalBrowserExecutable() {
   }
 
   const candidates = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
   ];
 
   for (const candidate of candidates) {
@@ -585,7 +659,7 @@ async function resolveExternalBrowserExecutable() {
     }
   }
 
-  throw new Error('No supported browser executable was found. Set NETWORK_MCP_BROWSER_EXECUTABLE to chrome.exe or msedge.exe.');
+  throw new Error('No supported browser executable was found. Set NETWORK_MCP_BROWSER_EXECUTABLE to msedge.exe or chrome.exe.');
 }
 
 async function fileExists(filePath) {
@@ -720,6 +794,134 @@ async function snapshotFields(target) {
     })(),
     value: node.value || ''
   })));
+}
+
+async function snapshotSubmitCandidates(target) {
+  return target.locator('button, input[type="submit"], input[type="button"], a').evaluateAll(nodes => nodes.map((node, index) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    const style = window.getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    const tag = node.tagName.toLowerCase();
+    const type = String(node.getAttribute('type') || '').toLowerCase();
+    const text = normalize(node.innerText || node.textContent || node.getAttribute('value') || node.getAttribute('aria-label') || '');
+    const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
+    const isFinal = /submit|apply|send|confirm|finish|complete|delete|withdraw|purchase|payment/i.test(text) || type === 'submit';
+    return {
+      index,
+      tag,
+      type,
+      text,
+      name: node.getAttribute('name') || '',
+      id: node.getAttribute('id') || '',
+      ariaLabel: node.getAttribute('aria-label') || '',
+      visible: isVisible,
+      enabled: !node.disabled,
+      finalCandidate: isFinal
+    };
+  })).then(items => items.filter(item => item.visible && item.enabled && item.text));
+}
+
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture' } = {}) {
+  await ensureNotChallenge(target);
+  const fields = await snapshotFields(target);
+  const submitCandidates = await snapshotSubmitCandidates(target);
+  const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
+  const artifact = {
+    ok: true,
+    url: target.url(),
+    title: await target.title(),
+    textHash: hashChatGptSnapshotText(visibleText),
+    fields,
+    formHash: hashStableJson(fields),
+    submitCandidates
+  };
+  const reviewHash = hashStableJson({
+    url: artifact.url,
+    title: artifact.title,
+    textHash: artifact.textHash,
+    formHash: artifact.formHash,
+    submitCandidates: artifact.submitCandidates
+  });
+
+  return {
+    ...artifact,
+    reviewHash,
+    screenshot: screenshot ? await writeReviewScreenshot(target, screenshotPrefix) : null
+  };
+}
+
+async function listBrowserTargets() {
+  await ensurePage();
+  const pages = browser ? browser.pages() : [];
+  const targets = [];
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const item = pages[index];
+    targets.push({
+      index,
+      active: item === page,
+      closed: item.isClosed(),
+      url: item.isClosed() ? null : item.url(),
+      title: item.isClosed() ? null : await item.title().catch(() => null)
+    });
+  }
+
+  return { ok: true, activeIndex: targets.find(item => item.active)?.index ?? null, targets };
+}
+
+async function bindBrowserTarget({ index, url, urlContains } = {}) {
+  await ensurePage();
+  const pages = browser ? browser.pages() : [];
+  let selected = null;
+
+  if (Number.isInteger(index)) {
+    selected = pages[index] ?? null;
+  } else if (url) {
+    selected = pages.find(item => !item.isClosed() && item.url() === String(url)) ?? null;
+  } else if (urlContains) {
+    selected = pages.find(item => !item.isClosed() && item.url().includes(String(urlContains))) ?? null;
+  }
+
+  if (!selected || selected.isClosed()) {
+    throw new Error('Requested browser target was not found or is closed.');
+  }
+
+  page = selected;
+  await page.bringToFront().catch(() => {});
+  return { ok: true, bound: { index: pages.findIndex(item => item === page), url: page.url(), title: await page.title().catch(() => '') } };
+}
+
+async function waitForReadiness(target, { selector = '', state = 'domcontentloaded', timeoutMs = 15000, quietMs = 500 } = {}) {
+  const startedAt = Date.now();
+  if (state === 'selector-visible' || state === 'selector-attached') {
+    if (!selector) {
+      throw new Error(`selector is required for ${state}.`);
+    }
+    await target.locator(selector).first().waitFor({ state: state === 'selector-visible' ? 'visible' : 'attached', timeout: timeoutMs });
+  } else if (state === 'mutation-quiet') {
+    await target.evaluate(({ quietMs: browserQuietMs, timeoutMs: browserTimeoutMs }) => new Promise((resolve, reject) => {
+      let timer = window.setTimeout(done, browserQuietMs);
+      const fail = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error('Mutation quiet wait timed out.'));
+      }, browserTimeoutMs);
+      const observer = new MutationObserver(() => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(done, browserQuietMs);
+      });
+      function done() {
+        window.clearTimeout(fail);
+        observer.disconnect();
+        resolve(true);
+      }
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+    }), { quietMs, timeoutMs });
+  } else {
+    await target.waitForLoadState(state, { timeout: timeoutMs });
+  }
+
+  await ensureNotChallenge(target);
+  return { ok: true, state, selector: selector || null, elapsedMs: Date.now() - startedAt, url: target.url(), title: await target.title() };
 }
 
 async function writeField(locator, value) {
@@ -908,6 +1110,34 @@ app.post('/browser-kill', async (req, res) => {
   }
 });
 
+app.post('/health-full', async (_req, res) => {
+  try {
+    res.json(await getFullHealthStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-targets', async (_req, res) => {
+  try {
+    res.json(await listBrowserTargets());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-bind', async (req, res) => {
+  try {
+    res.json(await bindBrowserTarget({
+      index: Number.isInteger(req.body?.index) ? req.body.index : undefined,
+      url: typeof req.body?.url === 'string' ? req.body.url : undefined,
+      urlContains: typeof req.body?.urlContains === 'string' ? req.body.urlContains : undefined
+    }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
 app.post('/open-fresh', async (req, res) => {
   try {
     const policy = getPolicy();
@@ -1004,6 +1234,32 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
     const target = await ensurePage();
     await target.bringToFront().catch(() => {});
     res.json(await snapshotChatGptPage(target));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/page-capture', async (req, res) => {
+  try {
+    const target = await ensurePage();
+    await target.bringToFront().catch(() => {});
+    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/wait-for-ready', async (req, res) => {
+  try {
+    const target = await ensurePage();
+    const allowedStates = new Set(['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet']);
+    const state = allowedStates.has(req.body?.state) ? req.body.state : 'domcontentloaded';
+    res.json(await waitForReadiness(target, {
+      selector: typeof req.body?.selector === 'string' ? req.body.selector : '',
+      state,
+      timeoutMs: Number.isInteger(req.body?.timeoutMs) ? Math.min(Math.max(req.body.timeoutMs, 250), 60000) : 15000,
+      quietMs: Number.isInteger(req.body?.quietMs) ? Math.min(Math.max(req.body.quietMs, 100), 10000) : 500
+    }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
@@ -1139,13 +1395,63 @@ app.post('/review-before-submit', async (_req, res) => {
   try {
     const target = await ensurePage();
     await ensureNotChallenge(target);
-    const outputDir = path.join('var', 'browser');
-    await mkdir(outputDir, { recursive: true });
-    const screenshotPath = path.join(outputDir, `review-${Date.now()}.png`);
-    await target.screenshot({ path: screenshotPath, fullPage: true });
-    res.json({ ok: true, url: target.url(), screenshot: screenshotPath, message: 'Review manually before submit.' });
+    const artifact = await capturePageArtifact(target, { screenshot: true, screenshotPrefix: 'review' });
+    res.json({ ...artifact, message: 'Review manually before submit. Use reviewHash with submit-after-approval if the final action is approved.' });
   } catch (error) {
     res.status(409).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/submit-after-approval', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const approved = req.body?.approved === true;
+    const approvalText = String(req.body?.approvalText || '');
+    if (!policy.submitEnabled) {
+      throw new Error('Final submit is disabled. Set NETWORK_MCP_ENABLE_SUBMIT=true to enable controlled submit actions.');
+    }
+    if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
+      throw new Error('Explicit approvalText=SUBMIT is required for final submit actions.');
+    }
+
+    const target = await ensurePage();
+    await ensureNotChallenge(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
+    const expectedReviewHash = String(req.body?.reviewHash || '').trim();
+    if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
+      throw new Error('Current page reviewHash does not match the approved reviewHash. Capture a fresh review artifact before submitting.');
+    }
+
+    const text = String(req.body?.text || '').trim();
+    const selector = String(req.body?.selector || '').trim();
+    const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
+    let locator;
+    if (selector) {
+      locator = target.locator(selector);
+    } else if (text) {
+      locator = target.getByRole('button', { name: text, exact: true });
+      if (await locator.count() === 0) {
+        locator = target.getByRole('link', { name: text, exact: true });
+      }
+      if (await locator.count() === 0) {
+        locator = target.getByText(text, { exact: true });
+      }
+    } else {
+      locator = target.locator('button[type="submit"], input[type="submit"]').first();
+    }
+
+    const count = await locator.count();
+    if (count <= nth) {
+      throw new Error(`Submit target not found. Matches: ${count}. Requested index: ${nth}.`);
+    }
+
+    await locator.nth(nth).click();
+    await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+    await ensureNotChallenge(target);
+    const after = await capturePageArtifact(target, { screenshot: false });
+    res.json({ ok: true, action: 'submit_after_approval', clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
   }
 });
 

@@ -5,6 +5,10 @@ param(
         'doctor',
         'doctor-json',
         'status',
+        'runtime-doctor',
+        'runtime-recover',
+        'watch-tick',
+        'watch-status',
         'start',
         'stop',
         'start-visible-worker',
@@ -53,8 +57,16 @@ $NamedTunnelLogFile = Join-Path $LogDir 'cloudflared-named.log'
 $NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
 $StartupTaskName = 'network-mcp-dev'
 $StartupTaskPath = '\'
+$RuntimeStateFile = Join-Path $RunDir 'network-runtime.json'
+$WatchdogStateFile = Join-Path $RunDir 'network-watchdog-state.json'
+$WatchdogLogFile = Join-Path $LogDir 'network-watchdog.ndjson'
 $DefaultMcpPublicOrigin = 'https://network-mcp.taa0662621456.workers.dev'
 $LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
+$DefaultSharedBrowserRoot = Join-Path (Split-Path -Parent $Root) 'mcp\browser'
+$DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
+$DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
+$DefaultSharedBrowserLogDir = Join-Path $DefaultSharedBrowserRoot 'log'
+$SharedBrowserRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-runtime.json'
 
 function Test-LegacySmartresponsorOrigin {
     param([AllowNull()][string]$Value)
@@ -92,6 +104,29 @@ function Get-NpmCommand {
 
 function Get-PwshCommand {
     return (Get-Command pwsh -ErrorAction Stop)
+}
+
+function Ensure-SharedBrowserEnvironment {
+    if (-not $env:NETWORK_MCP_SHARED_BROWSER_ROOT) {
+        $env:NETWORK_MCP_SHARED_BROWSER_ROOT = $DefaultSharedBrowserRoot
+    }
+
+    if (-not $env:NETWORK_MCP_USER_DATA_DIR) {
+        $env:NETWORK_MCP_USER_DATA_DIR = $DefaultSharedBrowserProfile
+    }
+
+    if (-not $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME) {
+        $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = 'true'
+    }
+
+    if (-not $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT) {
+        $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT = '9223'
+    }
+
+    New-Item -ItemType Directory -Force -Path $env:NETWORK_MCP_SHARED_BROWSER_ROOT | Out-Null
+    New-Item -ItemType Directory -Force -Path $env:NETWORK_MCP_USER_DATA_DIR | Out-Null
+    New-Item -ItemType Directory -Force -Path $DefaultSharedBrowserRunDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $DefaultSharedBrowserLogDir | Out-Null
 }
 
 function Get-WorkerPort {
@@ -566,6 +601,7 @@ function Install-NamedTunnelService {
 
 function Start-Worker {
     Ensure-Directories
+    Ensure-SharedBrowserEnvironment
 
     $state = Get-WorkerState
     if ($state.running) {
@@ -1079,7 +1115,276 @@ function Invoke-PublicSmoke {
     } | ConvertTo-Json -Depth 8
 }
 
+function ConvertTo-HealthCheckResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][bool]$Ok,
+        [AllowNull()][string]$Reason = $null,
+        [AllowNull()][object]$Detail = $null
+    )
+
+    [pscustomobject]@{
+        name = $Name
+        ok = $Ok
+        state = if ($Ok) { 'READY' } else { 'DEGRADED' }
+        reason = $Reason
+        detail = $Detail
+    }
+}
+
+function Resolve-RuntimeVerdict {
+    param(
+        [Parameter(Mandatory = $true)][object]$WorkerState,
+        [Parameter(Mandatory = $true)][object]$McpState,
+        [Parameter(Mandatory = $true)][object]$BrowserStatus,
+        [Parameter(Mandatory = $true)][object]$McpSmoke,
+        [Parameter(Mandatory = $true)][object]$PublicSmoke,
+        [Parameter(Mandatory = $true)][object]$NamedTunnelState,
+        [Parameter(Mandatory = $true)][object]$Policy
+    )
+
+    $checks = [ordered]@{}
+    $checks['worker'] = ConvertTo-HealthCheckResult -Name 'worker' -Ok ([bool]($WorkerState.running -and -not $WorkerState.port_conflict)) -Reason $(if ($WorkerState.port_conflict) { 'WORKER_PORT_CONFLICT' } elseif (-not $WorkerState.running) { 'WORKER_DOWN' } else { $null }) -Detail $WorkerState
+    $checks['mcp'] = ConvertTo-HealthCheckResult -Name 'mcp-server' -Ok ([bool]($McpState.running -and -not $McpState.port_conflict)) -Reason $(if ($McpState.port_conflict) { 'MCP_PORT_CONFLICT' } elseif (-not $McpState.running) { 'MCP_SERVER_DOWN' } else { $null }) -Detail $McpState
+    $checks['browser'] = ConvertTo-HealthCheckResult -Name 'browser' -Ok ([bool]($BrowserStatus.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserStatus.ok) { 'BROWSER_STATUS_FAILED' } else { $null }) -Detail $BrowserStatus
+    $browserBody = $BrowserStatus.body
+    $browserRuntime = $browserBody.runtime.browser
+    $browserPolicy = $browserBody.runtime.policy
+    $browserConfiguredVisible = [bool]($browserBody -and $browserBody.configuredVisible -eq $true)
+    $browserDetectedVisible = [bool]($browserBody -and ($browserBody.detectedVisibleWindow -eq $true -or $browserBody.browserVisible -eq $true))
+    $externalCdpAttached = [bool]($BrowserStatus.ok -and $browserPolicy.externalVisibleChrome -eq $true -and $browserRuntime.contextOpen -eq $true -and $browserRuntime.pageCount -gt 0)
+    $browserVisibilityOk = [bool]((-not $browserConfiguredVisible) -or $browserDetectedVisible -or $externalCdpAttached)
+    $browserVisibilityReason = if (-not $browserVisibilityOk) { 'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' } elseif ($externalCdpAttached -and -not $browserDetectedVisible) { 'EXTERNAL_CDP_ATTACHED_WINDOW_OWNER_NOT_DETECTED' } else { $null }
+    $checks['browserVisibility'] = ConvertTo-HealthCheckResult -Name 'browser-visibility' -Ok $browserVisibilityOk -Reason $browserVisibilityReason -Detail ([pscustomobject]@{ configured_visible = $browserConfiguredVisible; detected_visible = $browserDetectedVisible; external_cdp_attached = $externalCdpAttached; page_count = $browserRuntime.pageCount; current_url = $browserRuntime.currentUrl; browser = $BrowserStatus })
+    $checks['mcpSmoke'] = ConvertTo-HealthCheckResult -Name 'mcp-smoke' -Ok ([bool]($McpSmoke.ok)) -Reason $(if (-not $McpState.running) { 'MCP_SMOKE_SKIPPED_SERVER_DOWN' } elseif (-not $McpSmoke.ok) { 'MCP_SMOKE_FAILED' } else { $null }) -Detail $McpSmoke
+
+    $publicConfigured = -not [string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)
+    $checks['public'] = ConvertTo-HealthCheckResult -Name 'public' -Ok ([bool]((-not $publicConfigured) -or $PublicSmoke.ok)) -Reason $(if ($publicConfigured -and -not $PublicSmoke.ok) { 'PUBLIC_SMOKE_FAILED' } else { $null }) -Detail $PublicSmoke
+
+    $namedTunnelRequired = -not [string]::IsNullOrWhiteSpace((Get-NamedTunnelHostname))
+    $checks['namedTunnel'] = ConvertTo-HealthCheckResult -Name 'named-tunnel' -Ok ([bool]((-not $namedTunnelRequired) -or $NamedTunnelState.running)) -Reason $(if ($namedTunnelRequired -and -not $NamedTunnelState.running) { 'NAMED_TUNNEL_DOWN' } else { $null }) -Detail $NamedTunnelState
+    $checks['policy'] = ConvertTo-HealthCheckResult -Name 'policy' -Ok ([bool]($Policy.warnings.Count -eq 0)) -Reason $(if ($Policy.warnings.Count -gt 0) { 'POLICY_WARNINGS' } else { $null }) -Detail $Policy
+
+    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $softFailure = @($checks['browserVisibility'], $checks['public'], $checks['namedTunnel'], $checks['policy']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $primaryFailure = if ($hardFailure) { $hardFailure } else { $softFailure }
+    $recommendedAction = 'NONE'
+
+    if ($primaryFailure) {
+        switch ($primaryFailure.reason) {
+            'WORKER_DOWN' { $recommendedAction = 'START_WORKER' }
+            'WORKER_PORT_CONFLICT' { $recommendedAction = 'STOP_CONFLICTING_WORKER_PORT_PROCESS' }
+            'MCP_SERVER_DOWN' { $recommendedAction = 'START_MCP_SERVER' }
+            'MCP_PORT_CONFLICT' { $recommendedAction = 'STOP_CONFLICTING_MCP_PORT_PROCESS' }
+            'BROWSER_STATUS_FAILED' { $recommendedAction = 'RESTART_WORKER' }
+            'MCP_SMOKE_FAILED' { $recommendedAction = 'RESTART_MCP_SERVER' }
+            'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' { $recommendedAction = 'START_VISIBLE_BROWSER_OR_ENABLE_EXTERNAL_CHROME' }
+            'PUBLIC_SMOKE_FAILED' { $recommendedAction = 'CHECK_PUBLIC_ORIGIN_OR_TUNNEL' }
+            'NAMED_TUNNEL_DOWN' { $recommendedAction = 'START_NAMED_TUNNEL' }
+            default { $recommendedAction = 'INSPECT_RUNTIME' }
+        }
+    }
+
+    [pscustomobject]@{
+        ok = -not [bool]$primaryFailure
+        state = if (-not $primaryFailure) { 'READY' } elseif ($hardFailure) { 'FAILED' } else { 'DEGRADED' }
+        reason = if ($primaryFailure) { $primaryFailure.reason } else { $null }
+        recommended_action = $recommendedAction
+        checks = $checks
+    }
+}
+
+function Get-RuntimeDoctorSnapshot {
+    Ensure-Directories
+    Ensure-SharedBrowserEnvironment
+    $workerState = Get-WorkerState
+    $mcpState = Get-McpState
+    $policy = Get-PolicyState
+    $browserStatus = Invoke-WorkerBrowserStatus
+    $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
+    $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
+    $namedTunnelState = Get-NamedTunnelState
+    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
+
+    [pscustomobject]@{
+        ok = $verdict.ok
+        state = $verdict.state
+        reason = $verdict.reason
+        recommended_action = $verdict.recommended_action
+        timestamp = (Get-Date).ToUniversalTime().ToString('o')
+        repo_root = $Root
+        browser_runtime = [pscustomobject]@{
+            root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
+            profile = $env:NETWORK_MCP_USER_DATA_DIR
+            mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
+            port = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
+        }
+        runtime_file = $RuntimeStateFile
+        watchdog_state_file = $WatchdogStateFile
+        watchdog_log_file = $WatchdogLogFile
+        worker = $workerState
+        mcp = $mcpState
+        browser = $browserStatus
+        mcp_smoke = $mcpSmoke
+        public_smoke = $publicSmoke
+        named_tunnel = $namedTunnelState
+        policy = $policy
+        checks = $verdict.checks
+    }
+}
+
+function Save-SharedBrowserRuntimeSnapshot {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+
+    Ensure-SharedBrowserEnvironment
+    $browserBody = $Snapshot.browser.body
+    $browserRuntime = $browserBody.runtime.browser
+    $browserPolicy = $browserBody.runtime.policy
+    $visibilityCheck = $Snapshot.checks.browserVisibility.detail
+    $cdpVersion = $null
+    try {
+        $cdpVersion = Invoke-RestMethod -Method Get -Uri ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT + '/json/version') -TimeoutSec 3
+    } catch {
+        $cdpVersion = $null
+    }
+    $actualUserAgent = if ($cdpVersion -and $cdpVersion.'User-Agent') { [string]$cdpVersion.'User-Agent' } else { '' }
+    $actualProduct = if ($actualUserAgent -match 'Edg/') { 'msedge' } elseif ($actualUserAgent -match 'Chrome/') { 'chrome' } else { '' }
+    $registry = [pscustomobject]@{
+        ok = $Snapshot.ok
+        state = if ($visibilityCheck.external_cdp_attached) { 'ATTACHED' } elseif ($browserBody.ok) { 'DEGRADED' } else { 'FAILED' }
+        owner = 'shared-browser-runtime'
+        preferred_product = 'msedge'
+        fallback_product = 'chrome'
+        actual_product = $actualProduct
+        actual_user_agent = $actualUserAgent
+        cdp_endpoint = ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT)
+        root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
+        profile = $env:NETWORK_MCP_USER_DATA_DIR
+        page_count = $browserRuntime.pageCount
+        current_url = $browserRuntime.currentUrl
+        context_open = $browserRuntime.contextOpen
+        page_open = $browserRuntime.pageOpen
+        visible_window_detected = $visibilityCheck.detected_visible
+        external_cdp_attached = $visibilityCheck.external_cdp_attached
+        updated_at = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $SharedBrowserRuntimeFile -Encoding utf8
+}
+
+function Save-RuntimeSnapshot {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+
+    Ensure-Directories
+    $Snapshot | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $RuntimeStateFile -Encoding utf8
+    Save-SharedBrowserRuntimeSnapshot -Snapshot $Snapshot
+}
+
+function Show-RuntimeDoctor {
+    $snapshot = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $snapshot
+    $json = $snapshot | ConvertTo-Json -Depth 12
+    Write-Output $json
+    if (-not $snapshot.ok) {
+        if ($snapshot.state -eq 'FAILED') {
+            exit 2
+        }
+        exit 1
+    }
+}
+
+function Invoke-RuntimeRecover {
+    Ensure-Directories
+    $before = Get-RuntimeDoctorSnapshot
+    $actions = @()
+
+    switch ($before.recommended_action) {
+        'START_WORKER' {
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
+        }
+        'START_MCP_SERVER' {
+            Start-Worker | Out-Null
+            $actions += [pscustomobject]@{ action = 'START_MCP_SERVER'; result = (Start-McpServer | ConvertFrom-Json) }
+        }
+        'RESTART_WORKER' {
+            $actions += [pscustomobject]@{ action = 'STOP_WORKER'; result = (Stop-Worker | ConvertFrom-Json) }
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
+        }
+        'RESTART_MCP_SERVER' {
+            $actions += [pscustomobject]@{ action = 'STOP_MCP_SERVER'; result = (Stop-McpServer | ConvertFrom-Json) }
+            Start-Worker | Out-Null
+            $actions += [pscustomobject]@{ action = 'START_MCP_SERVER'; result = (Start-McpServer | ConvertFrom-Json) }
+        }
+        'START_NAMED_TUNNEL' {
+            $actions += [pscustomobject]@{ action = 'START_NAMED_TUNNEL'; result = (Start-NamedTunnel | ConvertFrom-Json) }
+        }
+        'START_VISIBLE_BROWSER_OR_ENABLE_EXTERNAL_CHROME' {
+            $actions += [pscustomobject]@{ action = 'NO_AUTOMATIC_VISIBLE_BROWSER_RECOVERY'; reason = 'Visible browser requires interactive Windows session or NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true.' }
+        }
+        default {
+            $actions += [pscustomobject]@{ action = 'NO_AUTOMATIC_RECOVERY'; reason = $before.reason; recommended_action = $before.recommended_action }
+        }
+    }
+
+    $after = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $after
+
+    [pscustomobject]@{
+        ok = $after.ok
+        state = $after.state
+        reason = $after.reason
+        before = $before
+        actions = $actions
+        after = $after
+    } | ConvertTo-Json -Depth 12
+}
+
+function Invoke-WatchTick {
+    Ensure-Directories
+    $before = Get-RuntimeDoctorSnapshot
+    $recovery = $null
+    if (-not $before.ok) {
+        $recovery = Invoke-RuntimeRecover | ConvertFrom-Json
+    }
+    $after = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $after
+
+    $tick = [pscustomobject]@{
+        ts = (Get-Date).ToUniversalTime().ToString('o')
+        ok = $after.ok
+        state = $after.state
+        reason = $after.reason
+        recommended_action = $after.recommended_action
+        before_state = $before.state
+        before_reason = $before.reason
+        recovery = $recovery
+    }
+
+    ($tick | ConvertTo-Json -Depth 12 -Compress) | Add-Content -LiteralPath $WatchdogLogFile -Encoding utf8
+    $tick | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $WatchdogStateFile -Encoding utf8
+    return ($tick | ConvertTo-Json -Depth 12)
+}
+
+function Show-WatchStatus {
+    Ensure-Directories
+    $state = $null
+    if (Test-Path -LiteralPath $WatchdogStateFile) {
+        try {
+            $state = Get-Content -LiteralPath $WatchdogStateFile -Raw | ConvertFrom-Json
+        } catch {
+            $state = Get-Content -LiteralPath $WatchdogStateFile -Raw
+        }
+    }
+
+    [pscustomobject]@{
+        ok = [bool]$state
+        state_file = $WatchdogStateFile
+        log_file = $WatchdogLogFile
+        last_tick = $state
+    } | ConvertTo-Json -Depth 12
+}
+
 function Show-Status {
+    Ensure-SharedBrowserEnvironment
     $workerState = Get-WorkerState
     $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
@@ -1287,12 +1592,19 @@ switch ($Command) {
     'doctor' { Show-Doctor }
     'doctor-json' { Show-DoctorJson }
     'status' { Show-Status }
+    'runtime-doctor' { Show-RuntimeDoctor }
+    'runtime-recover' { Invoke-RuntimeRecover }
+    'watch-tick' { Invoke-WatchTick }
+    'watch-status' { Show-WatchStatus }
     'start' { Start-Stack }
     'start-visible-worker' { & (Join-Path $Root 'tool\start-visible-worker.cmd') }
     'stop' { Stop-Stack }
     'restart' {
         Stop-Stack | Out-Null
-        Start-Stack
+        Start-Stack | Out-Null
+        $snapshot = Get-RuntimeDoctorSnapshot
+        Save-RuntimeSnapshot -Snapshot $snapshot
+        $snapshot | ConvertTo-Json -Depth 12
     }
     'start-mcp' { Start-McpServer }
     'stop-mcp' { Stop-McpServer }

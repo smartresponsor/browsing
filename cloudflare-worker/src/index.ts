@@ -28,6 +28,40 @@ type McpTool = {
 
 const MCP_TOOLS: McpTool[] = [
   {
+    name: 'network.health_full',
+    description: 'Run deep supervised browser diagnostics including worker, browser, target, profile, and DevTools reachability.',
+    route: '/health-full',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.browser_targets',
+    description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
+    route: '/browser-targets',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.browser_bind',
+    description: 'Bind the supervised worker to a specific browser page by index, exact URL, or URL fragment.',
+    route: '/browser-bind',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer', minimum: 0 },
+        url: { type: 'string' },
+        urlContains: { type: 'string' }
+      }
+    }
+  },
+  {
     name: 'network.open',
     description: 'Open a target URL in the supervised browser worker.',
     route: '/open',
@@ -64,6 +98,33 @@ const MCP_TOOLS: McpTool[] = [
         text: { type: 'string' },
         selector: { type: 'string' },
         nth: { type: 'integer', minimum: 0 }
+      }
+    }
+  },
+  {
+    name: 'network.page_capture',
+    description: 'Capture the current page URL, title, visible text hash, form hash, submit candidates, and optional screenshot review artifact.',
+    route: '/page-capture',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        screenshot: { type: 'boolean' }
+      }
+    }
+  },
+  {
+    name: 'network.wait_for_ready',
+    description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, network idle, or mutation quietness.',
+    route: '/wait-for-ready',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        selector: { type: 'string' },
+        state: { type: 'string', enum: ['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet'] },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 60000 },
+        quietMs: { type: 'integer', minimum: 100, maximum: 10000 }
       }
     }
   },
@@ -135,6 +196,24 @@ const MCP_TOOLS: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {}
+    }
+  },
+  {
+    name: 'network.submit_after_approval',
+    description: 'Perform a final submit/destructive click only after explicit approval and optional review snapshot hash validation.',
+    route: '/submit-after-approval',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        approved: { type: 'boolean' },
+        approvalText: { type: 'string' },
+        reviewHash: { type: 'string' },
+        text: { type: 'string' },
+        selector: { type: 'string' },
+        nth: { type: 'integer', minimum: 0 }
+      },
+      required: ['approved', 'approvalText']
     }
   }
 ];
