@@ -409,6 +409,34 @@ async function getSharedBrowserRuntimeStatus() {
   };
 }
 
+async function listRawCdpTargets(policy = getPolicy()) {
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
+  const response = await fetch(`${endpoint}/json/list`, {
+    signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+  });
+  const rawTargets = await response.json();
+  const targets = Array.isArray(rawTargets) ? rawTargets.map((target, index) => ({
+    index,
+    id: typeof target?.id === 'string' ? target.id : '',
+    type: typeof target?.type === 'string' ? target.type : '',
+    title: typeof target?.title === 'string' ? target.title : '',
+    url: typeof target?.url === 'string' ? target.url : '',
+    attached: Boolean(target?.attached),
+    webSocketDebuggerUrl: typeof target?.webSocketDebuggerUrl === 'string' ? target.webSocketDebuggerUrl : ''
+  })) : [];
+
+  return {
+    ok: response.ok,
+    service: 'network-mcp-browser-worker',
+    endpoint,
+    status: response.status,
+    timeoutMs,
+    count: targets.length,
+    targets
+  };
+}
+
 async function restartBrowserSession({ force = false, reopen = true, reason = '' } = {}) {
   const policy = getPolicy();
   const before = await getBrowserStatus();
@@ -1080,6 +1108,14 @@ app.post('/health-full', async (_req, res) => {
 app.post('/shared-browser-status', async (_req, res) => {
   try {
     res.json(await getSharedBrowserRuntimeStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-targets', async (_req, res) => {
+  try {
+    res.json(await listRawCdpTargets());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }

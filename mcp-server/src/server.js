@@ -173,6 +173,15 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.browser_cdp_targets',
+    {
+      description: 'List raw shared browser CDP targets without attaching through Playwright or opening pages.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.browser_cdp_targets', {}))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
