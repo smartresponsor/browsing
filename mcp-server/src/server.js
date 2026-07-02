@@ -164,6 +164,15 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.shared_browser_status',
+    {
+      description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.shared_browser_status', {}))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',

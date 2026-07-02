@@ -2,7 +2,7 @@
 import { chromium } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'fs/promises';
+import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'node:util';
 
@@ -63,6 +63,10 @@ function getSharedBrowserRoot() {
 
 function getDefaultUserDataDir() {
   return path.join(getSharedBrowserRoot(), 'profile');
+}
+
+function getSharedBrowserRuntimeFile(policy = getPolicy()) {
+  return path.join(policy.sharedBrowserRoot, 'run', 'browser-runtime.json');
 }
 
 function getManagedUserDataDir(policy = getPolicy()) {
@@ -362,6 +366,35 @@ async function getFullHealthStatus() {
     target: activePage ? { ok: true, url: activePage.url(), closed: activePage.isClosed() } : { ok: false, reason: 'No active page bound.' },
     profile: { userDataDir: getManagedUserDataDir(policy), externalVisibleChrome: policy.externalVisibleChrome, configuredBrowserChannel: policy.browserChannel },
     actualBrowser: devTools.enabled ? { product: devTools.product || '', userAgent: devTools.userAgent || '' } : null
+  };
+}
+
+async function getSharedBrowserRuntimeStatus() {
+  const policy = getPolicy();
+  const runtimeFile = getSharedBrowserRuntimeFile(policy);
+  let registry = null;
+  let registryError = '';
+
+  try {
+    registry = JSON.parse(await readFile(runtimeFile, 'utf8'));
+  } catch (error) {
+    registryError = normalizeError(error);
+  }
+
+  const devTools = await getDevToolsStatus(policy);
+  const attached = Boolean(devTools.ok && browser && browser.pages().length > 0);
+  return {
+    ok: Boolean(registry?.ok || attached),
+    service: 'network-mcp-browser-worker',
+    runtimeFile,
+    registry: registry || null,
+    registryError: registry ? null : registryError,
+    live: {
+      attached,
+      pageCount: browser ? browser.pages().length : 0,
+      activeUrl: page && !page.isClosed() ? page.url() : null,
+      cdp: devTools
+    }
   };
 }
 
@@ -1113,6 +1146,14 @@ app.post('/browser-kill', async (req, res) => {
 app.post('/health-full', async (_req, res) => {
   try {
     res.json(await getFullHealthStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/shared-browser-status', async (_req, res) => {
+  try {
+    res.json(await getSharedBrowserRuntimeStatus());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }

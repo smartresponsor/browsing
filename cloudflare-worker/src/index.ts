@@ -38,6 +38,16 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.shared_browser_status',
+    description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
+    route: '/shared-browser-status',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
     name: 'network.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',
