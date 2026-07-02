@@ -1627,8 +1627,5 @@ function sanitizeProcessInfo(item) {
 const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
 app.listen(port, '127.0.0.1', () => {
   console.log(`Network browser worker listening on http://127.0.0.1:${port}`);
-  ensurePage().catch(error => {
-    console.warn(`Startup browser open failed. ${normalizeError(error)}`);
-  });
 });
 
