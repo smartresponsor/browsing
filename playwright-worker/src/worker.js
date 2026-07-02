@@ -177,7 +177,8 @@ function getPolicy() {
     userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
-    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223)
+    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223),
+    externalAttachTimeoutMs: Number(process.env.NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 5000)
   };
 }
 
@@ -321,7 +322,8 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       maxFieldWrites: policy.maxFieldWrites,
       externalVisibleBrowser: policy.externalVisibleBrowser,
       externalVisibleChrome: policy.externalVisibleChrome,
-      remoteDebuggingPort: policy.remoteDebuggingPort
+      remoteDebuggingPort: policy.remoteDebuggingPort,
+      externalAttachTimeoutMs: policy.externalAttachTimeoutMs
     },
     session: {
       startedAt: sessionStartedAt ? new Date(sessionStartedAt).toISOString() : null,
@@ -590,10 +592,12 @@ async function ensurePage() {
   return page;
 }
 
-async function connectToExistingCdpEndpoint(endpoint) {
+async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 5000) {
   let connectEndpoint = endpoint;
   try {
-    const versionResponse = await fetch(`${endpoint.replace(/\/$/, '')}/json/version`);
+    const versionResponse = await fetch(`${endpoint.replace(/\/$/, '')}/json/version`, {
+      signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+    });
     const version = await versionResponse.json();
     if (typeof version.webSocketDebuggerUrl === 'string' && version.webSocketDebuggerUrl.trim()) {
       connectEndpoint = version.webSocketDebuggerUrl.trim();
@@ -602,17 +606,18 @@ async function connectToExistingCdpEndpoint(endpoint) {
     connectEndpoint = endpoint;
   }
 
-  const cdpBrowser = await chromium.connectOverCDP(connectEndpoint);
+  const cdpBrowser = await chromium.connectOverCDP(connectEndpoint, { timeout: Math.max(250, timeoutMs) });
   const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
   return { connectedBrowser: cdpBrowser, context };
 }
 
 async function connectExternalVisibleChrome(policy, _userDataDir) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
   try {
-    return await connectToExistingCdpEndpoint(endpoint);
+    return await connectToExistingCdpEndpoint(endpoint, timeoutMs);
   } catch (error) {
-    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint}. ${normalizeError(error)}`);
+    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint} within ${timeoutMs} ms. ${normalizeError(error)}`);
   }
 }
 
