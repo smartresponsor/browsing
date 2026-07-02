@@ -409,6 +409,39 @@ async function getSharedBrowserRuntimeStatus() {
   };
 }
 
+function classifyRawCdpTarget(target) {
+  const type = typeof target?.type === 'string' ? target.type : '';
+  const rawUrl = typeof target?.url === 'string' ? target.url : '';
+  let url = null;
+  try {
+    url = new URL(rawUrl);
+  } catch (_error) {
+    url = null;
+  }
+
+  const host = url?.hostname.toLowerCase() || '';
+  const isChatGpt = host === 'chatgpt.com' || host.endsWith('.chatgpt.com');
+  const isPage = type === 'page';
+  const isChatGptHome = Boolean(isPage && isChatGpt && url.pathname === '/' && !url.search && !url.hash);
+  const isChatGptConversation = Boolean(isPage && isChatGpt && /^\/c\/[^/]+/.test(url.pathname));
+
+  return {
+    isChatGpt,
+    isPage,
+    isChatGptHome,
+    isChatGptConversation,
+    category: isChatGptHome
+      ? 'chatgpt-home'
+      : isChatGptConversation
+        ? 'chatgpt-conversation'
+        : isChatGpt
+          ? 'chatgpt-other'
+          : type || 'unknown',
+    rawCleanupCandidate: isChatGptHome,
+    cleanupSafety: isChatGptHome ? 'raw-candidate-only-dom-not-verified' : 'not-candidate'
+  };
+}
+
 async function listRawCdpTargets(policy = getPolicy()) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
   const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
@@ -416,15 +449,23 @@ async function listRawCdpTargets(policy = getPolicy()) {
     signal: AbortSignal.timeout(Math.max(250, timeoutMs))
   });
   const rawTargets = await response.json();
-  const targets = Array.isArray(rawTargets) ? rawTargets.map((target, index) => ({
-    index,
-    id: typeof target?.id === 'string' ? target.id : '',
-    type: typeof target?.type === 'string' ? target.type : '',
-    title: typeof target?.title === 'string' ? target.title : '',
-    url: typeof target?.url === 'string' ? target.url : '',
-    attached: Boolean(target?.attached),
-    webSocketDebuggerUrl: typeof target?.webSocketDebuggerUrl === 'string' ? target.webSocketDebuggerUrl : ''
-  })) : [];
+  const targets = Array.isArray(rawTargets) ? rawTargets.map((target, index) => {
+    const classification = classifyRawCdpTarget(target);
+    return {
+      index,
+      id: typeof target?.id === 'string' ? target.id : '',
+      type: typeof target?.type === 'string' ? target.type : '',
+      title: typeof target?.title === 'string' ? target.title : '',
+      url: typeof target?.url === 'string' ? target.url : '',
+      attached: Boolean(target?.attached),
+      classification,
+      webSocketDebuggerUrl: typeof target?.webSocketDebuggerUrl === 'string' ? target.webSocketDebuggerUrl : ''
+    };
+  }) : [];
+  const chatGptTargets = targets.filter(target => target.classification.isChatGpt);
+  const chatGptHomeTargets = targets.filter(target => target.classification.isChatGptHome);
+  const chatGptConversationTargets = targets.filter(target => target.classification.isChatGptConversation);
+  const rawCleanupCandidates = targets.filter(target => target.classification.rawCleanupCandidate);
 
   return {
     ok: response.ok,
@@ -433,6 +474,14 @@ async function listRawCdpTargets(policy = getPolicy()) {
     status: response.status,
     timeoutMs,
     count: targets.length,
+    chatGptInventory: {
+      chatGptTargetCount: chatGptTargets.length,
+      chatGptHomeTargetCount: chatGptHomeTargets.length,
+      chatGptConversationTargetCount: chatGptConversationTargets.length,
+      rawCleanupCandidateCount: rawCleanupCandidates.length,
+      rawCleanupCandidateIndexes: rawCleanupCandidates.map(target => target.index),
+      safety: 'read-only-raw-cdp-inventory; cleanup still requires DOM/draft verification before close'
+    },
     targets
   };
 }
