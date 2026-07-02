@@ -182,6 +182,20 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.browser_cdp_verify_chatgpt_home',
+    {
+      description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
+      inputSchema: z.object({
+        index: z.number().int().nonnegative().optional(),
+        id: z.string().optional(),
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ index, id, maxVerify, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_verify_chatgpt_home', { index, id, maxVerify, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',

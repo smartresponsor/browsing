@@ -442,6 +442,127 @@ function classifyRawCdpTarget(target) {
   };
 }
 
+async function evaluateRawCdpTarget(target, expression, timeoutMs = 5000) {
+  const webSocketDebuggerUrl = String(target?.webSocketDebuggerUrl || '').trim();
+  if (!webSocketDebuggerUrl) {
+    throw new Error('Target does not expose webSocketDebuggerUrl.');
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let socket = null;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { socket?.close(); } catch (_error) {}
+      reject(new Error(`Timed out while evaluating raw CDP target after ${timeoutMs} ms.`));
+    }, Math.max(250, timeoutMs));
+
+    function finish(callback, value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket?.close(); } catch (_error) {}
+      callback(value);
+    }
+
+    try {
+      socket = new WebSocket(webSocketDebuggerUrl);
+      socket.addEventListener('open', () => {
+        socket.send(JSON.stringify({
+          id: 1,
+          method: 'Runtime.evaluate',
+          params: { expression, awaitPromise: true, returnByValue: true }
+        }));
+      });
+      socket.addEventListener('message', event => {
+        let payload = null;
+        try { payload = JSON.parse(String(event.data || '')); } catch (_error) { return; }
+        if (payload?.id !== 1) return;
+        if (payload.error) {
+          finish(reject, new Error(payload.error.message || 'Raw CDP Runtime.evaluate failed.'));
+          return;
+        }
+        const exceptionText = payload?.result?.exceptionDetails?.text;
+        if (exceptionText) {
+          finish(reject, new Error(exceptionText));
+          return;
+        }
+        finish(resolve, payload?.result?.result?.value ?? null);
+      });
+      socket.addEventListener('error', () => finish(reject, new Error('Raw CDP target WebSocket failed.')));
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
+}
+
+function buildChatGptHomeVerificationExpression() {
+  return `(() => {
+    const normalize = value => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = node => {
+      if (!node) return false;
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
+    };
+    const selectors = ['#prompt-textarea', '[data-testid="composer-root"] textarea', 'textarea', '[contenteditable="true"]', '.ProseMirror'];
+    const nodes = Array.from(new Set(selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)))));
+    const composerNodes = nodes.filter(visible).map((node, index) => ({
+      index,
+      tag: node.tagName.toLowerCase(),
+      id: node.id || '',
+      ariaLabel: node.getAttribute('aria-label') || '',
+      text: normalize(node.value || node.innerText || node.textContent || ''),
+      placeholder: node.getAttribute('placeholder') || ''
+    }));
+    const composerText = normalize(composerNodes.map(item => item.text).join(' '));
+    const buttons = Array.from(document.querySelectorAll('button')).filter(visible).map(button => normalize(button.innerText || button.textContent || button.getAttribute('aria-label') || '')).filter(Boolean).slice(0, 80);
+    const isStreaming = buttons.some(text => /stop|cancel|pause/i.test(text)) || Boolean(document.querySelector('[data-testid*="stop"], [aria-label*="Stop"], [aria-label*="stop"]'));
+    const pathname = window.location.pathname || '';
+    const isConversation = /^\\/c\\/[^/]+/.test(pathname);
+    const isHomeUrl = window.location.hostname === 'chatgpt.com' && pathname === '/' && !window.location.search && !window.location.hash;
+    return {
+      ok: true,
+      url: window.location.href || '',
+      title: document.title || '',
+      pathname,
+      isHomeUrl,
+      isConversation,
+      composerNodeCount: composerNodes.length,
+      composerTextLength: composerText.length,
+      composerTextPreview: composerText.slice(0, 200),
+      isStreaming,
+      buttonTexts: buttons,
+      verifiedEmptyHome: Boolean(isHomeUrl && !isConversation && composerText.length === 0 && !isStreaming),
+      safety: 'read-only-dom-verification-no-write-no-click-no-close'
+    };
+  })()`;
+}
+
+async function verifyChatGptHomeTarget(target, timeoutMs = 5000) {
+  const classification = target?.classification || classifyRawCdpTarget(target);
+  if (!classification.isChatGptHome) {
+    return {
+      ok: true,
+      verifiedEmptyHome: false,
+      reason: 'not-chatgpt-home-candidate',
+      target: { index: target.index, id: target.id, url: target.url, title: target.title },
+      classification
+    };
+  }
+
+  const dom = await evaluateRawCdpTarget(target, buildChatGptHomeVerificationExpression(), timeoutMs);
+  return {
+    ok: Boolean(dom?.ok),
+    verifiedEmptyHome: Boolean(dom?.verifiedEmptyHome),
+    reason: dom?.verifiedEmptyHome ? 'verified-empty-chatgpt-home' : 'dom-verification-not-empty-or-unsafe',
+    target: { index: target.index, id: target.id, url: target.url, title: target.title },
+    classification,
+    dom
+  };
+}
+
 async function listRawCdpTargets(policy = getPolicy()) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
   const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
@@ -1165,6 +1286,37 @@ app.post('/shared-browser-status', async (_req, res) => {
 app.post('/browser-cdp-targets', async (_req, res) => {
   try {
     res.json(await listRawCdpTargets());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
+  try {
+    const inventory = await listRawCdpTargets();
+    const timeoutMs = Number.isInteger(req.body?.timeoutMs) ? Math.min(Math.max(req.body.timeoutMs, 250), 10000) : 5000;
+    const maxVerify = Number.isInteger(req.body?.maxVerify) ? Math.min(Math.max(req.body.maxVerify, 1), 50) : 10;
+    const requestedIndex = Number.isInteger(req.body?.index) ? req.body.index : null;
+    const requestedId = typeof req.body?.id === 'string' && req.body.id.trim() ? req.body.id.trim() : null;
+    const candidates = inventory.targets
+      .filter(target => target.classification.rawCleanupCandidate)
+      .filter(target => requestedIndex === null || target.index === requestedIndex)
+      .filter(target => requestedId === null || target.id === requestedId)
+      .slice(0, maxVerify);
+    const verified = [];
+    for (const target of candidates) {
+      verified.push(await verifyChatGptHomeTarget(target, timeoutMs));
+    }
+    res.json({
+      ok: true,
+      service: 'network-mcp-browser-worker',
+      action: 'browser_cdp_verify_chatgpt_home',
+      requested: { index: requestedIndex, id: requestedId, maxVerify, timeoutMs },
+      candidateCount: candidates.length,
+      verifiedEmptyHomeCount: verified.filter(item => item.verifiedEmptyHome).length,
+      verified,
+      safety: 'read-only-dom-verification-no-write-no-click-no-close'
+    });
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }

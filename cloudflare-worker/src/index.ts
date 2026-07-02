@@ -58,6 +58,21 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.browser_cdp_verify_chatgpt_home',
+    description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
+    route: '/browser-cdp-verify-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer', minimum: 0 },
+        id: { type: 'string' },
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
     name: 'network.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',
