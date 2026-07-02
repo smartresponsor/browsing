@@ -1302,9 +1302,9 @@ function Save-SharedBrowserRuntimeSnapshot {
     $actualUserAgent = if ($cdpVersion -and $cdpVersion.'User-Agent') { [string]$cdpVersion.'User-Agent' } else { '' }
     $actualProduct = if ($actualUserAgent -match 'Edg/') { 'msedge' } elseif ($actualUserAgent -match 'Chrome/') { 'chrome' } else { '' }
     $registry = [pscustomobject]@{
-        ok = $Snapshot.ok
-        state = if ($visibilityCheck.external_cdp_attached) { 'ATTACHED' } elseif ($browserBody.ok) { 'DEGRADED' } else { 'FAILED' }
-        owner = 'shared-browser-runtime'
+        ok = [bool]($visibilityCheck.external_cdp_attached)
+        state = if ($visibilityCheck.external_cdp_attached) { 'ATTACHED' } else { 'DETACHED' }
+        owner = 'network-mcp-browser-client'
         preferred_product = 'msedge'
         fallback_product = 'chrome'
         actual_product = $actualProduct
