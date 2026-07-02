@@ -1117,13 +1117,17 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $toolsResponseHasTool = $tools.Content.Contains('network.open')
+    $requiredTools = @('network.open', 'network.browser_cdp_targets')
+    $missingTools = @($requiredTools | Where-Object { -not $tools.Content.Contains($_) })
+    $toolsResponseHasRequiredTools = $missingTools.Count -eq 0
 
     return [pscustomobject]@{
-        ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasTool
+        ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasRequiredTools
         endpoint = $uri
         initialize = @{ status_code = [int]$initialize.StatusCode; body = $initializeBodyParsed }
         tools = @{ status_code = [int]$tools.StatusCode; body = $toolsBodyParsed }
+        required_tools = $requiredTools
+        missing_tools = $missingTools
     } | ConvertTo-Json -Depth 12
 }
 
