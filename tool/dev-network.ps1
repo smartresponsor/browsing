@@ -10,6 +10,7 @@ param(
         'watch-tick',
         'watch-status',
         'shared-browser-status',
+        'browser-cdp-targets',
         'shared-browser-start',
         'shared-browser-stop',
         'shared-browser-restart',
@@ -882,6 +883,27 @@ function Invoke-WorkerBrowserStatus {
     return [pscustomobject]@{ ok = $response.status_code -eq 200; status_code = $response.status_code; body = $body }
 }
 
+function Invoke-WorkerBrowserCdpTargets {
+    $state = Get-WorkerState
+    if (-not $state.running) {
+        return [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } | ConvertTo-Json -Depth 8
+    }
+
+    $response = Invoke-WorkerRequest -Path '/browser-cdp-targets' -Body '{}'
+    $body = $null
+    try {
+        $body = $response.content | ConvertFrom-Json
+    } catch {
+        $body = $response.content
+    }
+
+    return [pscustomobject]@{
+        ok = $response.status_code -eq 200 -and $body.ok -eq $true
+        status_code = $response.status_code
+        body = $body
+    } | ConvertTo-Json -Depth 12
+}
+
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     try {
@@ -1182,6 +1204,7 @@ function Resolve-RuntimeVerdict {
         [Parameter(Mandatory = $true)][object]$WorkerState,
         [Parameter(Mandatory = $true)][object]$McpState,
         [Parameter(Mandatory = $true)][object]$BrowserStatus,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpTargets,
         [Parameter(Mandatory = $true)][object]$McpSmoke,
         [Parameter(Mandatory = $true)][object]$PublicSmoke,
         [Parameter(Mandatory = $true)][object]$NamedTunnelState,
@@ -1192,6 +1215,7 @@ function Resolve-RuntimeVerdict {
     $checks['worker'] = ConvertTo-HealthCheckResult -Name 'worker' -Ok ([bool]($WorkerState.running -and -not $WorkerState.port_conflict)) -Reason $(if ($WorkerState.port_conflict) { 'WORKER_PORT_CONFLICT' } elseif (-not $WorkerState.running) { 'WORKER_DOWN' } else { $null }) -Detail $WorkerState
     $checks['mcp'] = ConvertTo-HealthCheckResult -Name 'mcp-server' -Ok ([bool]($McpState.running -and -not $McpState.port_conflict)) -Reason $(if ($McpState.port_conflict) { 'MCP_PORT_CONFLICT' } elseif (-not $McpState.running) { 'MCP_SERVER_DOWN' } else { $null }) -Detail $McpState
     $checks['browser'] = ConvertTo-HealthCheckResult -Name 'browser' -Ok ([bool]($BrowserStatus.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserStatus.ok) { 'BROWSER_STATUS_FAILED' } else { $null }) -Detail $BrowserStatus
+    $checks['browserCdpTargets'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-targets' -Ok ([bool]($BrowserCdpTargets.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_TARGETS_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpTargets.ok) { 'BROWSER_CDP_TARGETS_FAILED' } else { $null }) -Detail $BrowserCdpTargets
     $browserBody = $BrowserStatus.body
     $browserRuntime = $browserBody.runtime.browser
     $browserPolicy = $browserBody.runtime.policy
@@ -1220,7 +1244,7 @@ function Resolve-RuntimeVerdict {
     $checks['namedTunnel'] = ConvertTo-HealthCheckResult -Name 'named-tunnel' -Ok ([bool]((-not $namedTunnelRequired) -or $NamedTunnelState.running)) -Reason $(if ($namedTunnelRequired -and -not $NamedTunnelState.running) { 'NAMED_TUNNEL_DOWN' } else { $null }) -Detail $NamedTunnelState
     $checks['policy'] = ConvertTo-HealthCheckResult -Name 'policy' -Ok ([bool]($Policy.warnings.Count -eq 0)) -Reason $(if ($Policy.warnings.Count -gt 0) { 'POLICY_WARNINGS' } else { $null }) -Detail $Policy
 
-    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['browserCdpTargets'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
     $softFailure = @($checks['browserVisibility'], $checks['public'], $checks['namedTunnel'], $checks['policy']) | Where-Object { -not $_.ok } | Select-Object -First 1
     $primaryFailure = if ($hardFailure) { $hardFailure } else { $softFailure }
     $recommendedAction = 'NONE'
@@ -1256,10 +1280,11 @@ function Get-RuntimeDoctorSnapshot {
     $mcpState = Get-McpState
     $policy = Get-PolicyState
     $browserStatus = Invoke-WorkerBrowserStatus
+    $browserCdpTargets = if ($workerState.running) { Invoke-WorkerBrowserCdpTargets | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
     $namedTunnelState = Get-NamedTunnelState
-    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
+    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -BrowserCdpTargets $browserCdpTargets -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
 
     [pscustomobject]@{
         ok = $verdict.ok
@@ -1281,6 +1306,7 @@ function Get-RuntimeDoctorSnapshot {
         worker = $workerState
         mcp = $mcpState
         browser = $browserStatus
+        browser_cdp_targets = $browserCdpTargets
         mcp_smoke = $mcpSmoke
         public_smoke = $publicSmoke
         named_tunnel = $namedTunnelState
@@ -1655,6 +1681,7 @@ switch ($Command) {
     'watch-tick' { Invoke-WatchTick }
     'watch-status' { Show-WatchStatus }
     'shared-browser-status' { Get-SharedBrowserOwnerStatus | ConvertTo-Json -Depth 8 }
+    'browser-cdp-targets' { Invoke-WorkerBrowserCdpTargets }
     'shared-browser-start' { Start-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-stop' { Stop-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
