@@ -11,6 +11,7 @@ param(
         'watch-status',
         'shared-browser-status',
         'browser-cdp-targets',
+        'browser-cdp-cleanup-plan',
         'shared-browser-start',
         'shared-browser-stop',
         'shared-browser-restart',
@@ -926,6 +927,28 @@ function Invoke-WorkerBrowserCdpHomeVerification {
     } | ConvertTo-Json -Depth 12
 }
 
+function Invoke-WorkerBrowserCdpCleanupPlan {
+    $state = Get-WorkerState
+    if (-not $state.running) {
+        return [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } | ConvertTo-Json -Depth 8
+    }
+
+    $bodyJson = @{ maxVerify = 1; maxClose = 1; timeoutMs = 5000 } | ConvertTo-Json -Depth 4
+    $response = Invoke-WorkerRequest -Path '/browser-cdp-cleanup-plan-chatgpt-home' -Body $bodyJson
+    $body = $null
+    try {
+        $body = $response.content | ConvertFrom-Json
+    } catch {
+        $body = $response.content
+    }
+
+    return [pscustomobject]@{
+        ok = $response.status_code -eq 200 -and $body.ok -eq $true -and $body.mode -eq 'dry-run'
+        status_code = $response.status_code
+        body = $body
+    } | ConvertTo-Json -Depth 12
+}
+
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     try {
@@ -1161,7 +1184,7 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home')
+    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home', 'network.browser_cdp_cleanup_plan_chatgpt_home')
     $missingTools = @($requiredTools | Where-Object { -not $tools.Content.Contains($_) })
     $toolsResponseHasRequiredTools = $missingTools.Count -eq 0
 
@@ -1228,6 +1251,7 @@ function Resolve-RuntimeVerdict {
         [Parameter(Mandatory = $true)][object]$BrowserStatus,
         [Parameter(Mandatory = $true)][object]$BrowserCdpTargets,
         [Parameter(Mandatory = $true)][object]$BrowserCdpHomeVerification,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpCleanupPlan,
         [Parameter(Mandatory = $true)][object]$McpSmoke,
         [Parameter(Mandatory = $true)][object]$PublicSmoke,
         [Parameter(Mandatory = $true)][object]$NamedTunnelState,
@@ -1240,6 +1264,7 @@ function Resolve-RuntimeVerdict {
     $checks['browser'] = ConvertTo-HealthCheckResult -Name 'browser' -Ok ([bool]($BrowserStatus.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserStatus.ok) { 'BROWSER_STATUS_FAILED' } else { $null }) -Detail $BrowserStatus
     $checks['browserCdpTargets'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-targets' -Ok ([bool]($BrowserCdpTargets.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_TARGETS_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpTargets.ok) { 'BROWSER_CDP_TARGETS_FAILED' } else { $null }) -Detail $BrowserCdpTargets
     $checks['browserCdpHomeVerification'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-home-verification' -Ok ([bool]($BrowserCdpHomeVerification.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_HOME_VERIFICATION_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpHomeVerification.ok) { 'BROWSER_CDP_HOME_VERIFICATION_FAILED' } else { $null }) -Detail $BrowserCdpHomeVerification
+    $checks['browserCdpCleanupPlan'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-cleanup-plan' -Ok ([bool]($BrowserCdpCleanupPlan.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_CLEANUP_PLAN_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpCleanupPlan.ok) { 'BROWSER_CDP_CLEANUP_PLAN_FAILED' } else { $null }) -Detail $BrowserCdpCleanupPlan
     $browserBody = $BrowserStatus.body
     $browserRuntime = $browserBody.runtime.browser
     $browserPolicy = $browserBody.runtime.policy
@@ -1268,7 +1293,7 @@ function Resolve-RuntimeVerdict {
     $checks['namedTunnel'] = ConvertTo-HealthCheckResult -Name 'named-tunnel' -Ok ([bool]((-not $namedTunnelRequired) -or $NamedTunnelState.running)) -Reason $(if ($namedTunnelRequired -and -not $NamedTunnelState.running) { 'NAMED_TUNNEL_DOWN' } else { $null }) -Detail $NamedTunnelState
     $checks['policy'] = ConvertTo-HealthCheckResult -Name 'policy' -Ok ([bool]($Policy.warnings.Count -eq 0)) -Reason $(if ($Policy.warnings.Count -gt 0) { 'POLICY_WARNINGS' } else { $null }) -Detail $Policy
 
-    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['browserCdpTargets'], $checks['browserCdpHomeVerification'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['browserCdpTargets'], $checks['browserCdpHomeVerification'], $checks['browserCdpCleanupPlan'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
     $softFailure = @($checks['browserVisibility'], $checks['public'], $checks['namedTunnel'], $checks['policy']) | Where-Object { -not $_.ok } | Select-Object -First 1
     $primaryFailure = if ($hardFailure) { $hardFailure } else { $softFailure }
     $recommendedAction = 'NONE'
@@ -1306,10 +1331,11 @@ function Get-RuntimeDoctorSnapshot {
     $browserStatus = Invoke-WorkerBrowserStatus
     $browserCdpTargets = if ($workerState.running) { Invoke-WorkerBrowserCdpTargets | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
     $browserCdpHomeVerification = if ($workerState.running) { Invoke-WorkerBrowserCdpHomeVerification | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $browserCdpCleanupPlan = if ($workerState.running) { Invoke-WorkerBrowserCdpCleanupPlan | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
     $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
     $namedTunnelState = Get-NamedTunnelState
-    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -BrowserCdpTargets $browserCdpTargets -BrowserCdpHomeVerification $browserCdpHomeVerification -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
+    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -BrowserCdpTargets $browserCdpTargets -BrowserCdpHomeVerification $browserCdpHomeVerification -BrowserCdpCleanupPlan $browserCdpCleanupPlan -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
 
     [pscustomobject]@{
         ok = $verdict.ok
@@ -1333,6 +1359,7 @@ function Get-RuntimeDoctorSnapshot {
         browser = $browserStatus
         browser_cdp_targets = $browserCdpTargets
         browser_cdp_home_verification = $browserCdpHomeVerification
+        browser_cdp_cleanup_plan = $browserCdpCleanupPlan
         mcp_smoke = $mcpSmoke
         public_smoke = $publicSmoke
         named_tunnel = $namedTunnelState
@@ -1708,6 +1735,7 @@ switch ($Command) {
     'watch-status' { Show-WatchStatus }
     'shared-browser-status' { Get-SharedBrowserOwnerStatus | ConvertTo-Json -Depth 8 }
     'browser-cdp-targets' { Invoke-WorkerBrowserCdpTargets }
+    'browser-cdp-cleanup-plan' { Invoke-WorkerBrowserCdpCleanupPlan }
     'shared-browser-start' { Start-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-stop' { Stop-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }

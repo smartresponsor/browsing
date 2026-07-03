@@ -196,6 +196,19 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.browser_cdp_cleanup_plan_chatgpt_home',
+    {
+      description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets without closing, clicking, writing, or using Playwright attach.',
+      inputSchema: z.object({
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        maxClose: z.number().int().min(1).max(50).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_plan_chatgpt_home', { maxVerify, maxClose, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',

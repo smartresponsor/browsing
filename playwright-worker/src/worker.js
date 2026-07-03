@@ -563,6 +563,107 @@ async function verifyChatGptHomeTarget(target, timeoutMs = 5000) {
   };
 }
 
+function compactRawCdpTarget(target) {
+  return {
+    index: target.index,
+    id: target.id,
+    type: target.type,
+    title: target.title,
+    url: target.url,
+    category: target.classification?.category || 'unknown',
+    hasWebSocketDebuggerUrl: Boolean(target.webSocketDebuggerUrl)
+  };
+}
+
+async function buildChatGptHomeCleanupPlan({ maxVerify = 20, maxClose = 10, timeoutMs = 5000 } = {}) {
+  const inventory = await listRawCdpTargets();
+  const boundedMaxVerify = Number.isInteger(maxVerify) ? Math.min(Math.max(maxVerify, 1), 50) : 20;
+  const boundedMaxClose = Number.isInteger(maxClose) ? Math.min(Math.max(maxClose, 1), 50) : 10;
+  const boundedTimeoutMs = Number.isInteger(timeoutMs) ? Math.min(Math.max(timeoutMs, 250), 10000) : 5000;
+  const rawCandidates = inventory.targets.filter(target => target.classification.rawCleanupCandidate).slice(0, boundedMaxVerify);
+  const verification = [];
+
+  for (const target of rawCandidates) {
+    try {
+      verification.push(await verifyChatGptHomeTarget(target, boundedTimeoutMs));
+    } catch (error) {
+      verification.push({
+        ok: false,
+        verifiedEmptyHome: false,
+        reason: 'dom-verification-error',
+        target: compactRawCdpTarget(target),
+        classification: target.classification,
+        error: normalizeError(error)
+      });
+    }
+  }
+
+  const verifiedById = new Map(verification.map(item => [item.target?.id, item]));
+  const verifiedCloseCandidates = verification.filter(item => item.ok === true && item.verifiedEmptyHome === true);
+  const selectedForClose = verifiedCloseCandidates.slice(0, boundedMaxClose);
+  const selectedIds = new Set(selectedForClose.map(item => item.target?.id).filter(Boolean));
+  const verifiedIds = new Set(verification.map(item => item.target?.id).filter(Boolean));
+  const wouldClose = selectedForClose.map(item => ({
+    ...item.target,
+    reason: item.reason,
+    dom: {
+      isHomeUrl: item.dom?.isHomeUrl === true,
+      isConversation: item.dom?.isConversation === true,
+      composerTextLength: Number(item.dom?.composerTextLength || 0),
+      isStreaming: item.dom?.isStreaming === true,
+      safety: item.dom?.safety || null
+    }
+  }));
+  const wouldKeep = inventory.targets
+    .filter(target => !selectedIds.has(target.id))
+    .map(target => {
+      const verified = verifiedById.get(target.id);
+      return {
+        ...compactRawCdpTarget(target),
+        reason: target.classification.isChatGptConversation
+          ? 'keep-chatgpt-conversation'
+          : target.classification.isChatGpt && !target.classification.isChatGptHome
+            ? 'keep-chatgpt-non-home'
+            : target.classification.isChatGptHome && !verifiedIds.has(target.id)
+              ? 'keep-unverified-beyond-max-verify'
+              : verified && verified.verifiedEmptyHome !== true
+                ? verified.reason
+                : target.classification.isChatGptHome
+                  ? 'keep-not-selected-by-max-close'
+                  : 'keep-non-chatgpt-or-non-page'
+      };
+    });
+
+  return {
+    ok: true,
+    service: 'network-mcp-browser-worker',
+    action: 'browser_cdp_cleanup_plan_chatgpt_home',
+    mode: 'dry-run',
+    requested: { maxVerify: boundedMaxVerify, maxClose: boundedMaxClose, timeoutMs: boundedTimeoutMs },
+    inventoryBefore: {
+      count: inventory.count,
+      chatGptInventory: inventory.chatGptInventory
+    },
+    rawCandidateCount: inventory.chatGptInventory.rawCleanupCandidateCount,
+    verifiedCount: verification.length,
+    verifiedEmptyHomeCount: verifiedCloseCandidates.length,
+    wouldCloseCount: wouldClose.length,
+    wouldKeepCount: wouldKeep.length,
+    wouldClose,
+    wouldKeep,
+    verification,
+    policy: {
+      browserMutation: false,
+      closesTabs: false,
+      dryRunOnly: true,
+      requiresConfirmedCleanupTool: true,
+      neverCloseConversationTabs: true,
+      neverCloseDraftOrStreamingTabs: true
+    },
+    safety: 'read-only-cleanup-plan-no-close-no-click-no-write-no-playwright-attach'
+  };
+}
+
 async function listRawCdpTargets(policy = getPolicy()) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
   const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
@@ -1317,6 +1418,18 @@ app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
       verified,
       safety: 'read-only-dom-verification-no-write-no-click-no-close'
     });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-cleanup-plan-chatgpt-home', async (req, res) => {
+  try {
+    res.json(await buildChatGptHomeCleanupPlan({
+      maxVerify: req.body?.maxVerify,
+      maxClose: req.body?.maxClose,
+      timeoutMs: req.body?.timeoutMs
+    }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }

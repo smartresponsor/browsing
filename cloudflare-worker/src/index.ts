@@ -73,6 +73,20 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.browser_cdp_cleanup_plan_chatgpt_home',
+    description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets.',
+    route: '/browser-cdp-cleanup-plan-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        maxClose: { type: 'integer', minimum: 1, maximum: 50 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
     name: 'network.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',
