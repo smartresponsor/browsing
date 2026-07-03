@@ -87,6 +87,21 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.browser_cdp_cleanup_chatgpt_home',
+    description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmCleanup, then verify conversation tabs were preserved.',
+    route: '/browser-cdp-cleanup-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        confirmCleanup: { type: 'boolean', default: false },
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        maxClose: { type: 'integer', minimum: 1, maximum: 10 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
     name: 'network.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',

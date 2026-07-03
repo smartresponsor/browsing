@@ -570,9 +570,21 @@ function compactRawCdpTarget(target) {
     type: target.type,
     title: target.title,
     url: target.url,
-    category: target.classification?.category || 'unknown',
+    category: target.classification?.category || target.category || 'unknown',
     hasWebSocketDebuggerUrl: Boolean(target.webSocketDebuggerUrl)
   };
+}
+
+async function closeRawCdpTarget(target, timeoutMs = 5000) {
+  const targetId = String(target?.id || '').trim();
+  if (!targetId) throw new Error('Target id is required for raw CDP close.');
+  const policy = getPolicy();
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const boundedTimeoutMs = Number.isFinite(timeoutMs) ? Math.min(Math.max(timeoutMs, 250), 10000) : 5000;
+  const closePath = ['/json', 'close', encodeURIComponent(targetId)].join('/');
+  const response = await fetch(`${endpoint}${closePath}`, { signal: AbortSignal.timeout(boundedTimeoutMs) });
+  const body = await response.text();
+  return { ok: response.ok, status: response.status, target: compactRawCdpTarget(target), body: body.slice(0, 500) };
 }
 
 async function buildChatGptHomeCleanupPlan({ maxVerify = 20, maxClose = 10, timeoutMs = 5000 } = {}) {
@@ -661,6 +673,67 @@ async function buildChatGptHomeCleanupPlan({ maxVerify = 20, maxClose = 10, time
       neverCloseDraftOrStreamingTabs: true
     },
     safety: 'read-only-cleanup-plan-no-close-no-click-no-write-no-playwright-attach'
+  };
+}
+
+async function cleanupChatGptHomeTargets({ confirmCleanup = false, maxVerify = 20, maxClose = 10, timeoutMs = 5000 } = {}) {
+  const plan = await buildChatGptHomeCleanupPlan({ maxVerify, maxClose, timeoutMs });
+  if (confirmCleanup !== true) {
+    return {
+      ok: false,
+      status: 'CONFIRM_CLEANUP_REQUIRED',
+      mode: 'blocked',
+      willCloseCount: plan.wouldCloseCount,
+      plan,
+      policy: {
+        browserMutation: true,
+        requiresConfirmCleanup: true,
+        closesVerifiedEmptyHomeTabsOnly: true,
+        maxCloseDefault: 10,
+        postCleanupInventoryRequired: true
+      }
+    };
+  }
+
+  const beforeConversationCount = Number(plan.inventoryBefore.chatGptInventory.chatGptConversationTargetCount || 0);
+  const closed = [];
+  for (const item of plan.wouldClose) {
+    const source = plan.verification.find(candidate => candidate.target?.id === item.id);
+    const target = source?.target ? { ...source.target, type: item.type, webSocketDebuggerUrl: '' } : item;
+    try {
+      closed.push(await closeRawCdpTarget(target, plan.requested.timeoutMs));
+    } catch (error) {
+      closed.push({ ok: false, target: item, error: normalizeError(error) });
+    }
+  }
+
+  const after = await listRawCdpTargets();
+  const afterConversationCount = Number(after.chatGptInventory.chatGptConversationTargetCount || 0);
+  const conversationCountPreserved = afterConversationCount >= beforeConversationCount;
+  const ok = closed.every(item => item.ok === true) && conversationCountPreserved;
+  return {
+    ok,
+    status: ok ? 'CHATGPT_HOME_CLEANUP_DONE' : 'CHATGPT_HOME_CLEANUP_GUARD_FAILED',
+    mode: 'confirmed',
+    closedCount: closed.filter(item => item.ok === true).length,
+    requestedCloseCount: plan.wouldCloseCount,
+    closed,
+    before: plan.inventoryBefore,
+    after: { count: after.count, chatGptInventory: after.chatGptInventory },
+    guard: {
+      beforeConversationCount,
+      afterConversationCount,
+      conversationCountPreserved
+    },
+    plan,
+    policy: {
+      browserMutation: true,
+      requiresConfirmCleanup: true,
+      closesVerifiedEmptyHomeTabsOnly: true,
+      neverCloseConversationTabs: true,
+      neverCloseDraftOrStreamingTabs: true,
+      postCleanupInventoryRequired: true
+    }
   };
 }
 
@@ -1426,6 +1499,19 @@ app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
 app.post('/browser-cdp-cleanup-plan-chatgpt-home', async (req, res) => {
   try {
     res.json(await buildChatGptHomeCleanupPlan({
+      maxVerify: req.body?.maxVerify,
+      maxClose: req.body?.maxClose,
+      timeoutMs: req.body?.timeoutMs
+    }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-cleanup-chatgpt-home', async (req, res) => {
+  try {
+    res.json(await cleanupChatGptHomeTargets({
+      confirmCleanup: req.body?.confirmCleanup === true,
       maxVerify: req.body?.maxVerify,
       maxClose: req.body?.maxClose,
       timeoutMs: req.body?.timeoutMs

@@ -209,6 +209,20 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.browser_cdp_cleanup_chatgpt_home',
+    {
+      description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmCleanup, then verify conversation tabs were preserved.',
+      inputSchema: z.object({
+        confirmCleanup: z.boolean().default(false),
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        maxClose: z.number().int().min(1).max(10).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ confirmCleanup, maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_chatgpt_home', { confirmCleanup, maxVerify, maxClose, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
