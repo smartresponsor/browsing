@@ -13,6 +13,7 @@ param(
         'browser-cdp-targets',
         'browser-cdp-cleanup-plan',
         'browser-cdp-cleanup-blocked',
+        'browser-cdp-cleanup-confirmed',
         'shared-browser-start',
         'shared-browser-stop',
         'shared-browser-restart',
@@ -972,6 +973,28 @@ function Invoke-WorkerBrowserCdpCleanupBlocked {
     } | ConvertTo-Json -Depth 12
 }
 
+function Invoke-WorkerBrowserCdpCleanupConfirmed {
+    $state = Get-WorkerState
+    if (-not $state.running) {
+        return [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } | ConvertTo-Json -Depth 8
+    }
+
+    $bodyJson = @{ confirmCleanup = $true; maxVerify = 50; maxClose = 10; timeoutMs = 5000 } | ConvertTo-Json -Depth 4
+    $response = Invoke-WorkerRequest -Path '/browser-cdp-cleanup-chatgpt-home' -Body $bodyJson
+    $body = $null
+    try {
+        $body = $response.content | ConvertFrom-Json
+    } catch {
+        $body = $response.content
+    }
+
+    return [pscustomobject]@{
+        ok = $response.status_code -eq 200 -and $body.ok -eq $true -and $body.guard.conversationCountPreserved -eq $true
+        status_code = $response.status_code
+        body = $body
+    } | ConvertTo-Json -Depth 12
+}
+
 function Get-FreeTcpPort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     try {
@@ -1764,6 +1787,7 @@ switch ($Command) {
     'browser-cdp-targets' { Invoke-WorkerBrowserCdpTargets }
     'browser-cdp-cleanup-plan' { Invoke-WorkerBrowserCdpCleanupPlan }
     'browser-cdp-cleanup-blocked' { Invoke-WorkerBrowserCdpCleanupBlocked }
+    'browser-cdp-cleanup-confirmed' { Invoke-WorkerBrowserCdpCleanupConfirmed }
     'shared-browser-start' { Start-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-stop' { Stop-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }

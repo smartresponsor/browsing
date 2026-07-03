@@ -36,6 +36,7 @@
     "dev:named-tunnel-service-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-named-tunnel-service",
     "dev:task-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-startup-task",
     "dev:task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 uninstall-startup-task",
-    "dev:task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-startup-task"
+    "dev:task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-startup-task",
+    "test": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 browser-cdp-cleanup-confirmed"
   }
 }
