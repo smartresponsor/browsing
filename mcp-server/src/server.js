@@ -1,8 +1,7 @@
 import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { z } from 'zod';
-import { NetworkToolRegistry } from './tool-registry.js';
+import { createNetworkToolBundle } from './network-tool-bundle.js';
 
 const host = process.env.NETWORK_MCP_SERVER_HOST || '127.0.0.1';
 const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
@@ -11,10 +10,10 @@ const workerUrl = process.env.NETWORK_MCP_BROWSER_WORKER_URL || 'http://127.0.0.
 const upstreamToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN || '';
 const upstreamPreviousToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
 
-const registry = new NetworkToolRegistry(
+const networkToolBundle = createNetworkToolBundle({
   workerUrl,
-  process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || ''
-);
+  browserWorkerToken: process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || ''
+});
 
 const server = createServer(async (req, res) => {
   if (!req.url) {
@@ -113,158 +112,9 @@ function buildServer() {
     version: '0.1.0-rc2'
   });
 
-  registerNetworkTools(mcpServer);
+  networkToolBundle.register(mcpServer);
 
   return mcpServer;
-}
-
-function registerNetworkTools(mcpServer) {
-  mcpServer.registerTool(
-    'network.browser_status',
-    {
-      description: 'Inspect the supervised browser runtime state.',
-      inputSchema: z.object({}).strict()
-    },
-    async () => toolResult(await registry.callTool('network.browser_status', {}))
-  );
-
-  mcpServer.registerTool(
-    'network.browser_restart',
-    {
-      description: 'Restart the supervised browser session.',
-      inputSchema: z.object({
-        hard: z.boolean().optional(),
-        reopen: z.boolean().optional(),
-        reason: z.string().max(200).optional()
-      }).strict()
-    },
-    async ({ hard, reopen, reason }) => toolResult(await registry.callTool('network.browser_restart', {
-      force: hard === true,
-      reopen,
-      reason
-    }))
-  );
-
-  mcpServer.registerTool(
-    'network.browser_kill',
-    {
-      description: 'Close the supervised browser session and kill managed browser processes for the configured profile.',
-      inputSchema: z.object({
-        reason: z.string().max(200).optional()
-      }).strict()
-    },
-    async ({ reason }) => toolResult(await registry.callTool('network.browser_kill', { reason }))
-  );
-
-  mcpServer.registerTool(
-    'network.open',
-    {
-      description: 'Open a target URL in the supervised browser worker.',
-      inputSchema: z.object({
-        url: z.string().url()
-      }).strict()
-    },
-    async ({ url }) => toolResult(await registry.callTool('network.open', { url }))
-  );
-
-  mcpServer.registerTool(
-    'network.open_job',
-    {
-      description: 'Open a normalized job URL in the supervised browser worker.',
-      inputSchema: z.object({
-        url: z.string().url()
-      }).strict()
-    },
-    async ({ url }) => toolResult(await registry.callTool('network.open_job', { url }))
-  );
-
-  mcpServer.registerTool(
-    'network.chatgpt_snapshot',
-    {
-      description: 'Read the current supervised ChatGPT Web tab URL and message snapshot for semantic execution gating.',
-      inputSchema: z.object({}).strict()
-    },
-    async () => toolResult(await registry.callTool('network.chatgpt_snapshot', {}))
-  );
-
-  mcpServer.registerTool(
-    'network.inspect',
-    {
-      description: 'Inspect visible form fields in the current page.',
-      inputSchema: z.object({}).strict()
-    },
-    async () => toolResult(await registry.callTool('network.inspect', {}))
-  );
-
-  mcpServer.registerTool(
-    'network.click',
-    {
-      description: 'Click a non-final visible button or link in the supervised browser worker.',
-      inputSchema: z.object({
-        text: z.string().optional(),
-        selector: z.string().optional(),
-        nth: z.number().int().nonnegative().optional()
-      }).strict()
-    },
-    async ({ text, selector, nth }) => toolResult(await registry.callTool('network.click', { text, selector, nth }))
-  );
-
-  mcpServer.registerTool(
-    'network.extract_form',
-    {
-      description: 'Extract the current form field snapshot.',
-      inputSchema: z.object({}).strict()
-    },
-    async () => toolResult(await registry.callTool('network.extract_form', {}))
-  );
-
-  mcpServer.registerTool(
-    'network.propose',
-    {
-      description: 'Produce supervised answer proposals before filling.',
-      inputSchema: z.object({
-        fields: z.array(z.record(z.unknown()))
-      }).strict()
-    },
-    async ({ fields }) => toolResult(await registry.callTool('network.propose', { fields }))
-  );
-
-  mcpServer.registerTool(
-    'network.fill_after_approval',
-    {
-      description: 'Fill approved fields only after explicit approval.',
-      inputSchema: z.object({
-        approved: z.boolean(),
-        approvalText: z.string(),
-        fields: z.array(z.record(z.unknown()))
-      }).strict()
-    },
-    async ({ approved, approvalText, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
-      approved,
-      approvalText,
-      fields
-    }))
-  );
-
-  mcpServer.registerTool(
-    'network.review_before_submit',
-    {
-      description: 'Capture a manual review artifact before any final submit.',
-      inputSchema: z.object({}).strict()
-    },
-    async () => toolResult(await registry.callTool('network.review_before_submit', {}))
-  );
-}
-
-function toolResult(result) {
-  return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(result, null, 2)
-      }
-    ]
-  };
 }
 
 async function readJsonBody(req) {
