@@ -223,6 +223,24 @@ function registerNetworkTools(mcpServer) {
   );
 
   mcpServer.registerTool(
+    'network.surface_plan',
+    {
+      description: 'Build a read-only publication update plan for network-mcp.',
+      inputSchema: z.object({ connectorName: z.string().optional(), connectorId: z.string().optional(), timeoutMs: z.number().int().min(5000).max(120000).optional() }).strict()
+    },
+    async ({ connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.surface_plan', { connectorName, connectorId, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
+    'network.surface_execute',
+    {
+      description: 'Run the approved publication update for network-mcp.',
+      inputSchema: z.object({ confirmSync: z.boolean().default(false), connectorName: z.string().optional(), connectorId: z.string().optional(), timeoutMs: z.number().int().min(5000).max(120000).optional() }).strict()
+    },
+    async ({ confirmSync, connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.connector_sync_execute', { confirmRefresh: confirmSync === true, connectorName, connectorId, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
     'network.browser_targets',
     {
       description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',

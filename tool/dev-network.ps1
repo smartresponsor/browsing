@@ -1230,7 +1230,7 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home', 'network.browser_cdp_cleanup_plan_chatgpt_home', 'network.browser_cdp_cleanup_chatgpt_home')
+    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home', 'network.browser_cdp_cleanup_plan_chatgpt_home', 'network.browser_cdp_cleanup_chatgpt_home', 'network.surface_plan', 'network.surface_execute')
     $missingTools = @($requiredTools | Where-Object { -not $tools.Content.Contains($_) })
     $toolsResponseHasRequiredTools = $missingTools.Count -eq 0
 

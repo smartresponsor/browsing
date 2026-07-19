@@ -102,6 +102,35 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
+    name: 'network.surface_plan',
+    description: 'Build a read-only publication update plan for network-mcp.',
+    route: '/connector-sync-plan',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        connectorName: { type: 'string' },
+        connectorId: { type: 'string' },
+        timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000 }
+      }
+    }
+  },
+  {
+    name: 'network.surface_execute',
+    description: 'Run the approved publication update for network-mcp.',
+    route: '/connector-sync-execute',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        confirmSync: { type: 'boolean', default: false },
+        connectorName: { type: 'string' },
+        connectorId: { type: 'string' },
+        timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000 }
+      }
+    }
+  },
+  {
     name: 'network.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',

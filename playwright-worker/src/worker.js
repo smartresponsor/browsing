@@ -737,6 +737,81 @@ async function cleanupChatGptHomeTargets({ confirmCleanup = false, maxVerify = 2
   };
 }
 
+function buildConnectorSettingsUrl(connectorId = '') {
+  return connectorId
+    ? `https://chatgpt.com/#settings/Connectors?connector=${encodeURIComponent(connectorId)}`
+    : 'https://chatgpt.com/#settings/Apps';
+}
+
+function planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs } = {}) {
+  const name = String(connectorName || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_NAME || 'network-mcp');
+  const id = String(connectorId || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_ID || '');
+  const boundedTimeoutMs = Number.isInteger(timeoutMs) ? Math.min(Math.max(timeoutMs, 5000), 120000) : 90000;
+  return {
+    ok: true,
+    status: 'NETWORK_CONNECTOR_REFRESH_PLAN_READY',
+    connectorName: name,
+    connectorId: id || null,
+    targetUrl: buildConnectorSettingsUrl(id),
+    executeTool: 'network.surface_execute',
+    executeRequires: { confirmSync: true, connectorName: name, connectorId: id || undefined },
+    timeoutMs: boundedTimeoutMs,
+    policy: {
+      browserMutation: false,
+      connectorRefresh: false,
+      writesInput: false,
+      submitsInput: false,
+      closesTabs: false
+    }
+  };
+}
+
+async function createRawCdpTarget(policy, targetUrl, timeoutMs) {
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(targetUrl)}`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+  });
+  if (!response.ok) throw new Error(`DevTools target create failed with HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, timeoutMs) {
+  const inventory = await listRawCdpTargets(policy);
+  const targets = inventory.targets.filter(target => target.type === 'page' && typeof target.webSocketDebuggerUrl === 'string');
+  const existing = targets.find(target => connectorId && String(target.url || '').includes(connectorId))
+    || targets.find(target => String(target.url || '').includes('#settings/Connectors'))
+    || targets.find(target => String(target.url || '').includes('#settings/Apps'));
+  if (existing) return { ...existing, reused: true };
+  const created = await createRawCdpTarget(policy, targetUrl, timeoutMs);
+  const deadline = Date.now() + Math.min(timeoutMs, 15000);
+  while (Date.now() <= deadline) {
+    const refreshed = await listRawCdpTargets(policy);
+    const createdTarget = refreshed.targets.find(target => target.id === created.id && target.webSocketDebuggerUrl);
+    if (createdTarget) return { ...createdTarget, reused: false };
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return { ...created, reused: false };
+}
+
+function buildNetworkConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
+  return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const networkToolsVisible = /network\./.test(pageText); if (!result && networkToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_NETWORK_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
+}
+
+async function executeNetworkConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
+  const plan = planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs });
+  if (confirmRefresh !== true) {
+    return { ok: false, status: 'CONFIRM_CONNECTOR_REFRESH_REQUIRED', willRefreshConnector: true, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true } };
+  }
+  const policy = getPolicy();
+  const target = await resolveConnectorRefreshTarget(policy, plan.targetUrl, plan.connectorId || '', plan.timeoutMs);
+  if (!target.webSocketDebuggerUrl) return { ok: false, status: 'CONNECTOR_REFRESH_TARGET_WEBSOCKET_MISSING', target, plan };
+  const result = await evaluateRawCdpTarget(target, buildNetworkConnectorRefreshExpression(plan.connectorName, plan.connectorId || '', plan.targetUrl), Math.min(plan.timeoutMs, 120000));
+  const pageText = typeof result?.pageText === 'string' ? result.pageText : '';
+  const observedTools = [...new Set([...pageText.matchAll(/\bnetwork\.[A-Za-z0-9_.]+/g)].map(match => match[0]))].sort();
+  return { ok: Boolean(result?.ok), status: result?.ok ? 'NETWORK_CONNECTOR_REFRESH_DONE' : String(result?.status || 'NETWORK_CONNECTOR_REFRESH_FAILED'), connectorName: plan.connectorName, connectorId: plan.connectorId, target: compactRawCdpTarget(target), refresh: result, observedSchema: { exposed: observedTools.length > 0, count: observedTools.length, tools: observedTools }, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true, writesInput: false, submitsInput: false, closesTabs: false } };
+}
+
 async function listRawCdpTargets(policy = getPolicy()) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
   const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
@@ -1452,6 +1527,22 @@ app.post('/health-full', async (_req, res) => {
 app.post('/shared-browser-status', async (_req, res) => {
   try {
     res.json(await getSharedBrowserRuntimeStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/connector-sync-plan', async (req, res) => {
+  try {
+    res.json(planNetworkConnectorRefresh({ connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/connector-sync-execute', async (req, res) => {
+  try {
+    res.json(await executeNetworkConnectorRefresh({ confirmRefresh: req.body?.confirmRefresh === true || req.body?.confirmSync === true, connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
