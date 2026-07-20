@@ -79,18 +79,9 @@ $NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'networ
 $SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 
 . (Join-Path $PSScriptRoot 'dev-network.d\20-process-support.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\25-runtime-config.ps1')
 . (Join-Path $PSScriptRoot 'dev-network.d\30-runtime-state.ps1')
 . (Join-Path $PSScriptRoot 'dev-network.d\35-policy-state.ps1')
-
-function Test-LegacySmartresponsorOrigin {
-    param([AllowNull()][string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $false
-    }
-
-    return $Value.TrimEnd('/') -eq $LegacySmartresponsorOrigin
-}
 
 function Ensure-SharedBrowserEnvironment {
     if (-not $env:NETWORK_MCP_SHARED_BROWSER_ROOT) {
@@ -117,22 +108,6 @@ function Ensure-SharedBrowserEnvironment {
     New-Item -ItemType Directory -Force -Path $env:NETWORK_MCP_USER_DATA_DIR | Out-Null
     New-Item -ItemType Directory -Force -Path $DefaultSharedBrowserRunDir | Out-Null
     New-Item -ItemType Directory -Force -Path $DefaultSharedBrowserLogDir | Out-Null
-}
-
-function Get-WorkerPort {
-    if ($env:NETWORK_MCP_WORKER_PORT) {
-        return [int]$env:NETWORK_MCP_WORKER_PORT
-    }
-
-    return 8791
-}
-
-function Get-McpPort {
-    if ($env:NETWORK_MCP_SERVER_PORT) {
-        return [int]$env:NETWORK_MCP_SERVER_PORT
-    }
-
-    return 8792
 }
 
 function Resolve-CloudflaredExe {
@@ -212,49 +187,8 @@ function Get-WranglerBinary {
     }
 }
 
-function Get-NamedTunnelName {
-    if ($env:NETWORK_MCP_TUNNEL_NAME) {
-        return $env:NETWORK_MCP_TUNNEL_NAME.Trim()
-    }
-
-    return 'network-mcp-worker'
-}
-
-function Get-NamedTunnelHostname {
-    if ($env:NETWORK_MCP_TUNNEL_HOSTNAME) {
-        if (Test-LegacySmartresponsorOrigin -Value ('https://' + $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim())) {
-            return ''
-        }
-
-        return $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim()
-    }
-
-    return ''
-}
-
-function Get-PublicOrigin {
-    if ($env:NETWORK_MCP_PUBLIC_ORIGIN) {
-        return $env:NETWORK_MCP_PUBLIC_ORIGIN.TrimEnd('/')
-    }
-
-    return $DefaultMcpPublicOrigin
-}
-
 if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
     Set-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
-}
-
-function Get-NamedTunnelConfigPath {
-    if ($env:NETWORK_MCP_TUNNEL_CONFIG) {
-        return $env:NETWORK_MCP_TUNNEL_CONFIG.Trim()
-    }
-
-    $profile = $env:USERPROFILE
-    if (-not $profile) {
-        throw 'USERPROFILE is not available. Set NETWORK_MCP_TUNNEL_CONFIG explicitly.'
-    }
-
-    return (Join-Path $profile '.cloudflared\network-mcp-worker.yml')
 }
 
 function Start-NamedTunnel {
