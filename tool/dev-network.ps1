@@ -88,39 +88,10 @@ $SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 . (Join-Path $PSScriptRoot 'dev-network.d\45-mcp-lifecycle.ps1')
 . (Join-Path $PSScriptRoot 'dev-network.d\50-quick-tunnel-lifecycle.ps1')
 . (Join-Path $PSScriptRoot 'dev-network.d\55-named-tunnel-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\60-stack-lifecycle.ps1')
 
 if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
     Set-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
-}
-
-function Start-Stack {
-    $sharedBrowser = Start-SharedBrowserOwner
-    $worker = Start-Worker
-    $mcp = Start-McpServer
-    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
-    $namedTunnel = Start-NamedTunnel | ConvertFrom-Json
-    [pscustomobject]@{
-        ok = $true
-        shared_browser = $sharedBrowser
-        worker = $worker | ConvertFrom-Json
-        mcp = $mcp | ConvertFrom-Json
-        legacy_quick_tunnel = $legacyTunnel
-        named_tunnel = $namedTunnel
-    } | ConvertTo-Json -Depth 8
-}
-
-function Stop-Stack {
-    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
-    $namedTunnel = Stop-NamedTunnel | ConvertFrom-Json
-    $mcp = Stop-McpServer | ConvertFrom-Json
-    $worker = Stop-Worker | ConvertFrom-Json
-    [pscustomobject]@{
-        ok = $true
-        worker = $worker
-        mcp = $mcp
-        legacy_quick_tunnel = $legacyTunnel
-        named_tunnel = $namedTunnel
-    } | ConvertTo-Json -Depth 8
 }
 
 function Invoke-WorkerRequest {
