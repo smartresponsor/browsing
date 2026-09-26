@@ -1,3 +1,22 @@
+const publicToolNames = [
+  'network.browser_status',
+  'network.browser_restart',
+  'network.browser_kill',
+  'network.open',
+  'network.open_job',
+  'network.chatgpt_snapshot',
+  'network.click',
+  'network.inspect',
+  'network.extract_form',
+  'network.propose',
+  'network.fill_after_approval',
+  'network.review_before_submit'
+];
+
+const internalWorkerCapabilityNames = [
+  'network.open_fresh'
+];
+
 export class NetworkToolRegistry {
   constructor(workerUrl, browserWorkerToken = '') {
     this.workerUrl = workerUrl;
@@ -5,21 +24,11 @@ export class NetworkToolRegistry {
   }
 
   listTools() {
-    return [
-      'network.browser_status',
-      'network.browser_restart',
-      'network.browser_kill',
-      'network.open',
-      'network.open_job',
-      'network.open_fresh',
-      'network.chatgpt_snapshot',
-      'network.click',
-      'network.inspect',
-      'network.extract_form',
-      'network.propose',
-      'network.fill_after_approval',
-      'network.review_before_submit'
-    ];
+    return [...publicToolNames];
+  }
+
+  listWorkerCapabilities() {
+    return [...publicToolNames, ...internalWorkerCapabilityNames];
   }
 
   async callWorker(path, payload) {
