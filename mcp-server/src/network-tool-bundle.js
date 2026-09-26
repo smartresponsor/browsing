@@ -85,7 +85,9 @@ function registerNetworkTools(mcpServer, registry) {
     async ({ url }) => toolResult(await registry.callTool('network.open_job', { url }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.chatgpt.snapshot',
     'network.chatgpt_snapshot',
     {
       description: 'Read the current supervised ChatGPT Web tab URL and message snapshot for semantic execution gating.',
@@ -116,7 +118,9 @@ function registerNetworkTools(mcpServer, registry) {
     async ({ text, selector, nth }) => toolResult(await registry.callTool('network.click', { text, selector, nth }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.form.extract',
     'network.extract_form',
     {
       description: 'Extract the current form field snapshot.',
@@ -155,7 +159,9 @@ function registerNetworkTools(mcpServer, registry) {
     }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.form.review.snapshot',
     'network.review_before_submit',
     {
       description: 'Capture a manual review artifact before any final submit.',

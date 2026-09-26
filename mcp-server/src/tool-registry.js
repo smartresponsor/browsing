@@ -8,13 +8,16 @@ const publicToolNames = [
   'network.open',
   'network.job.open',
   'network.open_job',
+  'network.chatgpt.snapshot',
   'network.chatgpt_snapshot',
   'network.click',
   'network.inspect',
+  'network.form.extract',
   'network.extract_form',
   'network.propose',
   'network.form.fill',
   'network.fill_after_approval',
+  'network.form.review.snapshot',
   'network.review_before_submit'
 ];
 
