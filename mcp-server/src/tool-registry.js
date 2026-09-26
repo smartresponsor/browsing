@@ -1,14 +1,19 @@
 const publicToolNames = [
+  'network.browser.status',
   'network.browser_status',
+  'network.browser.restart',
   'network.browser_restart',
+  'network.browser.kill',
   'network.browser_kill',
   'network.open',
+  'network.job.open',
   'network.open_job',
   'network.chatgpt_snapshot',
   'network.click',
   'network.inspect',
   'network.extract_form',
   'network.propose',
+  'network.form.fill',
   'network.fill_after_approval',
   'network.review_before_submit'
 ];

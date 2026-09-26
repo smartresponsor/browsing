@@ -12,8 +12,15 @@ export function createNetworkToolBundle({ workerUrl, browserWorkerToken }) {
   };
 }
 
+function registerNetworkToolWithLegacyAlias(mcpServer, canonicalName, legacyName, config, handler) {
+  mcpServer.registerTool(canonicalName, config, handler);
+  mcpServer.registerTool(legacyName, config, handler);
+}
+
 function registerNetworkTools(mcpServer, registry) {
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.browser.status',
     'network.browser_status',
     {
       description: 'Inspect the supervised browser runtime state.',
@@ -22,7 +29,9 @@ function registerNetworkTools(mcpServer, registry) {
     async () => toolResult(await registry.callTool('network.browser_status', {}))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.browser.restart',
     'network.browser_restart',
     {
       description: 'Restart the supervised browser session.',
@@ -39,7 +48,9 @@ function registerNetworkTools(mcpServer, registry) {
     }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.browser.kill',
     'network.browser_kill',
     {
       description: 'Close the supervised browser session and kill managed browser processes for the configured profile.',
@@ -61,7 +72,9 @@ function registerNetworkTools(mcpServer, registry) {
     async ({ url }) => toolResult(await registry.callTool('network.open', { url }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.job.open',
     'network.open_job',
     {
       description: 'Open a normalized job URL in the supervised browser worker.',
@@ -123,7 +136,9 @@ function registerNetworkTools(mcpServer, registry) {
     async ({ fields }) => toolResult(await registry.callTool('network.propose', { fields }))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.form.fill',
     'network.fill_after_approval',
     {
       description: 'Fill approved fields only after explicit approval.',
