@@ -635,7 +635,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload remains a separate pending capability.
+Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload is implemented separately as `network.form.upload`; it remains intentionally outside generic fill.
 
 Create type-specific mutations:
 
@@ -713,6 +713,8 @@ Exit criteria:
 ### Phase 7 — Human-boundary protocol
 
 Priority: P1
+
+Implementation status: first typed human-boundary slice complete. CAPTCHA, 2FA, and security challenges now produce `NETWORK_HUMAN_ACTION_REQUIRED` with boundary type, requested manual action, exact target URL/title evidence, and a safe resume condition. Page/form/navigation/review routes propagate the structured status through the common Network error envelope. Console MCP remains responsible for pause/resume orchestration. Login/consent/unexpected-modal/unsupported-control boundary expansion remains pending.
 
 Model CAPTCHA, 2FA, login, consent, unexpected modal, unsupported control, and security challenges as explicit resumable states.
 

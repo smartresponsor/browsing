@@ -12,7 +12,6 @@ import {
   hostMatches,
   isAllowedHostOverride,
   isBuiltInDeniedHost,
-  isChallengeText,
   isJobBoardHost,
   isSafeEditableInputType,
   normalizeBrowserChannel,
@@ -34,6 +33,7 @@ import {
   revisionError
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
+import { classifyChallengeText } from './human-boundary.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -471,14 +471,30 @@ function describePageType(targetUrl) {
 }
 
 async function ensureNotChallenge(target) {
-  const text = await target.evaluate(() => {
+  const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
-    return `${title}\n${body}`.slice(0, 4000);
+    return {
+      title,
+      text: `${title}\n${body}`.slice(0, 4000)
+    };
   });
 
-  if (isChallengeText(text)) {
-    throw new Error('CAPTCHA, 2FA, or a security challenge was detected. Pause and continue manually.');
+  const boundary = classifyChallengeText(snapshot.text);
+  if (boundary) {
+    throw revisionError(
+      'NETWORK_HUMAN_ACTION_REQUIRED',
+      'A human verification boundary was detected. Resolve it manually before Network resumes.',
+      {
+        boundary: {
+          type: boundary.type,
+          requestedAction: boundary.requestedAction,
+          targetUrl: target.url(),
+          title: String(snapshot.title || '').slice(0, 300),
+          resumeCondition: 'Re-run page capture or the intended Network operation after the human step is complete.'
+        }
+      }
+    );
   }
 }
 
@@ -876,11 +892,28 @@ function expectedRevisionsFromBody(body) {
   };
 }
 
-function sendNetworkError(res, error, fallbackStatus = 'NETWORK_OPERATION_FAILED') {
+function normalizeExecutionCorrelation(body) {
+  const input = body?.correlation;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const normalize = value => typeof value === 'string' && value.trim() ? value.trim().slice(0, 200) : null;
+  const taskId = normalize(input.taskId);
+  const runId = normalize(input.runId);
+  const invocationId = normalize(input.invocationId);
+  if (!taskId && !runId && !invocationId) return null;
+  return {
+    executionOwner: 'console-mcp',
+    taskId,
+    runId,
+    invocationId,
+  };
+}
+
+function sendNetworkError(res, error, fallbackStatus = 'NETWORK_OPERATION_FAILED', correlation = null) {
   res.status(409).json({
     ok: false,
     status: typeof error?.networkStatus === 'string' ? error.networkStatus : fallbackStatus,
     error: normalizeError(error),
+    correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
   });
 }
@@ -1536,7 +1569,7 @@ app.post('/open-fresh', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    res.status(409).json({ ok: false, error: normalizeError(error) });
+    sendNetworkError(res, error, 'NETWORK_OPEN_FRESH_FAILED');
   }
 });
 
@@ -1566,7 +1599,7 @@ app.post('/open', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_OPEN_FAILED');
   }
 });
 
@@ -1592,7 +1625,7 @@ app.post('/open-job', async (req, res) => {
       pageType: describePageType(normalizedUrl)
     });
   } catch (error) {
-    res.status(409).json({ ok: false, errorType: 'OPEN_JOB_FAILED', error: error.message });
+    sendNetworkError(res, error, 'NETWORK_OPEN_JOB_FAILED');
   }
 });
 
@@ -1612,7 +1645,7 @@ app.post('/page-capture', async (req, res) => {
     await target.bringToFront().catch(() => {});
     res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
   } catch (error) {
-    res.status(409).json({ ok: false, error: normalizeError(error) });
+    sendNetworkError(res, error, 'NETWORK_PAGE_CAPTURE_FAILED');
   }
 });
 
@@ -1628,7 +1661,7 @@ app.post('/wait-for-ready', async (req, res) => {
       quietMs: Number.isInteger(req.body?.quietMs) ? Math.min(Math.max(req.body.quietMs, 100), 10000) : 500
     }));
   } catch (error) {
-    res.status(409).json({ ok: false, error: normalizeError(error) });
+    sendNetworkError(res, error, 'NETWORK_READINESS_WAIT_FAILED');
   }
 });
 
@@ -1644,7 +1677,7 @@ app.post('/inspect', async (_req, res) => {
       fields
     });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_INSPECT_FAILED');
   }
 });
 
@@ -1659,7 +1692,7 @@ app.post('/extract-form', async (_req, res) => {
       fields
     });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_FORM_EXTRACT_FAILED');
   }
 });
 
@@ -1682,11 +1715,12 @@ app.post('/propose', async (req, res) => {
       proposals
     });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_PROPOSAL_FAILED');
   }
 });
 
 app.post('/fill-after-approval', async (req, res) => {
+  const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
@@ -1728,6 +1762,7 @@ app.post('/fill-after-approval', async (req, res) => {
     res.json({
       ok: true,
       status: 'NETWORK_FORM_MUTATION_VERIFIED',
+      correlation,
       filled,
       before: {
         targetId: before.targetId,
@@ -1741,11 +1776,12 @@ app.post('/fill-after-approval', async (req, res) => {
       },
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED');
+    sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED', correlation);
   }
 });
 
 app.post('/upload-artifact', async (req, res) => {
+  const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
@@ -1796,6 +1832,7 @@ app.post('/upload-artifact', async (req, res) => {
     res.json({
       ok: true,
       status: 'NETWORK_UPLOAD_VERIFIED',
+      correlation,
       controlId: resolvedControl.field.controlId || null,
       artifact: guarded.artifact,
       uploaded: {
@@ -1815,7 +1852,7 @@ app.post('/upload-artifact', async (req, res) => {
       }
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_UPLOAD_FAILED');
+    sendNetworkError(res, error, 'NETWORK_UPLOAD_FAILED', correlation);
   }
 });
 
@@ -1849,7 +1886,7 @@ app.post('/click', async (req, res) => {
     await ensureNotChallenge(target);
     res.json({ ok: true, url: target.url(), title: await target.title(), clicked: selector || text, nth });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_CLICK_FAILED');
   }
 });
 
@@ -1860,11 +1897,12 @@ app.post('/review-before-submit', async (_req, res) => {
     const artifact = await capturePageArtifact(target, { screenshot: true, screenshotPrefix: 'review' });
     res.json({ ...artifact, message: 'Review manually before submit. Use reviewHash with submit-after-approval if the final action is approved.' });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_REVIEW_CAPTURE_FAILED');
   }
 });
 
 app.post('/submit-after-approval', async (req, res) => {
+  const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
@@ -1912,9 +1950,9 @@ app.post('/submit-after-approval', async (req, res) => {
     await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
     await ensureNotChallenge(target);
     const after = await capturePageArtifact(target, { screenshot: false });
-    res.json({ ok: true, action: 'submit_after_approval', clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
+    res.json({ ok: true, action: 'submit_after_approval', correlation, clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED');
+    sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED', correlation);
   }
 });
 
