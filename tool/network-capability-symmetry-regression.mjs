@@ -39,6 +39,7 @@ for (const tool of contractTools) {
   assert.ok(typeof tool.replayPolicy === "string" && tool.replayPolicy.length > 0, `missing replayPolicy: ${tool.name}`);
   assert.ok(typeof tool.timeoutClass === "string" && tool.timeoutClass.length > 0, `missing timeoutClass: ${tool.name}`);
   assert.ok(["none", "console-owned-optional"].includes(tool.executionCorrelation), `invalid executionCorrelation: ${tool.name}`);
+  assert.ok(["none", "mints-fill-one-time", "consumes-fill-one-time", "mints-submit-one-time", "consumes-submit-one-time"].includes(tool.approvalReceiptBehavior), `invalid approvalReceiptBehavior: ${tool.name}`);
   assert.ok(typeof tool.postcondition === "string" && tool.postcondition.length > 0, `missing postcondition: ${tool.name}`);
 
   if (tool.requiresExplicitApproval) {
@@ -52,6 +53,16 @@ for (const tool of contractTools) {
 
 for (const route of workerRoutes) {
   assert.ok(contractRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);
+}
+
+for (const [toolName, behavior] of [
+  ["network.propose", "mints-fill-one-time"],
+  ["network.fill_after_approval", "consumes-fill-one-time"],
+  ["network.review_before_submit", "mints-submit-one-time"],
+  ["network.submit_after_approval", "consumes-submit-one-time"],
+]) {
+  const tool = contractTools.find((candidate) => candidate.name === toolName);
+  assert.equal(tool?.approvalReceiptBehavior, behavior, `approval receipt behavior mismatch: ${toolName}`);
 }
 
 for (const toolName of [

@@ -592,7 +592,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first semantic extraction slice complete. Network now classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Type-specific checkbox/radio/combobox/contenteditable/upload mutations remain pending.
+Implementation status: first semantic extraction slice complete. Network now classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Type-specific checkbox/radio/combobox/contenteditable/upload mutations are now implemented with postcondition verification; remaining semantic-model gaps are primarily richer compound controls, iframe/frame-path coverage, and site-specific edge cases.
 
 Replace flat field snapshots with semantic controls.
 
@@ -694,6 +694,8 @@ Exit criteria:
 ### Phase 6 — Approval receipts v2
 
 Priority: P1
+
+Implementation status: core fill/submit receipt flow complete. `network.propose` mints a durable opaque one-time fill receipt bound to exact target/page/form revisions plus a stable hash of the proposed operation set; approved fill consumes it before the first field mutation. `network.review_before_submit` mints a submit receipt bound to the exact review revision/hash; final submit consumes it before clicking. Receipt state is persisted under ignored Network domain state with TTL, stale-binding rejection, and replay-safe consume locks. Human-readable `APPLY` / `SUBMIT` approval remains in place as an additional explicit user gate. Console continues to own execution/run identity and orchestration.
 
 Replace bare approval strings as the primary trust primitive.
 

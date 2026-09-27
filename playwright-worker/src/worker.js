@@ -35,6 +35,12 @@ import {
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { classifyHumanBoundary } from './human-boundary.js';
 import { classifySubmitPostcondition } from './submit-postcondition.js';
+import {
+  approvalPayloadHash,
+  consumeApprovalReceipt,
+  createApprovalReceipt,
+  normalizeFillApprovalOperations
+} from './approval-receipt.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -130,6 +136,10 @@ function getPolicy() {
     requireApprovalForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
     requireApprovalForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
     requireApprovalForUpload: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_UPLOAD || 'true').toLowerCase() !== 'false',
+    requireApprovalReceiptForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_FILL || 'true').toLowerCase() !== 'false',
+    requireApprovalReceiptForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
+    approvalReceiptRoot: path.resolve(String(process.env.NETWORK_MCP_APPROVAL_RECEIPT_ROOT || path.join(process.cwd(), 'var', 'browser', 'approval-receipts')).trim()),
+    approvalReceiptTtlMs: Number(process.env.NETWORK_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
     uploadRoot: path.resolve(String(process.env.NETWORK_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
     maxUploadBytes: Number(process.env.NETWORK_MCP_MAX_UPLOAD_BYTES || 26214400),
     submitEnabled: String(process.env.NETWORK_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
@@ -1735,8 +1745,10 @@ app.post('/extract-form', async (_req, res) => {
 
 app.post('/propose', async (req, res) => {
   try {
+    const policy = getPolicy();
     const target = await ensurePage();
     await ensureNotChallenge(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
     const requestedFields = Array.isArray(req.body?.fields) ? req.body.fields : [];
     const proposals = requestedFields.map((field, index) => ({
       index,
@@ -1744,11 +1756,28 @@ app.post('/propose', async (req, res) => {
       value: field?.value ?? '',
       reason: field?.reason || 'Provided for supervised review before fill'
     }));
+    const operationSet = normalizeFillApprovalOperations(requestedFields);
+    const operationsHash = approvalPayloadHash(hashStableJson, operationSet);
+    const approvalReceipt = await createApprovalReceipt({
+      root: policy.approvalReceiptRoot,
+      kind: 'fill',
+      targetId: before.targetId,
+      pageRevision: before.pageRevision,
+      formRevision: before.formRevision,
+      payloadHash: operationsHash,
+      ttlMs: policy.approvalReceiptTtlMs
+    });
 
     res.json({
       ok: true,
-      url: target.url(),
-      title: await target.title(),
+      status: 'NETWORK_PROPOSAL_READY',
+      url: before.url,
+      title: before.title,
+      targetId: before.targetId,
+      pageRevision: before.pageRevision,
+      formRevision: before.formRevision,
+      operationsHash,
+      approvalReceipt,
       proposals
     });
   } catch (error) {
@@ -1780,6 +1809,19 @@ app.post('/fill-after-approval', async (req, res) => {
     const before = await capturePageArtifact(target, { screenshot: false });
     assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const fields = before.fields;
+    const operationSet = normalizeFillApprovalOperations(requestedFields);
+    const operationsHash = approvalPayloadHash(hashStableJson, operationSet);
+    const approvalReceipt = policy.requireApprovalReceiptForFill
+      ? await consumeApprovalReceipt({
+          root: policy.approvalReceiptRoot,
+          id: req.body?.approvalReceiptId,
+          kind: 'fill',
+          targetId: before.targetId,
+          pageRevision: before.pageRevision,
+          formRevision: before.formRevision,
+          payloadHash: operationsHash
+        })
+      : null;
 
     const filled = [];
     for (const item of requestedFields) {
@@ -1800,6 +1842,8 @@ app.post('/fill-after-approval', async (req, res) => {
       ok: true,
       status: 'NETWORK_FORM_MUTATION_VERIFIED',
       correlation,
+      approvalReceipt,
+      operationsHash,
       filled,
       before: {
         targetId: before.targetId,
@@ -1966,10 +2010,27 @@ app.post('/click', async (req, res) => {
 
 app.post('/review-before-submit', async (_req, res) => {
   try {
+    const policy = getPolicy();
     const target = await ensurePage();
     await ensureNotChallenge(target);
     const artifact = await capturePageArtifact(target, { screenshot: true, screenshotPrefix: 'review' });
-    res.json({ ...artifact, message: 'Review manually before submit. Use reviewHash with submit-after-approval if the final action is approved.' });
+    const reviewPayloadHash = approvalPayloadHash(hashStableJson, { reviewHash: artifact.reviewHash });
+    const approvalReceipt = await createApprovalReceipt({
+      root: policy.approvalReceiptRoot,
+      kind: 'submit',
+      targetId: artifact.targetId,
+      pageRevision: artifact.pageRevision,
+      formRevision: artifact.formRevision,
+      payloadHash: reviewPayloadHash,
+      ttlMs: policy.approvalReceiptTtlMs
+    });
+    res.json({
+      ...artifact,
+      status: 'NETWORK_REVIEW_READY',
+      reviewPayloadHash,
+      approvalReceipt,
+      message: 'Review manually before submit. Approve only this exact review receipt/revision before final submit.'
+    });
   } catch (error) {
     sendNetworkError(res, error, 'NETWORK_REVIEW_CAPTURE_FAILED');
   }
@@ -1996,6 +2057,18 @@ app.post('/submit-after-approval', async (req, res) => {
     if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
       throw revisionError('NETWORK_APPROVAL_STALE', 'Current page review revision does not match the approved review artifact. Capture a fresh review artifact before submitting.', { expectedReviewHash, actualReviewHash: before.reviewHash });
     }
+    const reviewPayloadHash = approvalPayloadHash(hashStableJson, { reviewHash: before.reviewHash });
+    const approvalReceipt = policy.requireApprovalReceiptForSubmit
+      ? await consumeApprovalReceipt({
+          root: policy.approvalReceiptRoot,
+          id: req.body?.approvalReceiptId,
+          kind: 'submit',
+          targetId: before.targetId,
+          pageRevision: before.pageRevision,
+          formRevision: before.formRevision,
+          payloadHash: reviewPayloadHash
+        })
+      : null;
 
     const text = String(req.body?.text || '').trim();
     const selector = String(req.body?.selector || '').trim();
@@ -2030,6 +2103,8 @@ app.post('/submit-after-approval', async (req, res) => {
       ...postcondition,
       action: 'submit_after_approval',
       correlation,
+      approvalReceipt,
+      reviewPayloadHash,
       clicked: selector || text || 'default-submit',
       nth,
       beforeReviewHash: before.reviewHash,

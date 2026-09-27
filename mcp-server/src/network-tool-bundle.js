@@ -317,6 +317,7 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),
+        approvalReceiptId: z.string().min(1).optional(),
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
@@ -324,9 +325,10 @@ function registerNetworkTools(mcpServer, registry) {
         fields: z.array(z.record(z.unknown()))
       }).strict()
     },
-    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
+    async ({ approved, approvalText, approvalReceiptId, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
       approved,
       approvalText,
+      approvalReceiptId,
       expectedTargetId,
       expectedPageRevision,
       expectedFormRevision,
@@ -386,6 +388,7 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),
+        approvalReceiptId: z.string().min(1).optional(),
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
@@ -396,9 +399,10 @@ function registerNetworkTools(mcpServer, registry) {
         nth: z.number().int().nonnegative().optional()
       }).strict()
     },
-    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
+    async ({ approved, approvalText, approvalReceiptId, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
       approved,
       approvalText,
+      approvalReceiptId,
       expectedTargetId,
       expectedPageRevision,
       expectedFormRevision,

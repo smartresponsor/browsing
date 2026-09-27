@@ -13,7 +13,7 @@ export const networkCapabilityAliases = Object.freeze({
 
 export const networkCapabilityContract = Object.freeze({
   schemaVersion: 2,
-  contractVersion: '2.0.0',
+  contractVersion: '2.1.0',
   owner: 'network-mcp',
   boundary: Object.freeze({
     chatgptFacingConnector: 'console-mcp',
@@ -109,28 +109,29 @@ export const networkCapabilityContract = Object.freeze({
     tool('network.extract_form', '/extract-form', 'read', {
       riskClass: 'observation', binding: 'required', postcondition: 'form-snapshot'
     }),
-    tool('network.propose', '/propose', 'read', {
-      riskClass: 'observation', binding: 'required', postcondition: 'proposal-set'
+    tool('network.propose', '/propose', 'write', {
+      riskClass: 'local-domain-state', binding: 'required', replayPolicy: 'non-idempotent',
+      approvalReceiptBehavior: 'mints-fill-one-time', postcondition: 'proposal-and-fill-approval-receipt-created'
     }),
     tool('network.fill_after_approval', '/fill-after-approval', 'write', {
       riskClass: 'data-entry', binding: 'required', approvalPolicy: 'explicit-apply',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', executionCorrelation: 'console-owned-optional',
-      postcondition: 'field-values-verified'
+      approvalReceiptBehavior: 'consumes-fill-one-time', postcondition: 'field-values-verified'
     }),
     tool('network.upload_artifact', '/upload-artifact', 'write', {
       riskClass: 'local-artifact-upload', binding: 'required', approvalPolicy: 'explicit-upload',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', artifactBehavior: 'guarded-local-upload',
       executionCorrelation: 'console-owned-optional', postcondition: 'file-name-and-size-verified'
     }),
-    tool('network.review_before_submit', '/review-before-submit', 'read', {
-      riskClass: 'observation', binding: 'required', artifactBehavior: 'review-snapshot',
-      postcondition: 'review-revision-created'
+    tool('network.review_before_submit', '/review-before-submit', 'write', {
+      riskClass: 'local-domain-state', binding: 'required', artifactBehavior: 'review-snapshot', replayPolicy: 'non-idempotent',
+      approvalReceiptBehavior: 'mints-submit-one-time', postcondition: 'review-revision-and-submit-approval-receipt-created'
     }),
     tool('network.submit_after_approval', '/submit-after-approval', 'write', {
       riskClass: 'final-external-submit', binding: 'required', approvalPolicy: 'explicit-submit',
       requiresExplicitApproval: true, replayPolicy: 'never-replay', timeoutClass: 'long',
       artifactBehavior: 'terminal-evidence', executionCorrelation: 'console-owned-optional',
-      postcondition: 'submit-result-verified-or-explicitly-unverified'
+      approvalReceiptBehavior: 'consumes-submit-one-time', postcondition: 'submit-result-verified-or-explicitly-unverified'
     })
   ])
 });
@@ -172,6 +173,7 @@ function tool(name, route, risk, metadata = {}) {
     timeoutClass: metadata.timeoutClass ?? 'short',
     artifactBehavior: metadata.artifactBehavior ?? 'none',
     executionCorrelation: metadata.executionCorrelation ?? 'none',
+    approvalReceiptBehavior: metadata.approvalReceiptBehavior ?? 'none',
     postcondition: metadata.postcondition ?? 'result-returned',
     legacyConnectorSurface: metadata.legacyConnectorSurface === true
   });
