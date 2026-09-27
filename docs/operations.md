@@ -56,6 +56,11 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `install-startup-task`
 - `uninstall-startup-task`
 - `show-startup-task`
+- `install-mcp-startup-task`
+- `start-mcp-startup-task`
+- `stop-mcp-startup-task`
+- `uninstall-mcp-startup-task`
+- `show-mcp-startup-task`
 
 ## What each command does
 
@@ -66,7 +71,12 @@ The browser stays visible by default. Login, registration, CAPTCHA, 2FA, and sec
 - `restart` restarts all managed local processes.
 - `start-mcp` starts only the local MCP server.
 - `stop-mcp` stops only the local MCP server.
-- `restart-mcp` restarts only the local MCP server.
+- `restart-mcp` restarts only the local MCP server inside the current caller session.
+- `install-mcp-startup-task` registers the persistent `network-mcp-server` Windows Scheduled Task.
+- `start-mcp-startup-task` starts the persistent MCP task, waits for port `8792`, and requires MCP smoke to pass.
+- `stop-mcp-startup-task` stops the persistent MCP task and any managed MCP child process.
+- `uninstall-mcp-startup-task` stops and removes the persistent MCP task.
+- `show-mcp-startup-task` reports task state together with the current MCP runtime state.
 - `smoke-local` exercises the browser worker against a public sample form.
 - `smoke-public` checks `GET /healthz` on `NETWORK_MCP_PUBLIC_ORIGIN`.
 - `smoke-mcp` verifies local MCP initialize and tools/list responses.
@@ -163,4 +173,8 @@ Visible startup logs are written to `var\log\playwright-worker.visible.log` and 
 On worker startup, the browser opens only `http://127.0.0.1:8791/healthz` by default. Override this only with an intentional `NETWORK_MCP_START_URL`.
 If Chromium reports a profile lock after reboot, cleanup is limited to browser processes using the configured `NETWORK_MCP_USER_DATA_DIR`.
 
-Use `install-startup-task` and `uninstall-startup-task` to manage it.
+Use `install-startup-task` and `uninstall-startup-task` to manage the visible worker task.
+
+The MCP server has a separate persistent task named `network-mcp-server`. It runs `tool/start-persistent-mcp.ps1` as the foreground task action so the MCP Node process is owned by Windows Task Scheduler rather than by a transient CLI or ChatGPT caller session. The launcher imports the shared `AwsSecretContract` environment, owns `var\run\mcp-server.pid`, and writes to the existing MCP logs.
+
+Use `install-mcp-startup-task`, `start-mcp-startup-task`, `stop-mcp-startup-task`, `show-mcp-startup-task`, and `uninstall-mcp-startup-task` to manage it.
