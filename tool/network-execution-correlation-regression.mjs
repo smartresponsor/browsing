@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.js", import.meta.url), "utf8");
+const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.cjs", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 
 for (const token of [
