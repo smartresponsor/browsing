@@ -20,16 +20,18 @@ for (const token of [
   "const correlation = normalizeExecutionCorrelation(req.body);",
   "status: 'NETWORK_FORM_MUTATION_VERIFIED'",
   "status: 'NETWORK_UPLOAD_VERIFIED'",
+  "status: verified ? 'NETWORK_CLICK_TRANSITION_VERIFIED' : 'NETWORK_CLICK_POSTCONDITION_UNVERIFIED'",
   "action: 'submit_after_approval'",
   "sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED', correlation)",
   "sendNetworkError(res, error, 'NETWORK_UPLOAD_FAILED', correlation)",
+  "sendNetworkError(res, error, 'NETWORK_CLICK_FAILED', correlation)",
   "sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED', correlation)",
 ]) {
   assert.equal(worker.includes(token), true, `Network worker correlation invariant missing: ${token}`);
 }
 
 const correlationCaptureCount = (worker.match(/const correlation = normalizeExecutionCorrelation\(req\.body\);/g) || []).length;
-assert.ok(correlationCaptureCount >= 3, "fill/upload/submit must each capture Console-owned correlation");
+assert.ok(correlationCaptureCount >= 4, "fill/upload/click/submit must each capture Console-owned correlation");
 
 assert.equal(
   worker.includes("genericExecutionLeaseOwnedByNetwork"),

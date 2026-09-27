@@ -263,12 +263,24 @@ function registerNetworkTools(mcpServer, registry) {
     {
       description: 'Click a non-final visible button or link in the supervised browser worker.',
       inputSchema: z.object({
+        expectedTargetId: z.string().optional(),
+        expectedPageRevision: z.string().optional(),
+        expectedFormRevision: z.string().optional(),
+        correlation: networkExecutionCorrelationSchema.optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
         nth: z.number().int().nonnegative().optional()
       }).strict()
     },
-    async ({ text, selector, nth }) => toolResult(await registry.callTool('network.click', { text, selector, nth }))
+    async ({ expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, text, selector, nth }) => toolResult(await registry.callTool('network.click', {
+      expectedTargetId,
+      expectedPageRevision,
+      expectedFormRevision,
+      correlation,
+      text,
+      selector,
+      nth
+    }))
   );
 
   registerNetworkToolWithLegacyAlias(

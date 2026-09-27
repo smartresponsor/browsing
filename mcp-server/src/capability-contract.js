@@ -100,7 +100,8 @@ export const networkCapabilityContract = Object.freeze({
       riskClass: 'observation', binding: 'required', timeoutClass: 'bounded-wait', postcondition: 'readiness-evidence'
     }),
     tool('network.click', '/click', 'write', {
-      riskClass: 'reversible-ui', binding: 'required', replayPolicy: 'non-idempotent', postcondition: 'transition-observed'
+      riskClass: 'reversible-ui', binding: 'required', replayPolicy: 'non-idempotent',
+      executionCorrelation: 'console-owned-optional', postcondition: 'transition-observed-or-explicitly-unverified'
     }),
     tool('network.inspect', '/inspect', 'read', {
       riskClass: 'observation', binding: 'required', postcondition: 'form-snapshot'

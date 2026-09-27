@@ -1863,9 +1863,12 @@ app.post('/upload-artifact', async (req, res) => {
 });
 
 app.post('/click', async (req, res) => {
+  const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const target = await ensurePage();
     await ensureNotChallenge(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const text = String(req.body?.text || '').trim();
     const selector = String(req.body?.selector || '').trim();
     const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
@@ -1884,15 +1887,49 @@ app.post('/click', async (req, res) => {
     }
     const count = await locator.count();
     if (count <= nth) {
-      throw new Error(`Click target not found. Matches: ${count}. Requested index: ${nth}.`);
+      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
     }
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
     await ensureNotChallenge(target);
-    res.json({ ok: true, url: target.url(), title: await target.title(), clicked: selector || text, nth });
+    const after = await capturePageArtifact(target, { screenshot: false });
+    const transition = {
+      targetChanged: before.targetId !== after.targetId,
+      urlChanged: before.url !== after.url,
+      pageRevisionChanged: before.pageRevision !== after.pageRevision,
+      formRevisionChanged: before.formRevision !== after.formRevision
+    };
+    const verified = Object.values(transition).some(Boolean);
+    res.json({
+      ok: verified,
+      status: verified ? 'NETWORK_CLICK_TRANSITION_VERIFIED' : 'NETWORK_CLICK_POSTCONDITION_UNVERIFIED',
+      verified,
+      retrySafe: false,
+      externalActionMayHaveOccurred: true,
+      correlation,
+      clicked: selector || text,
+      nth,
+      transition,
+      before: {
+        targetId: before.targetId,
+        pageRevision: before.pageRevision,
+        formRevision: before.formRevision,
+        url: before.url
+      },
+      after: {
+        targetId: after.targetId,
+        pageRevision: after.pageRevision,
+        formRevision: after.formRevision,
+        url: after.url,
+        title: after.title
+      },
+      recommendedAction: verified
+        ? 'Continue from the returned target/page/form revisions.'
+        : 'Inspect the current page before deciding the next action. Do not automatically repeat the click.'
+    });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_CLICK_FAILED');
+    sendNetworkError(res, error, 'NETWORK_CLICK_FAILED', correlation);
   }
 });
 

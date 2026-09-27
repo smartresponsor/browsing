@@ -55,6 +55,7 @@ for (const route of workerRoutes) {
 }
 
 for (const toolName of [
+  "network.click",
   "network.fill_after_approval",
   "network.upload_artifact",
   "network.submit_after_approval",

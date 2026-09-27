@@ -637,7 +637,7 @@ Priority: P0
 
 Submit postcondition status: final submit no longer reports unconditional success after a click. Network classifies explicit confirmation evidence as `NETWORK_SUBMIT_VERIFIED`, visible validation failure as `NETWORK_SUBMIT_VALIDATION_FAILED`, and all ambiguous outcomes as `NETWORK_SUBMIT_POSTCONDITION_UNVERIFIED` with `retrySafe:false` and an explicit no-auto-resubmit recommendation.
 
-Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload is implemented separately as `network.form.upload`; it remains intentionally outside generic fill.
+Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload is implemented separately as `network.form.upload`; it remains intentionally outside generic fill. `network.click` is now also revision-bound and Console-correlated, and reports verified versus explicitly unverified UI transitions with before/after revision evidence.
 
 Create type-specific mutations:
 

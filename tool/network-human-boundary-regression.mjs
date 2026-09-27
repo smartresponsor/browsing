@@ -21,7 +21,7 @@ for (const token of [
   "sendNetworkError(res, error, 'NETWORK_PAGE_CAPTURE_FAILED')",
   "sendNetworkError(res, error, 'NETWORK_INSPECT_FAILED')",
   "sendNetworkError(res, error, 'NETWORK_FORM_EXTRACT_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_CLICK_FAILED')",
+  "sendNetworkError(res, error, 'NETWORK_CLICK_FAILED', correlation)",
   "sendNetworkError(res, error, 'NETWORK_REVIEW_CAPTURE_FAILED')",
   "sendNetworkError(res, error, 'NETWORK_OPEN_FAILED')",
   "sendNetworkError(res, error, 'NETWORK_OPEN_JOB_FAILED')",
