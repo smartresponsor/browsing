@@ -592,7 +592,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first semantic extraction slice complete. Network now classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Type-specific checkbox/radio/combobox/contenteditable/upload mutations are now implemented with postcondition verification; remaining semantic-model gaps are primarily richer compound controls, iframe/frame-path coverage, and site-specific edge cases.
+Implementation status: semantic extraction now covers top-level and nested iframe controls. Network classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Each control now carries deterministic `framePath`, `frameUrl`, `frameName`, and frame-local identity; mutations resolve that exact frame path and fail closed with `NETWORK_FRAME_STALE` when it no longer exists. Type-specific checkbox/radio/combobox/contenteditable/upload mutations remain postcondition-verified; remaining semantic-model gaps are primarily richer compound controls, explicit shadow-root identity, and site-specific edge cases.
 
 Replace flat field snapshots with semantic controls.
 

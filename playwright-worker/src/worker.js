@@ -34,6 +34,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { classifyHumanBoundary } from './human-boundary.js';
+import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { classifySubmitPostcondition } from './submit-postcondition.js';
 import {
   approvalPayloadHash,
@@ -692,8 +693,8 @@ async function snapshotChatGptPage(target) {
 
 const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"]';
 
-async function snapshotFields(target) {
-  const rawFields = await target.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
+async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
+  const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
     const tag = node.tagName.toLowerCase();
     const type = String(node.getAttribute('type') || '').toLowerCase();
@@ -833,6 +834,7 @@ async function snapshotFields(target) {
   const occurrenceByFingerprint = new Map();
   return rawFields.map(field => {
     const fingerprint = hashStableJson({
+      framePath,
       tag: field.tag,
       semanticType: field.semanticType,
       name: field.name,
@@ -848,10 +850,34 @@ async function snapshotFields(target) {
 
     return {
       ...field,
+      localIndex: field.index,
+      framePath: [...framePath],
+      frameUrl,
+      frameName,
       controlId: `control:${hashStableJson({ fingerprint, occurrence })}`,
-      semanticModelVersion: 2,
+      semanticModelVersion: 3,
     };
   });
+}
+
+
+async function snapshotFields(target) {
+  const fields = [];
+  for (const frameInfo of enumerateFrameTree(target)) {
+    const frameFields = await snapshotFieldsInFrame(
+      frameInfo.frame,
+      frameInfo.framePath,
+      frameInfo.frameUrl,
+      frameInfo.frameName,
+    );
+    for (const field of frameFields) {
+      fields.push({
+        ...field,
+        index: fields.length,
+      });
+    }
+  }
+  return fields;
 }
 
 async function snapshotSubmitCandidates(target) {
@@ -1231,6 +1257,28 @@ function getRequestedControlId(item) {
   return typeof item?.controlId === 'string' && item.controlId.trim() ? item.controlId.trim() : null;
 }
 
+async function locatorForFieldSnapshot(target, field) {
+  const framePath = Array.isArray(field?.framePath) ? field.framePath : [];
+  const frame = resolveFrameByPath(target, framePath);
+  if (!frame) {
+    throw revisionError(
+      'NETWORK_FRAME_STALE',
+      'The frame path for this control no longer exists. Re-inspect the form before mutating.',
+      { framePath, controlId: field?.controlId || null }
+    );
+  }
+
+  const localIndex = Number.isInteger(field?.localIndex) ? field.localIndex : field?.index;
+  if (!Number.isInteger(localIndex) || localIndex < 0) {
+    throw revisionError('NETWORK_FIELD_NOT_FOUND', 'The control does not have a valid frame-local index.', {
+      framePath,
+      controlId: field?.controlId || null
+    });
+  }
+
+  return frame.locator(SEMANTIC_FIELD_SELECTOR).nth(localIndex);
+}
+
 async function resolveRequestedFieldLocator(target, item, fields) {
   const controlId = getRequestedControlId(item);
   if (controlId) {
@@ -1242,7 +1290,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Control is not safely editable.', { controlId, semanticType: field.semanticType || null });
     }
 
-    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };
+    return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   const index = getRequestedFieldIndex(item);
@@ -1256,7 +1304,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Legacy indexed control is not safely editable.', { index, semanticType: field.semanticType || null });
     }
 
-    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(index), field };
+    return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   if (typeof item?.selector === 'string' && item.selector.trim()) {
@@ -1276,7 +1324,7 @@ async function resolveUploadControl(target, item, fields) {
     if (field.semanticType !== 'file') {
       throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
     }
-    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };
+    return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   const selector = typeof item?.selector === 'string' ? item.selector.trim() : '';

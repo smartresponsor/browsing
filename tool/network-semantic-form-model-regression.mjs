@@ -12,7 +12,7 @@ for (const token of [
   "semanticType = 'contenteditable'",
   "supportedOperations",
   "validation: validity",
-  "semanticModelVersion: 2",
+  "semanticModelVersion: 3",
   "controlId:",
   "hashStableJson({ fingerprint, occurrence })",
   "const controlId = getRequestedControlId(item);",
@@ -27,7 +27,7 @@ for (const token of [
   "optionMatch: 'exact-accessible-name'",
   "NETWORK_VALIDATION_FAILED",
   "NETWORK_CONTROL_UNSUPPORTED",
-  "return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };",
+  "return { locator: await locatorForFieldSnapshot(target, field), field };",
 ]) {
   assert.equal(source.includes(token), true, `Semantic Form Model v2 invariant missing: ${token}`);
 }
