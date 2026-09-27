@@ -1191,10 +1191,10 @@ async function resolveRequestedFieldLocator(target, item, fields) {
   if (controlId) {
     const field = fields.find(candidate => candidate.controlId === controlId);
     if (!field) {
-      throw new Error(`Control identity ${controlId} is stale or was not found in the current form revision.`);
+      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Control identity is stale or missing from the current form revision.', { controlId });
     }
     if (!isSafeFieldSnapshot(field)) {
-      throw new Error(field.blockedReason || `Control ${controlId} is not a safe editable field.`);
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Control is not safely editable.', { controlId, semanticType: field.semanticType || null });
     }
 
     return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };
@@ -1204,11 +1204,11 @@ async function resolveRequestedFieldLocator(target, item, fields) {
   if (index !== null) {
     const field = fields[index];
     if (!field) {
-      throw new Error(`Field index ${index} is out of range.`);
+      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Legacy field index is out of range for the current form revision.', { index });
     }
 
     if (!isSafeFieldSnapshot(field)) {
-      throw new Error(field.blockedReason || `Field index ${index} is not a safe editable field.`);
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Legacy indexed control is not safely editable.', { index, semanticType: field.semanticType || null });
     }
 
     return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(index), field };
@@ -1218,7 +1218,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
     return describeSelectorField(target, item.selector.trim());
   }
 
-  throw new Error('Each field must include a controlId, an index from the inspected field list, or a selector.');
+  throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Each mutation must identify a control by controlId, legacy index, or exact selector.');
 }
 
 async function resolveUploadControl(target, item, fields) {
@@ -1727,16 +1727,16 @@ app.post('/fill-after-approval', async (req, res) => {
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
     if (policy.requireApprovalForFill && (!approved || approvalText !== 'APPLY')) {
-      throw new Error('Explicit approvalText=APPLY is required for fill actions.');
+      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=APPLY is required for fill actions.');
     }
 
     const requestedFields = Array.isArray(req.body?.fields) ? req.body.fields : [];
     if (formFillCount >= policy.maxFormFills) {
-      throw new Error(`Form fill limit reached (${policy.maxFormFills}). Restart the worker.`);
+      throw revisionError('NETWORK_OPERATION_LIMIT_REACHED', 'Form fill limit reached for this supervised session.', { limit: policy.maxFormFills, kind: 'form-fill' });
     }
 
     if (fieldWriteCount + requestedFields.length > policy.maxFieldWrites) {
-      throw new Error(`Field write limit would be exceeded (${policy.maxFieldWrites}).`);
+      throw revisionError('NETWORK_OPERATION_LIMIT_REACHED', 'Field write limit would be exceeded for this supervised session.', { limit: policy.maxFieldWrites, kind: 'field-write', requestedWrites: requestedFields.length });
     }
 
     const target = await ensurePage();
@@ -1865,10 +1865,10 @@ app.post('/click', async (req, res) => {
     const selector = String(req.body?.selector || '').trim();
     const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
     if (!text && !selector) {
-      throw new Error('Either text or selector is required for click.');
+      throw revisionError('NETWORK_CLICK_TARGET_REQUIRED', 'Either text or selector is required for click.');
     }
     if (/submit|final|delete|withdraw|payment|purchase|confirm/i.test(text)) {
-      throw new Error('Final submit or destructive clicks are not allowed through network.click.');
+      throw revisionError('NETWORK_FINAL_ACTION_REQUIRES_SUBMIT_TOOL', 'Final submit or destructive clicks are not allowed through network.click.');
     }
     let locator = selector ? target.locator(selector) : target.getByRole('button', { name: text, exact: true });
     if (!selector && await locator.count() === 0) {
@@ -1909,10 +1909,10 @@ app.post('/submit-after-approval', async (req, res) => {
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
     if (!policy.submitEnabled) {
-      throw new Error('Final submit is disabled. Set NETWORK_MCP_ENABLE_SUBMIT=true to enable controlled submit actions.');
+      throw revisionError('NETWORK_SUBMIT_DISABLED', 'Final submit is disabled by Network policy.');
     }
     if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
-      throw new Error('Explicit approvalText=SUBMIT is required for final submit actions.');
+      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
     }
 
     const target = await ensurePage();
@@ -1921,7 +1921,7 @@ app.post('/submit-after-approval', async (req, res) => {
     assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const expectedReviewHash = String(req.body?.reviewHash || '').trim();
     if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
-      throw new Error('Current page reviewHash does not match the approved reviewHash. Capture a fresh review artifact before submitting.');
+      throw revisionError('NETWORK_APPROVAL_STALE', 'Current page review revision does not match the approved review artifact. Capture a fresh review artifact before submitting.', { expectedReviewHash, actualReviewHash: before.reviewHash });
     }
 
     const text = String(req.body?.text || '').trim();
