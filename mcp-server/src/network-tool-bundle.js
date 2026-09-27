@@ -129,10 +129,12 @@ function registerNetworkTools(mcpServer, registry) {
     async () => toolResult(await registry.callTool('network.extract_form', {}))
   );
 
-  mcpServer.registerTool(
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
+    'network.form.proposal.preview',
     'network.propose',
     {
-      description: 'Produce supervised answer proposals before filling.',
+      description: 'Preview normalized supervised answer proposals before filling.',
       inputSchema: z.object({
         fields: z.array(z.record(z.unknown()))
       }).strict()

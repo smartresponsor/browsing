@@ -14,6 +14,7 @@ const publicToolNames = [
   'network.inspect',
   'network.form.extract',
   'network.extract_form',
+  'network.form.proposal.preview',
   'network.propose',
   'network.form.fill',
   'network.fill_after_approval',
