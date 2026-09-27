@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { NetworkToolRegistry } from './tool-registry.js';
 
+const networkExecutionCorrelationSchema = z.object({
+  taskId: z.string().min(1).max(200).optional(),
+  runId: z.string().min(1).max(200).optional(),
+  invocationId: z.string().min(1).max(200).optional(),
+}).strict();
+
 export function createNetworkToolBundle({ workerUrl, browserWorkerToken }) {
   const registry = new NetworkToolRegistry(workerUrl, browserWorkerToken || '');
 
@@ -301,15 +307,17 @@ function registerNetworkTools(mcpServer, registry) {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
+        correlation: networkExecutionCorrelationSchema.optional(),
         fields: z.array(z.record(z.unknown()))
       }).strict()
     },
-    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
       approved,
       approvalText,
       expectedTargetId,
       expectedPageRevision,
       expectedFormRevision,
+      correlation,
       fields
     }))
   );
@@ -326,18 +334,20 @@ function registerNetworkTools(mcpServer, registry) {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
+        correlation: networkExecutionCorrelationSchema.optional(),
         controlId: z.string().optional(),
         selector: z.string().optional(),
         artifactRef: z.string().min(1),
         expectedSha256: z.string().regex(/^[A-Fa-f0-9]{64}$/).optional()
       }).strict()
     },
-    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, controlId, selector, artifactRef, expectedSha256 }) => toolResult(await registry.callTool('network.upload_artifact', {
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, controlId, selector, artifactRef, expectedSha256 }) => toolResult(await registry.callTool('network.upload_artifact', {
       approved,
       approvalText,
       expectedTargetId,
       expectedPageRevision,
       expectedFormRevision,
+      correlation,
       controlId,
       selector,
       artifactRef,
@@ -366,18 +376,20 @@ function registerNetworkTools(mcpServer, registry) {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
+        correlation: networkExecutionCorrelationSchema.optional(),
         reviewHash: z.string().optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
         nth: z.number().int().nonnegative().optional()
       }).strict()
     },
-    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, correlation, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
       approved,
       approvalText,
       expectedTargetId,
       expectedPageRevision,
       expectedFormRevision,
+      correlation,
       reviewHash,
       text,
       selector,

@@ -113,12 +113,13 @@ export const networkCapabilityContract = Object.freeze({
     }),
     tool('network.fill_after_approval', '/fill-after-approval', 'write', {
       riskClass: 'data-entry', binding: 'required', approvalPolicy: 'explicit-apply',
-      requiresExplicitApproval: true, replayPolicy: 'non-idempotent', postcondition: 'field-values-verified'
+      requiresExplicitApproval: true, replayPolicy: 'non-idempotent', executionCorrelation: 'console-owned-optional',
+      postcondition: 'field-values-verified'
     }),
     tool('network.upload_artifact', '/upload-artifact', 'write', {
       riskClass: 'local-artifact-upload', binding: 'required', approvalPolicy: 'explicit-upload',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', artifactBehavior: 'guarded-local-upload',
-      postcondition: 'file-name-and-size-verified'
+      executionCorrelation: 'console-owned-optional', postcondition: 'file-name-and-size-verified'
     }),
     tool('network.review_before_submit', '/review-before-submit', 'read', {
       riskClass: 'observation', binding: 'required', artifactBehavior: 'review-snapshot',
@@ -127,7 +128,8 @@ export const networkCapabilityContract = Object.freeze({
     tool('network.submit_after_approval', '/submit-after-approval', 'write', {
       riskClass: 'final-external-submit', binding: 'required', approvalPolicy: 'explicit-submit',
       requiresExplicitApproval: true, replayPolicy: 'never-replay', timeoutClass: 'long',
-      artifactBehavior: 'terminal-evidence', postcondition: 'submit-result-verified-or-explicitly-unverified'
+      artifactBehavior: 'terminal-evidence', executionCorrelation: 'console-owned-optional',
+      postcondition: 'submit-result-verified-or-explicitly-unverified'
     })
   ])
 });
@@ -168,6 +170,7 @@ function tool(name, route, risk, metadata = {}) {
     replayPolicy: metadata.replayPolicy ?? (risk === 'read' ? 'safe-replay' : 'non-idempotent'),
     timeoutClass: metadata.timeoutClass ?? 'short',
     artifactBehavior: metadata.artifactBehavior ?? 'none',
+    executionCorrelation: metadata.executionCorrelation ?? 'none',
     postcondition: metadata.postcondition ?? 'result-returned',
     legacyConnectorSurface: metadata.legacyConnectorSurface === true
   });
