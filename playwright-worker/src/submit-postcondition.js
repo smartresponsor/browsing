@@ -24,20 +24,6 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
     /submission failed/
   ];
 
-  const confirmationMatch = confirmationPatterns.find(pattern => pattern.test(lower));
-  if (confirmationMatch) {
-    return {
-      ok: true,
-      status: 'NETWORK_SUBMIT_VERIFIED',
-      verified: true,
-      retrySafe: false,
-      evidence: {
-        kind: 'confirmation-text',
-        text: extractEvidence(text, confirmationMatch)
-      }
-    };
-  }
-
   const validationMatch = validationPatterns.find(pattern => pattern.test(lower));
   if (validationMatch) {
     return {
@@ -48,6 +34,20 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
       evidence: {
         kind: 'validation-text',
         text: extractEvidence(text, validationMatch)
+      }
+    };
+  }
+
+  const confirmationMatch = confirmationPatterns.find(pattern => pattern.test(lower));
+  if (confirmationMatch) {
+    return {
+      ok: true,
+      status: 'NETWORK_SUBMIT_VERIFIED',
+      verified: true,
+      retrySafe: false,
+      evidence: {
+        kind: 'confirmation-text',
+        text: extractEvidence(text, confirmationMatch)
       }
     };
   }
@@ -89,4 +89,3 @@ function extractEvidence(text, pattern) {
   const end = Math.min(text.length, match.index + match[0].length + 160);
   return text.slice(start, end);
 }
-

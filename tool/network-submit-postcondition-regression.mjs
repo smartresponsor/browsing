@@ -32,6 +32,19 @@ assert.equal(validation.status, "NETWORK_SUBMIT_VALIDATION_FAILED");
 assert.equal(validation.verified, false);
 assert.equal(validation.retrySafe, false);
 
+const conflicting = classifySubmitPostcondition({
+  before,
+  after: {
+    url: "https://example.test/confirmation",
+    pageRevision: "after-revision",
+  },
+  visibleText: "Thank you for your application. Please correct the errors below. This field is required.",
+});
+assert.equal(conflicting.ok, false);
+assert.equal(conflicting.status, "NETWORK_SUBMIT_VALIDATION_FAILED");
+assert.equal(conflicting.verified, false);
+assert.equal(conflicting.retrySafe, false);
+
 const unverified = classifySubmitPostcondition({
   before,
   after: {
