@@ -4,7 +4,7 @@ import fs from "node:fs";
 const source = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 
 for (const token of [
-  "const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable=\"true\"], [role=\"combobox\"], [role=\"switch\"], [aria-autocomplete], input[list]';",
+  "const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable=\"true\"], [role=\"combobox\"], [role=\"switch\"], [aria-autocomplete], input[list], [role=\"slider\"], [role=\"spinbutton\"]';",
   "semanticType = 'checkbox'",
   "semanticType = 'radio'",
   "radioGroup: semanticType === 'radio' ? {",

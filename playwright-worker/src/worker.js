@@ -486,22 +486,55 @@ async function ensureNotChallenge(target) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const isVisible = element => {
+      if (!element) return false;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.visibility !== 'collapse'
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    const visibleTexts = selector => Array.from(document.querySelectorAll(selector))
+      .filter(isVisible)
+      .map(element => normalize(element.innerText || element.textContent || ''))
+      .filter(Boolean);
+
+    const consentText = visibleTexts([
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[id*="cookie" i]',
+      '[class*="cookie" i]',
+      '[id*="consent" i]',
+      '[class*="consent" i]',
+    ].join(', ')).join(' ').slice(0, 4000);
+
+    const alertDialogText = visibleTexts('[role="alertdialog"], dialog[open][role="alertdialog"]')
+      .join(' ')
+      .slice(0, 2000);
+
     return {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
-      hasPasswordField: Boolean(document.querySelector('input[type="password"]'))
+      hasPasswordField: Boolean(document.querySelector('input[type="password"]')),
+      consentText,
+      alertDialogText,
     };
   });
 
   const boundary = classifyHumanBoundary({
     text: snapshot.text,
     url: target.url(),
-    hasPasswordField: snapshot.hasPasswordField
+    hasPasswordField: snapshot.hasPasswordField,
+    consentText: snapshot.consentText,
+    alertDialogText: snapshot.alertDialogText,
   });
   if (boundary) {
     throw revisionError(
       'NETWORK_HUMAN_ACTION_REQUIRED',
-      'A human verification boundary was detected. Resolve it manually before Network resumes.',
+      'A human-action boundary was detected. Resolve it manually before Network resumes.',
       {
         boundary: {
           type: boundary.type,
@@ -691,7 +724,7 @@ async function snapshotChatGptPage(target) {
   };
 }
 
-const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list]';
+const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list], [role="slider"], [role="spinbutton"]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
   const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
@@ -1429,6 +1462,46 @@ function isSafeFieldSnapshot(field) {
   );
 }
 
+function assertSafeMutableField(field, identityEvidence = {}) {
+  if (isSafeFieldSnapshot(field)) {
+    return;
+  }
+
+  if (field?.semanticType === 'unsupported') {
+    const boundary = classifyHumanBoundary({
+      unsupportedControl: {
+        controlId: field?.controlId || null,
+        semanticType: field?.semanticType || null,
+        blockedReason: field?.blockedReason || null,
+      }
+    });
+    throw revisionError(
+      'NETWORK_HUMAN_ACTION_REQUIRED',
+      'An unsupported form control requires manual completion before Network can continue.',
+      {
+        boundary: {
+          type: boundary?.type || 'unsupported_control',
+          requestedAction: boundary?.requestedAction || 'Complete the unsupported control manually, then re-inspect the form.',
+          controlId: field?.controlId || null,
+          semanticType: field?.semanticType || null,
+          blockedReason: field?.blockedReason || null,
+          resumeCondition: 'Re-inspect the form after the unsupported control has been resolved manually.'
+        },
+        ...identityEvidence,
+      }
+    );
+  }
+
+  throw revisionError(
+    'NETWORK_CONTROL_UNSUPPORTED',
+    field?.blockedReason || 'Control is not safely editable.',
+    {
+      semanticType: field?.semanticType || null,
+      ...identityEvidence,
+    }
+  );
+}
+
 function getRequestedFieldIndex(item) {
   if (Number.isInteger(item?.index) && item.index >= 0) {
     return item.index;
@@ -1498,9 +1571,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
     if (!field) {
       throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Control identity is stale or missing from the current form revision.', { controlId });
     }
-    if (!isSafeFieldSnapshot(field)) {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Control is not safely editable.', { controlId, semanticType: field.semanticType || null });
-    }
+    assertSafeMutableField(field, { controlId });
 
     return { locator: await locatorForFieldSnapshot(target, field), field };
   }
@@ -1512,9 +1583,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Legacy field index is out of range for the current form revision.', { index });
     }
 
-    if (!isSafeFieldSnapshot(field)) {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', field.blockedReason || 'Legacy indexed control is not safely editable.', { index, semanticType: field.semanticType || null });
-    }
+    assertSafeMutableField(field, { index });
 
     return { locator: await locatorForFieldSnapshot(target, field), field };
   }
@@ -1598,28 +1667,25 @@ async function describeSelectorField(target, selector) {
     const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true';
     const readOnly = Boolean(node.readOnly) || node.getAttribute('aria-readonly') === 'true';
     const role = String(node.getAttribute('role') || '').toLowerCase();
-    const semanticType = tag === 'select'
-      ? 'select'
-      : tag === 'textarea'
-        ? 'textarea'
-        : role === 'switch'
-          ? 'switch'
-          : node.hasAttribute('aria-autocomplete') || (tag === 'input' && node.hasAttribute('list'))
-            ? 'autocomplete'
-            : role === 'combobox'
-              ? 'combobox'
-          : node.getAttribute('contenteditable') === 'true'
-            ? 'contenteditable'
-            : type === 'checkbox'
-              ? 'checkbox'
-              : type === 'radio'
-                ? 'radio'
-                : type === 'file'
-                  ? 'file'
-                  : type === 'password'
-                    ? 'password'
-                    : 'text';
-    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)
+    let semanticType = 'unsupported';
+    if (tag === 'select') semanticType = 'select';
+    else if (tag === 'textarea') semanticType = 'textarea';
+    else if (role === 'switch') semanticType = 'switch';
+    else if (node.hasAttribute('aria-autocomplete') || (tag === 'input' && node.hasAttribute('list'))) semanticType = 'autocomplete';
+    else if (role === 'combobox') semanticType = 'combobox';
+    else if (node.getAttribute('contenteditable') === 'true') semanticType = 'contenteditable';
+    else if (tag === 'input') {
+      if (type === 'checkbox') semanticType = 'checkbox';
+      else if (type === 'radio') semanticType = 'radio';
+      else if (type === 'file') semanticType = 'file';
+      else if (type === 'email') semanticType = 'email';
+      else if (type === 'tel') semanticType = 'phone';
+      else if (type === 'number' || type === 'range') semanticType = 'number';
+      else if (['date', 'datetime-local', 'month', 'time', 'week'].includes(type)) semanticType = 'date-time';
+      else if (type === 'password') semanticType = 'password';
+      else if (!['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) semanticType = 'text';
+    }
+    const safeEditable = ['select', 'textarea', 'text', 'email', 'phone', 'number', 'date-time', 'checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)
       && visible
       && enabled
       && !readOnly;
@@ -1651,17 +1717,16 @@ async function describeSelectorField(target, selector) {
     };
   });
 
-  if (!isSafeFieldSnapshot(field)) {
-    throw new Error(field.blockedReason || 'Selector did not resolve to a safe editable field.');
-  }
+  const resolvedField = {
+    ...field,
+    controlId: `selector:${hashStableJson({ selector, semanticType: field.semanticType, name: field.name, id: field.id })}`,
+    semanticModelVersion: 4,
+  };
+  assertSafeMutableField(resolvedField, { selector });
 
   return {
     locator,
-    field: {
-      ...field,
-      controlId: `selector:${hashStableJson({ selector, semanticType: field.semanticType, name: field.name, id: field.id })}`,
-      semanticModelVersion: 2,
-    },
+    field: resolvedField,
   };
 }
 

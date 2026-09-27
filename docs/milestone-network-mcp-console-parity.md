@@ -718,7 +718,7 @@ Exit criteria:
 
 Priority: P1
 
-Implementation status: first typed human-boundary slice complete. CAPTCHA, 2FA, and security challenges now produce `NETWORK_HUMAN_ACTION_REQUIRED` with boundary type, requested manual action, exact target URL/title evidence, and a safe resume condition. Page/form/navigation/review routes propagate the structured status through the common Network error envelope. Console MCP remains responsible for pause/resume orchestration. Login-required detection is now included using URL/text plus password-control presence without reading credentials. Consent/unexpected-modal/unsupported-control boundary expansion remains pending.
+Implementation status: typed human-boundary coverage now includes CAPTCHA, 2FA, security challenge, credential-safe login-required, conservative cookie/privacy consent, strong-signal `alertdialog` unexpected-modal detection, and reachable unsupported-control boundaries for modeled custom ARIA controls. All produce `NETWORK_HUMAN_ACTION_REQUIRED` with requested manual action and a safe resume condition; page/form/navigation/review routes propagate the structured status through the common Network error envelope, while Console MCP remains responsible for pause/resume orchestration. Generic visible dialogs are intentionally not treated as human boundaries without a strong blocking signal.
 
 Model CAPTCHA, 2FA, login, consent, unexpected modal, unsupported control, and security challenges as explicit resumable states.
 
