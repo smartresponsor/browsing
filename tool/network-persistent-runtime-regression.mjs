@@ -16,7 +16,9 @@ for (const command of [
 }
 
 assert.equal(supervisor.includes("$McpStartupTaskName = 'network-mcp-server'"), true, "persistent MCP Scheduled Task identity missing");
+assert.equal(supervisor.includes("$NetworkRoot = $Root"), true, "supervisor must preserve NetworkRoot before dot-sourcing secret-runtime");
 assert.equal(supervisor.includes("$RequestedSupervisorCommand = $Command"), true, "supervisor must preserve Command before dot-sourcing secret-runtime");
+assert.equal(supervisor.includes("$Root = $NetworkRoot"), true, "supervisor must restore NetworkRoot after secret-runtime export-env");
 assert.equal(supervisor.includes("$Command = $RequestedSupervisorCommand"), true, "supervisor must restore Command after secret-runtime export-env");
 assert.equal(supervisor.includes("-ExecutionTimeLimit ([TimeSpan]::Zero)"), true, "persistent MCP task must not have a finite execution timeout");
 assert.equal(supervisor.includes("Invoke-McpSmoke | ConvertFrom-Json"), true, "persistent MCP start must verify smoke before reporting success");

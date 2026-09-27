@@ -39,6 +39,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
+$NetworkRoot = $Root
 $WorkerRoot = Join-Path $Root 'playwright-worker'
 $McpRoot = Join-Path $Root 'mcp-server'
 $CloudflareWorkerRoot = Join-Path $Root 'cloudflare-worker'
@@ -69,6 +70,7 @@ if (Test-Path -LiteralPath $SharedSecretRuntime -PathType Leaf) {
     . $SharedSecretRuntime -Command export-env -Consumer network-mcp -IncludePrevious
 }
 
+$Root = $NetworkRoot
 $Command = $RequestedSupervisorCommand
 
 function Test-LegacySmartresponsorOrigin {
