@@ -7,6 +7,7 @@ for (const token of [
   "const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable=\"true\"], [role=\"combobox\"], [role=\"switch\"], [aria-autocomplete], input[list]';",
   "semanticType = 'checkbox'",
   "semanticType = 'radio'",
+  "radioGroup: semanticType === 'radio' ? {",
   "semanticType = 'file'",
   "semanticType = 'combobox'",
   "semanticType = 'autocomplete'",

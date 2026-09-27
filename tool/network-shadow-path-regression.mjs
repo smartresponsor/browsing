@@ -5,7 +5,9 @@ const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", imp
 
 for (const token of [
   "const shadowPath = [];",
-  "let shadowRoot = node.getRootNode();",
+  "const nodeRoot = node.getRootNode();",
+  "const queryRoot = nodeRoot && typeof nodeRoot.querySelector === 'function' ? nodeRoot : document",
+  "let shadowRoot = nodeRoot;",
   "while (shadowRoot && shadowRoot.host)",
   "shadowPath.unshift({",
   "shadowPath,",

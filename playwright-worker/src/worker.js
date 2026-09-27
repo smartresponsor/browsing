@@ -705,12 +705,14 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true';
     const readOnly = Boolean(node.readOnly) || node.getAttribute('aria-readonly') === 'true';
     const id = node.getAttribute('id') || '';
-    const explicit = id ? document.querySelector('label[for="' + id.replace(/"/g, '\\"') + '"]') : null;
+    const nodeRoot = node.getRootNode();
+    const queryRoot = nodeRoot && typeof nodeRoot.querySelector === 'function' ? nodeRoot : document;
+    const explicit = id ? queryRoot.querySelector('label[for="' + id.replace(/"/g, '\\"') + '"]') : null;
     const wrapping = node.closest('label');
     const labelledBy = String(node.getAttribute('aria-labelledby') || '')
       .split(/\s+/)
       .filter(Boolean)
-      .map(item => document.getElementById(item))
+      .map(item => queryRoot.querySelector('[id="' + item.replace(/"/g, '\\"') + '"]'))
       .filter(Boolean)
       .map(element => normalize(element.innerText || element.textContent || ''))
       .join(' ');
@@ -718,7 +720,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     const container = node.closest('fieldset, li, tr, .question, .form-group, .form-row, .field, .field-wrapper, .formField, .questionWrapper, .questionContainer, section, article, div');
     const contextText = container ? normalize(container.innerText || container.textContent || '') : '';
     const shadowPath = [];
-    let shadowRoot = node.getRootNode();
+    let shadowRoot = nodeRoot;
     while (shadowRoot && shadowRoot.host) {
       const host = shadowRoot.host;
       const parent = host.parentNode;
@@ -771,7 +773,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
         : semanticType === 'switch'
           ? ['switch-on', 'switch-off']
         : semanticType === 'radio'
-          ? ['choose']
+          ? ['choose', 'choose-option']
           : semanticType === 'select'
             ? (node.multiple ? ['select-multiple'] : ['select'])
             : ['text', 'textarea', 'email', 'phone', 'number', 'date-time'].includes(semanticType)
@@ -797,11 +799,13 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
             disabled: Boolean(option.disabled),
           }))
       : semanticType === 'radio' && node.getAttribute('name')
-        ? Array.from(document.querySelectorAll('input[type="radio"][name="' + String(node.getAttribute('name')).replace(/"/g, '\\"') + '"]')).slice(0, 200).map(option => ({
+        ? Array.from(queryRoot.querySelectorAll('input[type="radio"][name="' + String(node.getAttribute('name')).replace(/"/g, '\\"') + '"]')).slice(0, 200).map(option => ({
             value: String(option.value || ''),
             label: (() => {
               const optionId = option.getAttribute('id') || '';
-              const optionLabel = optionId ? document.querySelector('label[for="' + optionId.replace(/"/g, '\\"') + '"]') : option.closest('label');
+              const optionRoot = option.getRootNode();
+              const optionQueryRoot = optionRoot && typeof optionRoot.querySelector === 'function' ? optionRoot : document;
+              const optionLabel = optionId ? optionQueryRoot.querySelector('label[for="' + optionId.replace(/"/g, '\\"') + '"]') : option.closest('label');
               return normalize(optionLabel?.innerText || optionLabel?.textContent || option.getAttribute('aria-label') || option.value || '');
             })(),
             selected: Boolean(option.checked),
@@ -855,6 +859,12 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       checked: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
       multiple: Boolean(node.multiple),
       autocompleteMode: semanticType === 'autocomplete' ? (tag === 'input' && node.list ? 'native-datalist' : 'aria') : null,
+      radioGroup: semanticType === 'radio' ? {
+        name: node.getAttribute('name') || '',
+        size: options.length,
+        selectedValue: options.find(option => option.selected)?.value ?? null,
+        selectedLabel: options.find(option => option.selected)?.label ?? null,
+      } : null,
       options,
       supportedOperations,
       validation: validity,
@@ -1200,6 +1210,51 @@ async function writeField(target, locator, value, field = {}) {
   }
 
   if (semanticType === 'radio') {
+    if (typeof value === 'string' && value.trim()) {
+      const desired = value.trim();
+      const options = Array.isArray(field.options) ? field.options : [];
+      const matches = options.filter(option => !option.disabled && (String(option.value ?? '') === desired || String(option.label ?? '') === desired));
+      if (matches.length !== 1) {
+        throw revisionError(
+          matches.length === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          matches.length === 0
+            ? 'Radio-group option was not found by exact value or label.'
+            : 'Radio-group option is ambiguous by exact value or label.',
+          { desired, optionCount: matches.length, controlId: field.controlId || null, groupName: field.name || null }
+        );
+      }
+      const selected = matches[0];
+      const accessibleName = String(selected.label || '').trim();
+      if (!accessibleName) {
+        throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Radio-group exact selection requires an accessible option label.', { desired, value: selected.value ?? null, controlId: field.controlId || null });
+      }
+      const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
+      const option = optionFrame.getByRole('radio', { name: accessibleName, exact: true });
+      const optionCount = await option.count();
+      if (optionCount !== 1) {
+        throw revisionError(
+          optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          optionCount === 0
+            ? 'Radio-group option was not found by exact accessible name.'
+            : 'Radio-group option accessible name is ambiguous.',
+          { desired, accessibleName, optionCount, controlId: field.controlId || null }
+        );
+      }
+      await option.check();
+      const actual = await option.isChecked();
+      if (!actual) {
+        throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio-group postcondition did not confirm the requested option.', { desired, accessibleName, actual, controlId: field.controlId || null });
+      }
+      return {
+        semanticType: 'radio',
+        groupSelection: true,
+        requested: desired,
+        actual: String(selected.value ?? ''),
+        actualLabel: accessibleName,
+        optionMatch: 'exact-value-or-label-and-accessible-name',
+      };
+    }
+
     const desired = normalizeBooleanMutationValue(value, true);
     if (!desired) {
       throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'A radio control can only be selected; deselect by choosing another option in the group.', { controlId: field.controlId || null });
@@ -1209,7 +1264,7 @@ async function writeField(target, locator, value, field = {}) {
     if (!actual) {
       throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio postcondition did not confirm the requested option.', { desired: true, actual, controlId: field.controlId || null });
     }
-    return { semanticType: 'radio', requested: true, actual };
+    return { semanticType: 'radio', groupSelection: false, requested: true, actual };
   }
 
   if (semanticType === 'contenteditable') {
