@@ -708,8 +708,7 @@ async function snapshotFields(target) {
     else if (readOnly) blockedReason = 'Field is read-only';
     else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
     else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
-    else if (['contenteditable', 'combobox'].includes(semanticType)) blockedReason = 'Control requires a type-specific mutation capability';
-    else if (!nativeTextEditable) blockedReason = `Unsupported semantic control type: ${semanticType}`;
+    else if (!nativeTextEditable && !['contenteditable', 'combobox'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     const supportedOperations = semanticType === 'file'
       ? ['upload']
@@ -783,7 +782,7 @@ async function snapshotFields(target) {
       visible,
       enabled,
       readOnly,
-      safeEditable: (nativeTextEditable || ['checkbox', 'radio'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
+      safeEditable: (nativeTextEditable || ['checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
       blockedReason,
       sensitive: semanticType === 'password',
       checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
@@ -992,13 +991,16 @@ async function waitForReadiness(target, { selector = '', state = 'domcontentload
   return { ok: true, state, selector: selector || null, elapsedMs: Date.now() - startedAt, url: target.url(), title: await target.title() };
 }
 
-async function writeField(locator, value, field = {}) {
+async function writeField(target, locator, value, field = {}) {
   const tagName = await locator.evaluate(node => node.tagName.toLowerCase());
   const semanticType = field.semanticType || await locator.evaluate(node => {
     const tag = node.tagName.toLowerCase();
     const type = String(node.getAttribute('type') || '').toLowerCase();
+    const role = String(node.getAttribute('role') || '').toLowerCase();
     if (tag === 'select') return 'select';
     if (tag === 'textarea') return 'textarea';
+    if (role === 'combobox') return 'combobox';
+    if (node.getAttribute('contenteditable') === 'true') return 'contenteditable';
     if (type === 'checkbox') return 'checkbox';
     if (type === 'radio') return 'radio';
     return 'text';
@@ -1036,6 +1038,56 @@ async function writeField(locator, value, field = {}) {
       throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio postcondition did not confirm the requested option.', { desired: true, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'radio', requested: true, actual };
+  }
+
+  if (semanticType === 'contenteditable') {
+    const desired = String(value ?? '');
+    await locator.fill(desired);
+    const actual = await locator.evaluate(node => String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim());
+    const normalizedDesired = desired.replace(/\s+/g, ' ').trim();
+    if (actual !== normalizedDesired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Contenteditable postcondition did not match the requested text.', { desired: normalizedDesired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'contenteditable', requested: normalizedDesired, actual };
+  }
+
+  if (semanticType === 'combobox') {
+    const desired = String(value ?? '').trim();
+    if (!desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Combobox mutation requires a non-empty option label.', { controlId: field.controlId || null });
+    }
+
+    const fillable = await locator.evaluate(node => {
+      const tag = node.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || node.getAttribute('contenteditable') === 'true';
+    });
+    if (!fillable) {
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Generic combobox mutation only supports input/textarea/contenteditable combobox controls.', { controlId: field.controlId || null, tagName });
+    }
+
+    await locator.click();
+    await locator.fill(desired);
+    const option = target.getByRole('option', { name: desired, exact: true });
+    const optionCount = await option.count();
+    if (optionCount !== 1) {
+      throw revisionError(
+        optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+        optionCount === 0
+          ? 'Combobox option was not found by exact accessible name.'
+          : 'Combobox option accessible name is ambiguous.',
+        { desired, optionCount, controlId: field.controlId || null }
+      );
+    }
+
+    await option.click();
+    const actual = await locator.evaluate(node => {
+      if ('value' in node) return String(node.value ?? '').trim();
+      return String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+    });
+    if (actual !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Combobox postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'combobox', requested: desired, actual, optionMatch: 'exact-accessible-name' };
   }
 
   const desired = String(value ?? '');
@@ -1146,20 +1198,25 @@ async function describeSelectorField(target, selector) {
     const visible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
     const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true';
     const readOnly = Boolean(node.readOnly) || node.getAttribute('aria-readonly') === 'true';
+    const role = String(node.getAttribute('role') || '').toLowerCase();
     const semanticType = tag === 'select'
       ? 'select'
       : tag === 'textarea'
         ? 'textarea'
-        : type === 'checkbox'
-          ? 'checkbox'
-          : type === 'radio'
-            ? 'radio'
-            : type === 'file'
-              ? 'file'
-              : type === 'password'
-                ? 'password'
-                : 'text';
-    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio'].includes(semanticType)
+        : role === 'combobox'
+          ? 'combobox'
+          : node.getAttribute('contenteditable') === 'true'
+            ? 'contenteditable'
+            : type === 'checkbox'
+              ? 'checkbox'
+              : type === 'radio'
+                ? 'radio'
+                : type === 'file'
+                  ? 'file'
+                  : type === 'password'
+                    ? 'password'
+                    : 'text';
+    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)
       && visible
       && enabled
       && !readOnly;
@@ -1596,7 +1653,7 @@ app.post('/fill-after-approval', async (req, res) => {
     const filled = [];
     for (const item of requestedFields) {
       const resolved = await resolveRequestedFieldLocator(target, item, fields);
-      const evidence = await writeField(resolved.locator, item.value, resolved.field);
+      const evidence = await writeField(target, resolved.locator, item.value, resolved.field);
       filled.push({
         controlId: resolved.field.controlId || item.controlId || null,
         requested: item.name || item.selector || item.index || item.controlId,

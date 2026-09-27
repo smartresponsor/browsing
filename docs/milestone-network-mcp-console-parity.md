@@ -635,7 +635,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first verified native-control mutation slice complete. Text/select/checkbox/radio mutations are type-specific, return per-control evidence, and enforce postconditions with stable `NETWORK_VALIDATION_FAILED` / `NETWORK_CONTROL_UNSUPPORTED` statuses. Semantic `controlId` is preferred over legacy index. Combobox/contenteditable/file-upload primitives remain pending.
+Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload remains a separate pending capability.
 
 Create type-specific mutations:
 
