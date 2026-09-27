@@ -691,7 +691,7 @@ async function snapshotChatGptPage(target) {
   };
 }
 
-const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"]';
+const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
   const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
@@ -721,6 +721,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     let semanticType = 'unsupported';
     if (tag === 'select') semanticType = 'select';
     else if (tag === 'textarea') semanticType = 'textarea';
+    else if (role === 'switch') semanticType = 'switch';
     else if (role === 'combobox') semanticType = 'combobox';
     else if (node.getAttribute('contenteditable') === 'true') semanticType = 'contenteditable';
     else if (tag === 'input') {
@@ -745,12 +746,14 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     else if (readOnly) blockedReason = 'Field is read-only';
     else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
     else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
-    else if (!nativeTextEditable && !['contenteditable', 'combobox'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
+    else if (!nativeTextEditable && !['contenteditable', 'combobox', 'switch'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     const supportedOperations = semanticType === 'file'
       ? ['upload']
       : semanticType === 'checkbox'
         ? ['check', 'uncheck']
+        : semanticType === 'switch'
+          ? ['switch-on', 'switch-off']
         : semanticType === 'radio'
           ? ['choose']
           : semanticType === 'select'
@@ -783,8 +786,10 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
           }))
         : [];
 
-    const semanticValue = semanticType === 'checkbox' || semanticType === 'radio'
-      ? Boolean(node.checked)
+    const semanticValue = semanticType === 'switch'
+      ? node.getAttribute('aria-checked') === 'true'
+      : semanticType === 'checkbox' || semanticType === 'radio'
+        ? Boolean(node.checked)
       : tag === 'select' && node.multiple
         ? Array.from(node.selectedOptions || []).map(option => String(option.value ?? ''))
         : node.getAttribute('contenteditable') === 'true'
@@ -819,10 +824,10 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       visible,
       enabled,
       readOnly,
-      safeEditable: (nativeTextEditable || ['checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
+      safeEditable: (nativeTextEditable || ['checkbox', 'radio', 'contenteditable', 'combobox', 'switch'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
       blockedReason,
       sensitive: semanticType === 'password',
-      checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
+      checked: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
       multiple: Boolean(node.multiple),
       options,
       supportedOperations,
@@ -1108,6 +1113,7 @@ async function writeField(target, locator, value, field = {}) {
     const role = String(node.getAttribute('role') || '').toLowerCase();
     if (tag === 'select') return 'select';
     if (tag === 'textarea') return 'textarea';
+    if (role === 'switch') return 'switch';
     if (role === 'combobox') return 'combobox';
     if (node.getAttribute('contenteditable') === 'true') return 'contenteditable';
     if (type === 'checkbox') return 'checkbox';
@@ -1150,6 +1156,19 @@ async function writeField(target, locator, value, field = {}) {
       throw revisionError('NETWORK_VALIDATION_FAILED', 'Checkbox postcondition did not match the requested checked state.', { desired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'checkbox', requested: desired, actual };
+  }
+
+  if (semanticType === 'switch') {
+    const desired = normalizeBooleanMutationValue(value);
+    const before = await locator.getAttribute('aria-checked') === 'true';
+    if (before !== desired) {
+      await locator.click();
+    }
+    const actual = await locator.getAttribute('aria-checked') === 'true';
+    if (actual !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Switch postcondition did not match the requested state.', { desired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'switch', requested: desired, actual };
   }
 
   if (semanticType === 'radio') {
@@ -1406,8 +1425,10 @@ async function describeSelectorField(target, selector) {
       ? 'select'
       : tag === 'textarea'
         ? 'textarea'
-        : role === 'combobox'
-          ? 'combobox'
+        : role === 'switch'
+          ? 'switch'
+          : role === 'combobox'
+            ? 'combobox'
           : node.getAttribute('contenteditable') === 'true'
             ? 'contenteditable'
             : type === 'checkbox'
@@ -1419,7 +1440,7 @@ async function describeSelectorField(target, selector) {
                   : type === 'password'
                     ? 'password'
                     : 'text';
-    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)
+    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox', 'switch'].includes(semanticType)
       && visible
       && enabled
       && !readOnly;
@@ -1446,8 +1467,8 @@ async function describeSelectorField(target, selector) {
       readOnly,
       safeEditable,
       blockedReason,
-      checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
-      value: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : String(node.value ?? ''),
+      checked: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
+      value: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : String(node.value ?? ''),
     };
   });
 
