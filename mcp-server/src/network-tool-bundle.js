@@ -298,12 +298,18 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),
+        expectedTargetId: z.string().optional(),
+        expectedPageRevision: z.string().optional(),
+        expectedFormRevision: z.string().optional(),
         fields: z.array(z.record(z.unknown()))
       }).strict()
     },
-    async ({ approved, approvalText, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, fields }) => toolResult(await registry.callTool('network.fill_after_approval', {
       approved,
       approvalText,
+      expectedTargetId,
+      expectedPageRevision,
+      expectedFormRevision,
       fields
     }))
   );
@@ -326,15 +332,21 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),
+        expectedTargetId: z.string().optional(),
+        expectedPageRevision: z.string().optional(),
+        expectedFormRevision: z.string().optional(),
         reviewHash: z.string().optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
         nth: z.number().int().nonnegative().optional()
       }).strict()
     },
-    async ({ approved, approvalText, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
       approved,
       approvalText,
+      expectedTargetId,
+      expectedPageRevision,
+      expectedFormRevision,
       reviewHash,
       text,
       selector,

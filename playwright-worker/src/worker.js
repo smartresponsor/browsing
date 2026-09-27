@@ -1,6 +1,5 @@
 ﻿import express from 'express';
 import { chromium } from '@playwright/test';
-import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
@@ -28,6 +27,11 @@ import {
   listRawCdpTargets,
   verifyChatGptHomeTarget
 } from './cdp-target-inventory.js';
+import {
+  assertExpectedRevisions,
+  buildRevisionEnvelope,
+  hashStableJson
+} from './revision-contract.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -76,22 +80,6 @@ function getBrowserMode(policy) {
   }
 
   return `playwright-${policy.browserChannel}`;
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map(item => stableJson(item)).join(',')}]`;
-  }
-
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
-  }
-
-  return JSON.stringify(value);
-}
-
-function hashStableJson(value) {
-  return createHash('sha256').update(stableJson(value), 'utf8').digest('hex');
 }
 
 async function writeReviewScreenshot(target, prefix = 'review') {
@@ -751,25 +739,70 @@ async function snapshotSubmitCandidates(target) {
   })).then(items => items.filter(item => item.visible && item.enabled && item.text));
 }
 
+async function getPageTargetId(target) {
+  let session;
+  try {
+    session = await target.context().newCDPSession(target);
+    const info = await session.send('Target.getTargetInfo');
+    const targetId = String(info?.targetInfo?.targetId || '').trim();
+    if (targetId) {
+      return targetId;
+    }
+  } catch (_error) {
+    // Fall back to a deterministic page identity when CDP target info is unavailable.
+  } finally {
+    await session?.detach().catch(() => {});
+  }
+
+  return `fallback:${hashStableJson({
+    url: target.url(),
+    title: await target.title().catch(() => ''),
+  })}`;
+}
+
+function expectedRevisionsFromBody(body) {
+  return {
+    targetId: body?.expectedTargetId,
+    pageRevision: body?.expectedPageRevision,
+    formRevision: body?.expectedFormRevision,
+  };
+}
+
+function sendNetworkError(res, error, fallbackStatus = 'NETWORK_OPERATION_FAILED') {
+  res.status(409).json({
+    ok: false,
+    status: typeof error?.networkStatus === 'string' ? error.networkStatus : fallbackStatus,
+    error: normalizeError(error),
+    evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
+  });
+}
+
 async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture' } = {}) {
   await ensureNotChallenge(target);
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
+  const url = target.url();
+  const title = await target.title();
+  const textHash = hashChatGptSnapshotText(visibleText);
+  const targetId = await getPageTargetId(target);
+  const revisions = buildRevisionEnvelope({ targetId, url, title, textHash, fields });
   const artifact = {
     ok: true,
-    url: target.url(),
-    title: await target.title(),
-    textHash: hashChatGptSnapshotText(visibleText),
+    url,
+    title,
+    textHash,
     fields,
-    formHash: hashStableJson(fields),
+    ...revisions,
     submitCandidates
   };
   const reviewHash = hashStableJson({
+    targetId: artifact.targetId,
+    pageRevision: artifact.pageRevision,
+    formRevision: artifact.formRevision,
     url: artifact.url,
     title: artifact.title,
     textHash: artifact.textHash,
-    formHash: artifact.formHash,
     submitCandidates: artifact.submitCandidates
   });
 
@@ -1357,7 +1390,9 @@ app.post('/fill-after-approval', async (req, res) => {
 
     const target = await ensurePage();
     await ensureNotChallenge(target);
-    const fields = await snapshotFields(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
+    const fields = before.fields;
 
     const filled = [];
     for (const item of requestedFields) {
@@ -1368,10 +1403,25 @@ app.post('/fill-after-approval', async (req, res) => {
 
     formFillCount += 1;
     fieldWriteCount += requestedFields.length;
+    const after = await capturePageArtifact(target, { screenshot: false });
 
-    res.json({ ok: true, filled });
+    res.json({
+      ok: true,
+      status: 'NETWORK_FORM_MUTATION_VERIFIED',
+      filled,
+      before: {
+        targetId: before.targetId,
+        pageRevision: before.pageRevision,
+        formRevision: before.formRevision,
+      },
+      after: {
+        targetId: after.targetId,
+        pageRevision: after.pageRevision,
+        formRevision: after.formRevision,
+      },
+    });
   } catch (error) {
-    res.status(409).json({ ok: false, error: error.message });
+    sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED');
   }
 });
 
@@ -1435,6 +1485,7 @@ app.post('/submit-after-approval', async (req, res) => {
     const target = await ensurePage();
     await ensureNotChallenge(target);
     const before = await capturePageArtifact(target, { screenshot: false });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const expectedReviewHash = String(req.body?.reviewHash || '').trim();
     if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
       throw new Error('Current page reviewHash does not match the approved reviewHash. Capture a fresh review artifact before submitting.');
@@ -1469,7 +1520,7 @@ app.post('/submit-after-approval', async (req, res) => {
     const after = await capturePageArtifact(target, { screenshot: false });
     res.json({ ok: true, action: 'submit_after_approval', clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
   } catch (error) {
-    res.status(409).json({ ok: false, error: normalizeError(error) });
+    sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED');
   }
 });
 

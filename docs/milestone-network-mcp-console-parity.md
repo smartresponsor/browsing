@@ -530,6 +530,8 @@ Exit criteria:
 
 Priority: P0
 
+Implementation status: target/revision foundation started. Page/review captures now produce durable CDP `targetId`, `pageRevision`, and `formRevision`; approved fill and submit accept expected revisions and reject stale target/page/form state with stable Network statuses. Workflow/run persistence and leases remain pending.
+
 Add durable records for:
 
 - `workflowId`;
