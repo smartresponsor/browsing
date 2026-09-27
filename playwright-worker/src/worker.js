@@ -33,7 +33,7 @@ import {
   revisionError
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
-import { classifyChallengeText } from './human-boundary.js';
+import { classifyHumanBoundary } from './human-boundary.js';
 import { classifySubmitPostcondition } from './submit-postcondition.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -477,11 +477,16 @@ async function ensureNotChallenge(target) {
     const body = document.body?.innerText || '';
     return {
       title,
-      text: `${title}\n${body}`.slice(0, 4000)
+      text: `${title}\n${body}`.slice(0, 4000),
+      hasPasswordField: Boolean(document.querySelector('input[type="password"]'))
     };
   });
 
-  const boundary = classifyChallengeText(snapshot.text);
+  const boundary = classifyHumanBoundary({
+    text: snapshot.text,
+    url: target.url(),
+    hasPasswordField: snapshot.hasPasswordField
+  });
   if (boundary) {
     throw revisionError(
       'NETWORK_HUMAN_ACTION_REQUIRED',

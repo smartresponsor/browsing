@@ -25,3 +25,23 @@ export function classifyChallengeText(text) {
   return null;
 }
 
+export function classifyHumanBoundary({ text, url = '', hasPasswordField = false } = {}) {
+  const challenge = classifyChallengeText(text);
+  if (challenge) {
+    return challenge;
+  }
+
+  const normalizedText = String(text || '');
+  const normalizedUrl = String(url || '');
+  const loginText = /\b(sign[ -]?in|log[ -]?in|login|password)\b/i.test(normalizedText);
+  const loginUrl = /\/(?:login|log-in|signin|sign-in|auth)(?:[/?#]|$)/i.test(normalizedUrl);
+
+  if (hasPasswordField && (loginText || loginUrl)) {
+    return {
+      type: 'login_required',
+      requestedAction: 'Complete login manually in the bound browser target. Network will not read or enter credentials.'
+    };
+  }
+
+  return null;
+}
