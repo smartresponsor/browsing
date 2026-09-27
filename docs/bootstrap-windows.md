@@ -13,7 +13,7 @@ This is the bootstrap path for `network-mcp` on Windows.
 ## Install
 
 ```powershell
-cd D:\PhpstormProjects\www\network-mcp
+cd D:\PhpstormProjects\www\mcp\network-mcp
 npm install
 npm --prefix .\mcp-server install
 npm --prefix .\playwright-worker install

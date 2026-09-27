@@ -15,7 +15,7 @@ Source of truth:
 Run:
 
 ```powershell
-cd D:\PhpstormProjects\www\network-mcp
+cd D:\PhpstormProjects\www\mcp\network-mcp
 .\script\start-career-tunnel.ps1
 ```
 
@@ -32,7 +32,7 @@ Paste the printed public tunnel URL into the `CAREER_WORKER_URL` value used by t
 Recommended command:
 
 ```powershell
-echo https://your-public-tunnel.trycloudflare.com | wrangler secret put CAREER_WORKER_URL --config D:\PhpstormProjects\www\network-mcp\cloudflare-worker\wrangler.jsonc
+echo https://your-public-tunnel.trycloudflare.com | wrangler secret put CAREER_WORKER_URL --config D:\PhpstormProjects\www\mcp\network-mcp\cloudflare-worker\wrangler.jsonc
 ```
 
 If you prefer an environment variable for a local-only session, set `CAREER_WORKER_URL` in your shell before `wrangler deploy` or `wrangler dev`.

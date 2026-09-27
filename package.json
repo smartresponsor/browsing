@@ -10,6 +10,18 @@
     "dev:doctor": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 doctor",
     "dev:doctor-json": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 doctor-json",
     "dev:status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 status",
+    "dev:runtime-doctor": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 runtime-doctor",
+    "dev:runtime-recover": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 runtime-recover",
+    "dev:watch-tick": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 watch-tick",
+    "dev:watch-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 watch-status",
+    "dev:smoke": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 runtime-doctor",
+    "smoke": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 runtime-doctor",
+    "dev:watch-once": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\watch-network.ps1 -Once",
+    "dev:watch": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\watch-network.ps1",
+    "dev:shared-browser-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\shared-browser.ps1 status",
+    "dev:shared-browser-start": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\shared-browser.ps1 start",
+    "dev:shared-browser-restart": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\shared-browser.ps1 restart",
+    "dev:shared-browser-stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\shared-browser.ps1 stop",
     "dev:start": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start",
     "dev:stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop",
     "dev:start-visible-worker": ".\\tool\\start-visible-worker.cmd",
@@ -23,6 +35,7 @@
     "dev:stop-named-tunnel": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop-named-tunnel",
     "dev:named-tunnel-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 named-tunnel-status",
     "dev:named-tunnel-service-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-named-tunnel-service",
+    "typecheck": "node --check playwright-worker/src/worker.js && node --check playwright-worker/src/browser-policy.js && node --check playwright-worker/src/cdp-target-inventory.js && node --check mcp-server/src/server.js && node --check mcp-server/src/tool-registry.js && node --check mcp-server/src/capability-contract.js",
     "dev:task-install": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 install-startup-task",
     "dev:task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 uninstall-startup-task",
     "dev:task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-startup-task",
@@ -30,6 +43,7 @@
     "dev:mcp-task-start": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 start-mcp-startup-task",
     "dev:mcp-task-stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 stop-mcp-startup-task",
     "dev:mcp-task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 uninstall-mcp-startup-task",
-    "dev:mcp-task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-mcp-startup-task"
+    "dev:mcp-task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 show-mcp-startup-task",
+    "test:browser-cdp-cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-network.ps1 browser-cdp-cleanup-confirmed"
   }
 }

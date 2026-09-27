@@ -5,6 +5,18 @@ param(
         'doctor',
         'doctor-json',
         'status',
+        'runtime-doctor',
+        'runtime-recover',
+        'watch-tick',
+        'watch-status',
+        'shared-browser-status',
+        'browser-cdp-targets',
+        'browser-cdp-cleanup-plan',
+        'browser-cdp-cleanup-blocked',
+        'browser-cdp-cleanup-confirmed',
+        'shared-browser-start',
+        'shared-browser-stop',
+        'shared-browser-restart',
         'start',
         'stop',
         'start-visible-worker',
@@ -60,784 +72,43 @@ $NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
 $StartupTaskName = 'network-mcp-dev'
 $McpStartupTaskName = 'network-mcp-server'
 $StartupTaskPath = '\'
+$RuntimeStateFile = Join-Path $RunDir 'network-runtime.json'
+$WatchdogStateFile = Join-Path $RunDir 'network-watchdog-state.json'
+$WatchdogLogFile = Join-Path $LogDir 'network-watchdog.ndjson'
 $DefaultMcpPublicOrigin = 'https://network-mcp.taa0662621456.workers.dev'
 $LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
-
+$DefaultSharedBrowserRoot = Join-Path (Split-Path -Parent $Root) 'browser'
+$DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
+$DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
+$DefaultSharedBrowserLogDir = Join-Path $DefaultSharedBrowserRoot 'log'
+$SharedBrowserRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-runtime.json'
+$NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'network-mcp-browser-client.json'
+$SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 $McpWorkspaceRoot = Split-Path -Parent $Root
 $SharedSecretRuntime = Join-Path $McpWorkspaceRoot 'AwsSecretContract\tool\secret-runtime.ps1'
 $RequestedSupervisorCommand = $Command
 if (Test-Path -LiteralPath $SharedSecretRuntime -PathType Leaf) {
     . $SharedSecretRuntime -Command export-env -Consumer network-mcp -IncludePrevious
 }
-
 $Root = $NetworkRoot
 $Command = $RequestedSupervisorCommand
 
-function Test-LegacySmartresponsorOrigin {
-    param([AllowNull()][string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $false
-    }
-
-    return $Value.TrimEnd('/') -eq $LegacySmartresponsorOrigin
-}
-
-function Ensure-Directories {
-    foreach ($path in @($RunDir, $LogDir)) {
-        New-Item -ItemType Directory -Force -Path $path | Out-Null
-    }
-}
-
-function Get-NodeCommand {
-    return (Get-Command node -ErrorAction Stop)
-}
-
-function Get-NpmCommand {
-    $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
-    if ($npmCmd) {
-        return $npmCmd.Source
-    }
-
-    $npmExe = Get-Command npm.exe -ErrorAction SilentlyContinue
-    if ($npmExe) {
-        return $npmExe.Source
-    }
-
-    return (Get-Command npm -ErrorAction Stop).Source
-}
-
-function Get-PwshCommand {
-    return (Get-Command pwsh -ErrorAction Stop)
-}
-
-function Get-WorkerPort {
-    if ($env:NETWORK_MCP_WORKER_PORT) {
-        return [int]$env:NETWORK_MCP_WORKER_PORT
-    }
-
-    return 8791
-}
-
-function Get-McpPort {
-    if ($env:NETWORK_MCP_SERVER_PORT) {
-        return [int]$env:NETWORK_MCP_SERVER_PORT
-    }
-
-    return 8792
-}
-
-function Test-TcpListener {
-    param([Parameter(Mandatory = $true)][int]$Port)
-
-    return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
-}
-
-function Wait-ForTcpListener {
-    param(
-        [Parameter(Mandatory = $true)][int]$Port,
-        [int]$TimeoutSeconds = 45
-    )
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        if (Test-TcpListener -Port $Port) {
-            return $true
-        }
-        Start-Sleep -Milliseconds 250
-    }
-
-    return $false
-}
-
-function Stop-TreeProcess {
-    param([Parameter(Mandatory = $true)][int]$ProcessId)
-
-    $taskkill = Get-Command taskkill.exe -ErrorAction Stop
-    & $taskkill.Source /PID $ProcessId /T /F | Out-Null
-}
-
-function Get-ProcessFromPidFile {
-    param([Parameter(Mandatory = $true)][string]$PidFile)
-
-    if (-not (Test-Path -LiteralPath $PidFile)) {
-        return $null
-    }
-
-    $raw = (Get-Content -LiteralPath $PidFile -Raw).Trim()
-    $parsedPid = 0
-    if (-not [int]::TryParse($raw, [ref]$parsedPid)) {
-        return $null
-    }
-
-    try {
-        return Get-Process -Id $parsedPid -ErrorAction Stop
-    } catch {
-        return $null
-    }
-}
-
-function Get-ListeningProcessOnPort {
-    param([Parameter(Mandatory = $true)][int]$Port)
-
-    $connection = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
-        Where-Object { $_.LocalAddress -in @('127.0.0.1', '0.0.0.0', '::1', '::') } |
-        Select-Object -First 1
-
-    if (-not $connection) {
-        return $null
-    }
-
-    return Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
-}
-
-function Get-CommandLine {
-    param([Parameter(Mandatory = $true)][int]$ProcessId)
-
-    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
-    if (-not $process) {
-        return $null
-    }
-
-    return [string]$process.CommandLine
-}
-
-function Resolve-CloudflaredExe {
-    $candidates = @()
-
-    if ($env:NETWORK_MCP_CLOUDFLARED_BIN) {
-        $candidates += $env:NETWORK_MCP_CLOUDFLARED_BIN.Trim()
-    }
-
-    $candidates += 'C:\Tools\cloudflared\cloudflared.exe'
-
-    $pathCommand = Get-Command cloudflared.exe -ErrorAction SilentlyContinue
-    if ($pathCommand) {
-        $candidates += $pathCommand.Source
-    }
-
-    foreach ($candidate in $candidates | Select-Object -Unique) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-            return $candidate
-        }
-    }
-
-    throw 'cloudflared.exe was not found. Set NETWORK_MCP_CLOUDFLARED_BIN, install it at C:\Tools\cloudflared\cloudflared.exe, or add it to PATH.'
-}
-
-function Resolve-WranglerExe {
-    $candidates = @(
-        (Join-Path $Root 'node_modules\.bin\wrangler.cmd'),
-        (Join-Path $Root 'node_modules\.bin\wrangler.exe')
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate) {
-            return $candidate
-        }
-    }
-
-    $command = Get-Command wrangler -ErrorAction SilentlyContinue
-    if ($command) {
-        return $command.Source
-    }
-
-    throw 'wrangler was not found. Run npm install at the repo root so node_modules\.bin\wrangler is available, or add wrangler to PATH.'
-}
-
-function Test-CloudflaredAvailable {
-    try {
-        Resolve-CloudflaredExe | Out-Null
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Get-CloudflaredBinary {
-    try {
-        return Resolve-CloudflaredExe
-    } catch {
-        return $null
-    }
-}
-
-function Test-WranglerAvailable {
-    try {
-        Resolve-WranglerExe | Out-Null
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Get-WranglerBinary {
-    try {
-        return Resolve-WranglerExe
-    } catch {
-        return $null
-    }
-}
-
-function Get-WorkerState {
-    $pidProcess = Get-ProcessFromPidFile -PidFile $WorkerPidFile
-    $listenerProcess = Get-ListeningProcessOnPort -Port (Get-WorkerPort)
-    $listenerCommandLine = if ($listenerProcess) { Get-CommandLine -ProcessId $listenerProcess.Id } else { $null }
-    $listenerMatches = $false
-    if ($listenerCommandLine) {
-        $listenerMatches = $listenerCommandLine -match '(?i)playwright-worker.*(src[\\/]+worker\.js|run\s+start)'
-    }
-
-    $process = $pidProcess
-    if (-not $process -and $listenerMatches) {
-        $process = $listenerProcess
-    }
-
-    [pscustomobject]@{
-        name = 'playwright-worker'
-        port = (Get-WorkerPort)
-        pid_file = $WorkerPidFile
-        pid = if ($process) { $process.Id } else { $null }
-        running = [bool]$process
-        port_open = [bool]$listenerProcess
-        port_conflict = [bool]($listenerProcess -and -not $listenerMatches)
-        listener_command_line = $listenerCommandLine
-        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
-        log_file = $WorkerLogFile
-        error_file = $WorkerErrFile
-    }
-}
-
-function Get-McpState {
-    $pidProcess = Get-ProcessFromPidFile -PidFile $McpPidFile
-    $listenerProcess = Get-ListeningProcessOnPort -Port (Get-McpPort)
-    $listenerCommandLine = if ($listenerProcess) { Get-CommandLine -ProcessId $listenerProcess.Id } else { $null }
-    $listenerMatches = $false
-    if ($listenerCommandLine) {
-        $listenerMatches = $listenerCommandLine -match '(?i)src[\\/]+server\.js'
-    }
-
-    $process = $pidProcess
-    if (-not $process -and $listenerMatches) {
-        $process = $listenerProcess
-    }
-
-    [pscustomobject]@{
-        name = 'mcp-server'
-        port = (Get-McpPort)
-        endpoint = if ($env:NETWORK_MCP_SERVER_ENDPOINT) { $env:NETWORK_MCP_SERVER_ENDPOINT } else { '/mcp' }
-        pid_file = $McpPidFile
-        pid = if ($process) { $process.Id } else { $null }
-        running = [bool]$process
-        port_open = [bool]$listenerProcess
-        port_conflict = [bool]($listenerProcess -and -not $listenerMatches)
-        listener_command_line = $listenerCommandLine
-        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
-        log_file = $McpLogFile
-        error_file = $McpErrFile
-    }
-}
-
-function Get-PolicyState {
-    $allowedHosts = @()
-    if ($env:NETWORK_MCP_ALLOWED_HOSTS) {
-        $allowedHosts = $env:NETWORK_MCP_ALLOWED_HOSTS -split '[,;\r\n]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
-    }
-
-    $deniedHosts = @()
-    if ($env:NETWORK_MCP_DENIED_HOSTS) {
-        $deniedHosts = $env:NETWORK_MCP_DENIED_HOSTS -split '[,;\r\n]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() }
-    }
-
-    $warnings = @()
-    if ($env:NETWORK_MCP_HEADLESS -eq 'true') {
-        $warnings += 'NETWORK_MCP_HEADLESS is true; the MVP expects a visible browser by default.'
-    }
-    if ($env:NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL -eq 'false') {
-        $warnings += 'NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL is false; fill actions should remain approval-gated.'
-    }
-    if ($env:NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT -eq 'false') {
-        $warnings += 'NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT is false; submit should remain explicitly gated.'
-    }
-    if ($env:NETWORK_MCP_SUBMIT_DEFAULT -eq 'true') {
-        $warnings += 'NETWORK_MCP_SUBMIT_DEFAULT is true; the MVP expects submit to stay disabled by default.'
-    }
-    if ($env:NETWORK_MCP_ENABLE_SUBMIT -eq 'true') {
-        $warnings += 'NETWORK_MCP_ENABLE_SUBMIT is true; submit mode should remain off unless explicitly enabled later.'
-    }
-
-    $maxSessionSeconds = if ($env:NETWORK_MCP_MAX_SESSION_SECONDS) { [int]$env:NETWORK_MCP_MAX_SESSION_SECONDS } else { 7200 }
-    $maxPageVisits = if ($env:NETWORK_MCP_MAX_PAGE_VISITS) { [int]$env:NETWORK_MCP_MAX_PAGE_VISITS } else { 100 }
-    $maxFormFills = if ($env:NETWORK_MCP_MAX_FORM_FILLS) { [int]$env:NETWORK_MCP_MAX_FORM_FILLS } else { 20 }
-    $maxFieldWrites = if ($env:NETWORK_MCP_MAX_FIELD_WRITES) { [int]$env:NETWORK_MCP_MAX_FIELD_WRITES } else { 80 }
-
-    if ($maxSessionSeconds -le 0) {
-        $warnings += 'NETWORK_MCP_MAX_SESSION_SECONDS must be greater than zero.'
-    }
-    if ($maxPageVisits -le 0) {
-        $warnings += 'NETWORK_MCP_MAX_PAGE_VISITS must be greater than zero.'
-    }
-    if ($maxFormFills -le 0) {
-        $warnings += 'NETWORK_MCP_MAX_FORM_FILLS must be greater than zero.'
-    }
-    if ($maxFieldWrites -le 0) {
-        $warnings += 'NETWORK_MCP_MAX_FIELD_WRITES must be greater than zero.'
-    }
-
-    [pscustomobject]@{
-        mode = if ($env:NETWORK_MCP_MODE) { $env:NETWORK_MCP_MODE } else { 'local-assist' }
-        headless = [bool]($env:NETWORK_MCP_HEADLESS -eq 'true')
-        require_approval_for_fill = -not ($env:NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL -eq 'false')
-        require_approval_for_submit = -not ($env:NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT -eq 'false')
-        submit_default = [bool]($env:NETWORK_MCP_SUBMIT_DEFAULT -eq 'true')
-        enable_submit = [bool]($env:NETWORK_MCP_ENABLE_SUBMIT -eq 'true')
-        max_session_seconds = $maxSessionSeconds
-        max_page_visits = $maxPageVisits
-        max_form_fills = $maxFormFills
-        max_field_writes = $maxFieldWrites
-        allowed_hosts = $allowedHosts
-        denied_hosts = $deniedHosts
-        warnings = $warnings
-    }
-}
-
-function Get-TunnelState {
-    $pidProcess = Get-ProcessFromPidFile -PidFile $TunnelPidFile
-    $commandLineProcess = $null
-    if (-not $pidProcess) {
-        $commandLineProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -match 'cloudflared\b.*\btunnel\b.*\b--url\b.*127\.0\.0\.1' } |
-            Select-Object -First 1
-    }
-
-    $process = $pidProcess
-    if (-not $process -and $commandLineProcess) {
-        $process = Get-Process -Id $commandLineProcess.ProcessId -ErrorAction SilentlyContinue
-    }
-
-    [pscustomobject]@{
-        name = 'cloudflared'
-        pid_file = $TunnelPidFile
-        pid = if ($process) { $process.Id } else { $null }
-        running = [bool]$process
-        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
-        log_file = $TunnelLogFile
-        error_file = $TunnelErrFile
-    }
-}
-
-function Read-TunnelUrl {
-    foreach ($path in @($TunnelLogFile, $TunnelErrFile)) {
-        if (-not (Test-Path -LiteralPath $path)) {
-            continue
-        }
-
-        $text = Get-Content -LiteralPath $path -Raw
-        if ($text -match 'https://[a-z0-9.-]+\.trycloudflare\.com') {
-            return $Matches[0]
-        }
-    }
-
-    return $null
-}
-
-function Get-NamedTunnelName {
-    if ($env:NETWORK_MCP_TUNNEL_NAME) {
-        return $env:NETWORK_MCP_TUNNEL_NAME.Trim()
-    }
-
-    return 'network-mcp-worker'
-}
-
-function Get-NamedTunnelHostname {
-    if ($env:NETWORK_MCP_TUNNEL_HOSTNAME) {
-        if (Test-LegacySmartresponsorOrigin -Value ('https://' + $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim())) {
-            return ''
-        }
-
-        return $env:NETWORK_MCP_TUNNEL_HOSTNAME.Trim()
-    }
-
-    return ''
-}
-
-function Get-PublicOrigin {
-    if ($env:NETWORK_MCP_PUBLIC_ORIGIN) {
-        return $env:NETWORK_MCP_PUBLIC_ORIGIN.TrimEnd('/')
-    }
-
-    return $DefaultMcpPublicOrigin
-}
+. (Join-Path $PSScriptRoot 'dev-network.d\20-process-support.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\25-runtime-config.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\27-command-resolution.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\28-shared-browser-support.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\30-runtime-state.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\35-policy-state.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\40-worker-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\45-mcp-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\47-mcp-persistent-task.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\50-quick-tunnel-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\55-named-tunnel-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\60-stack-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-network.d\65-worker-request.ps1')
 
 if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
     Set-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
-}
-
-function Get-NamedTunnelConfigPath {
-    if ($env:NETWORK_MCP_TUNNEL_CONFIG) {
-        return $env:NETWORK_MCP_TUNNEL_CONFIG.Trim()
-    }
-
-    $profile = $env:USERPROFILE
-    if (-not $profile) {
-        throw 'USERPROFILE is not available. Set NETWORK_MCP_TUNNEL_CONFIG explicitly.'
-    }
-
-    return (Join-Path $profile '.cloudflared\network-mcp-worker.yml')
-}
-
-function Get-NamedTunnelState {
-    $pidProcess = Get-ProcessFromPidFile -PidFile $NamedTunnelPidFile
-    $commandLineProcess = $null
-    if (-not $pidProcess) {
-        $tunnelName = [regex]::Escape((Get-NamedTunnelName))
-        $commandLineProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -and $_.CommandLine -match "cloudflared.*tunnel.*run.*$tunnelName" } |
-            Select-Object -First 1
-    }
-
-    $process = $pidProcess
-    if (-not $process -and $commandLineProcess) {
-        $process = Get-Process -Id $commandLineProcess.ProcessId -ErrorAction SilentlyContinue
-    }
-
-    [pscustomobject]@{
-        name = 'cloudflared-named'
-        tunnel_name = Get-NamedTunnelName
-        hostname = Get-NamedTunnelHostname
-        config_file = Get-NamedTunnelConfigPath
-        pid_file = $NamedTunnelPidFile
-        pid = if ($process) { $process.Id } else { $null }
-        running = [bool]$process
-        command_line = if ($process) { Get-CommandLine -ProcessId $process.Id } else { $null }
-        log_file = $NamedTunnelLogFile
-        error_file = $NamedTunnelErrFile
-    }
-}
-
-function Start-NamedTunnel {
-    Ensure-Directories
-    Start-Worker | Out-Null
-
-    $state = Get-NamedTunnelState
-    if ($state.running) {
-        return ($state | ConvertTo-Json -Depth 8)
-    }
-
-    $cloudflared = Resolve-CloudflaredExe
-    $configPath = Get-NamedTunnelConfigPath
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        throw "Named tunnel config was not found: $configPath. Create it from ops\cloudflare\cloudflared.named.example.yml and keep credentials outside Git."
-    }
-
-    Remove-Item -LiteralPath $NamedTunnelPidFile -Force -ErrorAction SilentlyContinue
-    Set-Content -LiteralPath $NamedTunnelLogFile -Value '' -Encoding utf8
-    Set-Content -LiteralPath $NamedTunnelErrFile -Value '' -Encoding utf8
-
-    $process = Start-Process `
-        -FilePath $cloudflared `
-        -ArgumentList @(
-            'tunnel',
-            '--config',
-            $configPath,
-            'run',
-            (Get-NamedTunnelName)
-        ) `
-        -WorkingDirectory $Root `
-        -PassThru `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $NamedTunnelLogFile `
-        -RedirectStandardError $NamedTunnelErrFile
-
-    Set-Content -LiteralPath $NamedTunnelPidFile -Value $process.Id -NoNewline
-    Start-Sleep -Seconds 2
-
-    $state = Get-NamedTunnelState
-    if (-not $state.running) {
-        throw 'Named Cloudflare tunnel did not stay running.'
-    }
-
-    return ($state | ConvertTo-Json -Depth 8)
-}
-
-function Stop-NamedTunnel {
-    Ensure-Directories
-    $state = Get-NamedTunnelState
-    if ($state.pid) {
-        Stop-TreeProcess -ProcessId $state.pid
-    }
-
-    Remove-Item -LiteralPath $NamedTunnelPidFile -Force -ErrorAction SilentlyContinue
-    return (Get-NamedTunnelState | ConvertTo-Json -Depth 8)
-}
-
-function Install-NamedTunnelService {
-    $cloudflared = Resolve-CloudflaredExe
-    $configPath = Get-NamedTunnelConfigPath
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        throw "Named tunnel config was not found: $configPath. Create it from ops\cloudflare\cloudflared.named.example.yml first."
-    }
-
-    & $cloudflared service install --config $configPath
-}
-
-function Start-Worker {
-    Ensure-Directories
-
-    $state = Get-WorkerState
-    if ($state.running) {
-        return $state
-    }
-
-    if ($state.port_conflict) {
-        throw "playwright-worker cannot start because port $($state.port) is already in use by another process."
-    }
-
-    Remove-Item -LiteralPath $WorkerPidFile -Force -ErrorAction SilentlyContinue
-    Set-Content -LiteralPath $WorkerLogFile -Value '' -Encoding utf8
-    Set-Content -LiteralPath $WorkerErrFile -Value '' -Encoding utf8
-
-    $node = Get-NodeCommand
-    $workerScript = Join-Path $WorkerRoot 'src\worker.js'
-    $restorePort = $env:PORT
-    $restoreExternalVisibleChrome = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
-    $restoreRemoteDebuggingPort = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
-    $env:PORT = [string](Get-WorkerPort)
-    if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME)) {
-        $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = 'true'
-    }
-    if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_REMOTE_DEBUGGING_PORT)) {
-        $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT = '9223'
-    }
-
-    try {
-        $process = Start-Process `
-            -FilePath $node.Source `
-            -ArgumentList @('--enable-source-maps', $workerScript) `
-            -WorkingDirectory $Root `
-            -PassThru
-    } finally {
-        if ($null -eq $restorePort) {
-            Remove-Item -Path Env:PORT -ErrorAction SilentlyContinue
-        } else {
-            $env:PORT = $restorePort
-        }
-        if ($null -eq $restoreExternalVisibleChrome) {
-            Remove-Item -Path Env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME -ErrorAction SilentlyContinue
-        } else {
-            $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME = $restoreExternalVisibleChrome
-        }
-        if ($null -eq $restoreRemoteDebuggingPort) {
-            Remove-Item -Path Env:NETWORK_MCP_REMOTE_DEBUGGING_PORT -ErrorAction SilentlyContinue
-        } else {
-            $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT = $restoreRemoteDebuggingPort
-        }
-    }
-
-    Set-Content -LiteralPath $WorkerPidFile -Value $process.Id -NoNewline
-    if (-not (Wait-ForTcpListener -Port (Get-WorkerPort))) {
-        throw 'playwright-worker did not start in time.'
-    }
-
-    return (Get-WorkerState | ConvertTo-Json -Depth 8)
-}
-
-function Stop-Worker {
-    Ensure-Directories
-    $state = Get-WorkerState
-    if ($state.pid) {
-        Stop-TreeProcess -ProcessId $state.pid
-    }
-
-    Remove-Item -LiteralPath $WorkerPidFile -Force -ErrorAction SilentlyContinue
-    return (Get-WorkerState | ConvertTo-Json -Depth 8)
-}
-
-function Start-McpServer {
-    Ensure-Directories
-
-    $state = Get-McpState
-    if ($state.running) {
-        return $state
-    }
-
-    if ($state.port_conflict) {
-        throw "mcp-server cannot start because port $($state.port) is already in use by another process."
-    }
-
-    if (-not (Test-Path -LiteralPath (Join-Path $McpRoot 'node_modules'))) {
-        throw 'mcp-server dependencies are not installed. Run: npm --prefix mcp-server install'
-    }
-
-    Remove-Item -LiteralPath $McpPidFile -Force -ErrorAction SilentlyContinue
-    Set-Content -LiteralPath $McpLogFile -Value '' -Encoding utf8
-    Set-Content -LiteralPath $McpErrFile -Value '' -Encoding utf8
-
-    $node = Get-NodeCommand
-    $mcpScript = Join-Path $McpRoot 'src\server.js'
-    $restorePort = $env:NETWORK_MCP_SERVER_PORT
-    $env:NETWORK_MCP_SERVER_PORT = [string](Get-McpPort)
-
-    try {
-        $process = Start-Process `
-            -FilePath $node.Source `
-            -ArgumentList @('--enable-source-maps', $mcpScript) `
-            -WorkingDirectory $McpRoot `
-            -PassThru `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $McpLogFile `
-            -RedirectStandardError $McpErrFile
-    } finally {
-        if ($null -eq $restorePort) {
-            Remove-Item -Path Env:NETWORK_MCP_SERVER_PORT -ErrorAction SilentlyContinue
-        } else {
-            $env:NETWORK_MCP_SERVER_PORT = $restorePort
-        }
-    }
-
-    Set-Content -LiteralPath $McpPidFile -Value $process.Id -NoNewline
-    if (-not (Wait-ForTcpListener -Port (Get-McpPort))) {
-        throw 'mcp-server did not start in time.'
-    }
-
-    return (Get-McpState | ConvertTo-Json -Depth 8)
-}
-
-function Stop-McpServer {
-    Ensure-Directories
-    $state = Get-McpState
-    if ($state.pid) {
-        Stop-TreeProcess -ProcessId $state.pid
-    }
-
-    Remove-Item -LiteralPath $McpPidFile -Force -ErrorAction SilentlyContinue
-    return (Get-McpState | ConvertTo-Json -Depth 8)
-}
-
-function Start-Tunnel {
-    Ensure-Directories
-    Start-Worker | Out-Null
-
-    $cloudflared = Resolve-CloudflaredExe
-    Remove-Item -LiteralPath $TunnelPidFile -Force -ErrorAction SilentlyContinue
-    Set-Content -LiteralPath $TunnelLogFile -Value '' -Encoding utf8
-    Set-Content -LiteralPath $TunnelErrFile -Value '' -Encoding utf8
-
-    $workerPort = Get-WorkerPort
-    $process = Start-Process `
-        -FilePath $cloudflared `
-        -ArgumentList @(
-            'tunnel',
-            '--url',
-            "http://127.0.0.1:$workerPort",
-            '--no-autoupdate',
-            '--loglevel',
-            'info'
-        ) `
-        -WorkingDirectory $Root `
-        -PassThru `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $TunnelLogFile `
-        -RedirectStandardError $TunnelErrFile
-
-    Set-Content -LiteralPath $TunnelPidFile -Value $process.Id -NoNewline
-    $deadline = (Get-Date).AddSeconds(60)
-    $publicUrl = $null
-    while ((Get-Date) -lt $deadline -and -not $publicUrl) {
-        $publicUrl = Read-TunnelUrl
-        if ($publicUrl) {
-            break
-        }
-        Start-Sleep -Milliseconds 500
-    }
-
-    if (-not $publicUrl) {
-        throw 'cloudflared did not publish a trycloudflare URL in time.'
-    }
-
-    return [pscustomobject]@{
-        ok = $true
-        public_url = $publicUrl
-        worker_port = $workerPort
-        tunnel = Get-TunnelState
-    } | ConvertTo-Json -Depth 8
-}
-
-function Stop-Tunnel {
-    Ensure-Directories
-    $state = Get-TunnelState
-    if ($state.pid) {
-        Stop-TreeProcess -ProcessId $state.pid
-    }
-
-    Remove-Item -LiteralPath $TunnelPidFile -Force -ErrorAction SilentlyContinue
-    return (Get-TunnelState | ConvertTo-Json -Depth 8)
-}
-
-function Start-Stack {
-    $worker = Start-Worker
-    $mcp = Start-McpServer
-    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
-    $namedTunnel = Start-NamedTunnel | ConvertFrom-Json
-    [pscustomobject]@{
-        ok = $true
-        worker = $worker | ConvertFrom-Json
-        mcp = $mcp | ConvertFrom-Json
-        legacy_quick_tunnel = $legacyTunnel
-        named_tunnel = $namedTunnel
-    } | ConvertTo-Json -Depth 8
-}
-
-function Stop-Stack {
-    $legacyTunnel = Stop-Tunnel | ConvertFrom-Json
-    $namedTunnel = Stop-NamedTunnel | ConvertFrom-Json
-    $mcp = Stop-McpServer | ConvertFrom-Json
-    $worker = Stop-Worker | ConvertFrom-Json
-    [pscustomobject]@{
-        ok = $true
-        worker = $worker
-        mcp = $mcp
-        legacy_quick_tunnel = $legacyTunnel
-        named_tunnel = $namedTunnel
-    } | ConvertTo-Json -Depth 8
-}
-
-function Invoke-WorkerRequest {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Body
-    )
-
-    $port = Get-WorkerPort
-    $uri = "http://127.0.0.1:$port$Path"
-    $headers = @{}
-    if ($env:NETWORK_MCP_BROWSER_WORKER_TOKEN) {
-        $headers['Authorization'] = "Bearer $($env:NETWORK_MCP_BROWSER_WORKER_TOKEN)"
-    }
-
-    $response = Invoke-WebRequest -Method Post -Uri $uri -ContentType 'application/json' -Headers $headers -Body $Body -SkipHttpErrorCheck -TimeoutSec 30
-
-    return [pscustomobject]@{
-        status_code = [int]$response.StatusCode
-        content = $response.Content
-    }
-}
-
-function Invoke-WorkerBrowserStatus {
-    $state = Get-WorkerState
-    if (-not $state.running) {
-        return [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' }
-    }
-
-    $response = Invoke-WorkerRequest -Path '/browser-status' -Body '{}'
-    $body = $null
-    try {
-        $body = $response.content | ConvertFrom-Json
-    } catch {
-        $body = $response.content
-    }
-
-    return [pscustomobject]@{ ok = $response.status_code -eq 200; status_code = $response.status_code; body = $body }
 }
 
 function Get-FreeTcpPort {
@@ -1075,13 +346,17 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $toolsResponseHasTool = $tools.Content.Contains('network.open')
+    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home', 'network.browser_cdp_cleanup_plan_chatgpt_home', 'network.browser_cdp_cleanup_chatgpt_home', 'network.surface_plan', 'network.surface_execute')
+    $missingTools = @($requiredTools | Where-Object { -not $tools.Content.Contains($_) })
+    $toolsResponseHasRequiredTools = $missingTools.Count -eq 0
 
     return [pscustomobject]@{
-        ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasTool
+        ok = [int]$initialize.StatusCode -eq 200 -and [int]$tools.StatusCode -eq 200 -and $toolsResponseHasRequiredTools
         endpoint = $uri
         initialize = @{ status_code = [int]$initialize.StatusCode; body = $initializeBodyParsed }
         tools = @{ status_code = [int]$tools.StatusCode; body = $toolsBodyParsed }
+        required_tools = $requiredTools
+        missing_tools = $missingTools
     } | ConvertTo-Json -Depth 12
 }
 
@@ -1114,7 +389,305 @@ function Invoke-PublicSmoke {
     } | ConvertTo-Json -Depth 8
 }
 
+function ConvertTo-HealthCheckResult {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][bool]$Ok,
+        [AllowNull()][string]$Reason = $null,
+        [AllowNull()][object]$Detail = $null
+    )
+
+    [pscustomobject]@{
+        name = $Name
+        ok = $Ok
+        state = if ($Ok) { 'READY' } else { 'DEGRADED' }
+        reason = $Reason
+        detail = $Detail
+    }
+}
+
+function Resolve-RuntimeVerdict {
+    param(
+        [Parameter(Mandatory = $true)][object]$WorkerState,
+        [Parameter(Mandatory = $true)][object]$McpState,
+        [Parameter(Mandatory = $true)][object]$BrowserStatus,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpTargets,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpHomeVerification,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpCleanupPlan,
+        [Parameter(Mandatory = $true)][object]$BrowserCdpCleanupBlocked,
+        [Parameter(Mandatory = $true)][object]$McpSmoke,
+        [Parameter(Mandatory = $true)][object]$PublicSmoke,
+        [Parameter(Mandatory = $true)][object]$NamedTunnelState,
+        [Parameter(Mandatory = $true)][object]$Policy
+    )
+
+    $checks = [ordered]@{}
+    $checks['worker'] = ConvertTo-HealthCheckResult -Name 'worker' -Ok ([bool]($WorkerState.running -and -not $WorkerState.port_conflict)) -Reason $(if ($WorkerState.port_conflict) { 'WORKER_PORT_CONFLICT' } elseif (-not $WorkerState.running) { 'WORKER_DOWN' } else { $null }) -Detail $WorkerState
+    $checks['mcp'] = ConvertTo-HealthCheckResult -Name 'mcp-server' -Ok ([bool]($McpState.running -and -not $McpState.port_conflict)) -Reason $(if ($McpState.port_conflict) { 'MCP_PORT_CONFLICT' } elseif (-not $McpState.running) { 'MCP_SERVER_DOWN' } else { $null }) -Detail $McpState
+    $checks['browser'] = ConvertTo-HealthCheckResult -Name 'browser' -Ok ([bool]($BrowserStatus.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserStatus.ok) { 'BROWSER_STATUS_FAILED' } else { $null }) -Detail $BrowserStatus
+    $checks['browserCdpTargets'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-targets' -Ok ([bool]($BrowserCdpTargets.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_TARGETS_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpTargets.ok) { 'BROWSER_CDP_TARGETS_FAILED' } else { $null }) -Detail $BrowserCdpTargets
+    $checks['browserCdpHomeVerification'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-home-verification' -Ok ([bool]($BrowserCdpHomeVerification.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_HOME_VERIFICATION_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpHomeVerification.ok) { 'BROWSER_CDP_HOME_VERIFICATION_FAILED' } else { $null }) -Detail $BrowserCdpHomeVerification
+    $checks['browserCdpCleanupPlan'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-cleanup-plan' -Ok ([bool]($BrowserCdpCleanupPlan.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_CLEANUP_PLAN_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpCleanupPlan.ok) { 'BROWSER_CDP_CLEANUP_PLAN_FAILED' } else { $null }) -Detail $BrowserCdpCleanupPlan
+    $checks['browserCdpCleanupBlocked'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-cleanup-blocked' -Ok ([bool]($BrowserCdpCleanupBlocked.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_CLEANUP_BLOCKED_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpCleanupBlocked.ok) { 'BROWSER_CDP_CLEANUP_BLOCKED_FAILED' } else { $null }) -Detail $BrowserCdpCleanupBlocked
+    $browserBody = $BrowserStatus.body
+    $browserRuntime = $browserBody.runtime.browser
+    $browserPolicy = $browserBody.runtime.policy
+    $browserConfiguredVisible = [bool]($browserBody -and $browserBody.configuredVisible -eq $true)
+    $browserDetectedVisible = [bool]($browserBody -and ($browserBody.detectedVisibleWindow -eq $true -or $browserBody.browserVisible -eq $true))
+    $sharedBrowserOwner = $null
+    try {
+        if (Test-Path -LiteralPath $SharedBrowserRuntimeFile) {
+            $sharedBrowserOwner = Get-Content -LiteralPath $SharedBrowserRuntimeFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+    } catch {
+        $sharedBrowserOwner = $null
+    }
+    $sharedBrowserOwnerReady = [bool]($sharedBrowserOwner -and $sharedBrowserOwner.ok -eq $true)
+    $externalCdpAttached = [bool]($BrowserStatus.ok -and ($browserPolicy.externalVisibleBrowser -eq $true -or $browserPolicy.externalVisibleChrome -eq $true) -and $browserRuntime.contextOpen -eq $true -and $browserRuntime.pageCount -gt 0)
+    $externalBrowserReady = [bool]($externalCdpAttached -or $sharedBrowserOwnerReady)
+    $browserVisibilityOk = [bool]((-not $browserConfiguredVisible) -or $browserDetectedVisible -or $externalBrowserReady)
+    $browserVisibilityReason = if (-not $browserVisibilityOk) { 'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' } elseif ($externalCdpAttached -and -not $browserDetectedVisible) { 'EXTERNAL_CDP_ATTACHED_WINDOW_OWNER_NOT_DETECTED' } elseif ($sharedBrowserOwnerReady -and -not $externalCdpAttached) { 'SHARED_BROWSER_OWNER_READY_CLIENT_NOT_ATTACHED' } else { $null }
+    $checks['browserVisibility'] = ConvertTo-HealthCheckResult -Name 'browser-visibility' -Ok $browserVisibilityOk -Reason $browserVisibilityReason -Detail ([pscustomobject]@{ configured_visible = $browserConfiguredVisible; detected_visible = $browserDetectedVisible; external_cdp_attached = $externalCdpAttached; shared_browser_owner_ready = $sharedBrowserOwnerReady; page_count = $browserRuntime.pageCount; current_url = $browserRuntime.currentUrl; shared_browser_owner = $sharedBrowserOwner; browser = $BrowserStatus })
+    $checks['mcpSmoke'] = ConvertTo-HealthCheckResult -Name 'mcp-smoke' -Ok ([bool]($McpSmoke.ok)) -Reason $(if (-not $McpState.running) { 'MCP_SMOKE_SKIPPED_SERVER_DOWN' } elseif (-not $McpSmoke.ok) { 'MCP_SMOKE_FAILED' } else { $null }) -Detail $McpSmoke
+
+    $publicConfigured = -not [string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)
+    $checks['public'] = ConvertTo-HealthCheckResult -Name 'public' -Ok ([bool]((-not $publicConfigured) -or $PublicSmoke.ok)) -Reason $(if ($publicConfigured -and -not $PublicSmoke.ok) { 'PUBLIC_SMOKE_FAILED' } else { $null }) -Detail $PublicSmoke
+
+    $namedTunnelRequired = -not [string]::IsNullOrWhiteSpace((Get-NamedTunnelHostname))
+    $checks['namedTunnel'] = ConvertTo-HealthCheckResult -Name 'named-tunnel' -Ok ([bool]((-not $namedTunnelRequired) -or $NamedTunnelState.running)) -Reason $(if ($namedTunnelRequired -and -not $NamedTunnelState.running) { 'NAMED_TUNNEL_DOWN' } else { $null }) -Detail $NamedTunnelState
+    $checks['policy'] = ConvertTo-HealthCheckResult -Name 'policy' -Ok ([bool]($Policy.warnings.Count -eq 0)) -Reason $(if ($Policy.warnings.Count -gt 0) { 'POLICY_WARNINGS' } else { $null }) -Detail $Policy
+
+    $hardFailure = @($checks['worker'], $checks['mcp'], $checks['browser'], $checks['browserCdpTargets'], $checks['browserCdpHomeVerification'], $checks['browserCdpCleanupPlan'], $checks['browserCdpCleanupBlocked'], $checks['mcpSmoke']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $softFailure = @($checks['browserVisibility'], $checks['public'], $checks['namedTunnel'], $checks['policy']) | Where-Object { -not $_.ok } | Select-Object -First 1
+    $primaryFailure = if ($hardFailure) { $hardFailure } else { $softFailure }
+    $recommendedAction = 'NONE'
+
+    if ($primaryFailure) {
+        switch ($primaryFailure.reason) {
+            'WORKER_DOWN' { $recommendedAction = 'START_WORKER' }
+            'WORKER_PORT_CONFLICT' { $recommendedAction = 'STOP_CONFLICTING_WORKER_PORT_PROCESS' }
+            'MCP_SERVER_DOWN' { $recommendedAction = 'START_MCP_SERVER' }
+            'MCP_PORT_CONFLICT' { $recommendedAction = 'STOP_CONFLICTING_MCP_PORT_PROCESS' }
+            'BROWSER_STATUS_FAILED' { $recommendedAction = 'RESTART_WORKER' }
+            'MCP_SMOKE_FAILED' { $recommendedAction = 'RESTART_MCP_SERVER' }
+            'VISIBLE_BROWSER_WINDOW_NOT_DETECTED' { $recommendedAction = 'START_SHARED_BROWSER_OR_ENABLE_EXTERNAL_BROWSER' }
+            'PUBLIC_SMOKE_FAILED' { $recommendedAction = 'CHECK_PUBLIC_ORIGIN_OR_TUNNEL' }
+            'NAMED_TUNNEL_DOWN' { $recommendedAction = 'START_NAMED_TUNNEL' }
+            default { $recommendedAction = 'INSPECT_RUNTIME' }
+        }
+    }
+
+    [pscustomobject]@{
+        ok = -not [bool]$primaryFailure
+        state = if (-not $primaryFailure) { 'READY' } elseif ($hardFailure) { 'FAILED' } else { 'DEGRADED' }
+        reason = if ($primaryFailure) { $primaryFailure.reason } else { $null }
+        recommended_action = $recommendedAction
+        checks = $checks
+    }
+}
+
+function Get-RuntimeDoctorSnapshot {
+    Ensure-Directories
+    Ensure-SharedBrowserEnvironment
+    $workerState = Get-WorkerState
+    $mcpState = Get-McpState
+    $policy = Get-PolicyState
+    $browserStatus = Invoke-WorkerBrowserStatus
+    $browserCdpTargets = if ($workerState.running) { Invoke-WorkerBrowserCdpTargets | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $browserCdpHomeVerification = if ($workerState.running) { Invoke-WorkerBrowserCdpHomeVerification | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $browserCdpCleanupPlan = if ($workerState.running) { Invoke-WorkerBrowserCdpCleanupPlan | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $browserCdpCleanupBlocked = if ($workerState.running) { Invoke-WorkerBrowserCdpCleanupBlocked | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
+    $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
+    $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
+    $namedTunnelState = Get-NamedTunnelState
+    $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -BrowserCdpTargets $browserCdpTargets -BrowserCdpHomeVerification $browserCdpHomeVerification -BrowserCdpCleanupPlan $browserCdpCleanupPlan -BrowserCdpCleanupBlocked $browserCdpCleanupBlocked -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
+
+    [pscustomobject]@{
+        ok = $verdict.ok
+        state = $verdict.state
+        reason = $verdict.reason
+        recommended_action = $verdict.recommended_action
+        timestamp = (Get-Date).ToUniversalTime().ToString('o')
+        repo_root = $Root
+        browser_runtime = [pscustomobject]@{
+            root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
+            profile = $env:NETWORK_MCP_USER_DATA_DIR
+            mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER
+            legacy_mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
+            port = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
+        }
+        runtime_file = $RuntimeStateFile
+        watchdog_state_file = $WatchdogStateFile
+        watchdog_log_file = $WatchdogLogFile
+        worker = $workerState
+        mcp = $mcpState
+        browser = $browserStatus
+        browser_cdp_targets = $browserCdpTargets
+        browser_cdp_home_verification = $browserCdpHomeVerification
+        browser_cdp_cleanup_plan = $browserCdpCleanupPlan
+        browser_cdp_cleanup_blocked = $browserCdpCleanupBlocked
+        mcp_smoke = $mcpSmoke
+        public_smoke = $publicSmoke
+        named_tunnel = $namedTunnelState
+        policy = $policy
+        checks = $verdict.checks
+    }
+}
+
+function Save-SharedBrowserRuntimeSnapshot {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+
+    Ensure-SharedBrowserEnvironment
+    $browserBody = $Snapshot.browser.body
+    $browserRuntime = $browserBody.runtime.browser
+    $browserPolicy = $browserBody.runtime.policy
+    $visibilityCheck = $Snapshot.checks.browserVisibility.detail
+    $cdpVersion = $null
+    try {
+        $cdpVersion = Invoke-RestMethod -Method Get -Uri ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT + '/json/version') -TimeoutSec 3
+    } catch {
+        $cdpVersion = $null
+    }
+    $actualUserAgent = if ($cdpVersion -and $cdpVersion.'User-Agent') { [string]$cdpVersion.'User-Agent' } else { '' }
+    $actualProduct = if ($actualUserAgent -match 'Edg/') { 'msedge' } elseif ($actualUserAgent -match 'Chrome/') { 'chrome' } else { '' }
+    $registry = [pscustomobject]@{
+        ok = [bool]($visibilityCheck.external_cdp_attached)
+        state = if ($visibilityCheck.external_cdp_attached) { 'ATTACHED' } else { 'DETACHED' }
+        owner = 'network-mcp-browser-client'
+        preferred_product = 'msedge'
+        fallback_product = 'chrome'
+        actual_product = $actualProduct
+        actual_user_agent = $actualUserAgent
+        cdp_endpoint = ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT)
+        root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
+        profile = $env:NETWORK_MCP_USER_DATA_DIR
+        page_count = $browserRuntime.pageCount
+        current_url = $browserRuntime.currentUrl
+        context_open = $browserRuntime.contextOpen
+        page_open = $browserRuntime.pageOpen
+        visible_window_detected = $visibilityCheck.detected_visible
+        external_cdp_attached = $visibilityCheck.external_cdp_attached
+        updated_at = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $NetworkBrowserClientRuntimeFile -Encoding utf8
+}
+
+function Save-RuntimeSnapshot {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+
+    Ensure-Directories
+    $Snapshot | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $RuntimeStateFile -Encoding utf8
+    Save-SharedBrowserRuntimeSnapshot -Snapshot $Snapshot
+}
+
+function Show-RuntimeDoctor {
+    $snapshot = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $snapshot
+    $json = $snapshot | ConvertTo-Json -Depth 12
+    Write-Output $json
+    if (-not $snapshot.ok) {
+        if ($snapshot.state -eq 'FAILED') {
+            exit 2
+        }
+        exit 1
+    }
+}
+
+function Invoke-RuntimeRecover {
+    Ensure-Directories
+    $before = Get-RuntimeDoctorSnapshot
+    $actions = @()
+
+    switch ($before.recommended_action) {
+        'START_WORKER' {
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
+        }
+        'START_MCP_SERVER' {
+            Start-Worker | Out-Null
+            $actions += [pscustomobject]@{ action = 'START_MCP_SERVER'; result = (Start-McpServer | ConvertFrom-Json) }
+        }
+        'RESTART_WORKER' {
+            $actions += [pscustomobject]@{ action = 'STOP_WORKER'; result = (Stop-Worker | ConvertFrom-Json) }
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
+        }
+        'RESTART_MCP_SERVER' {
+            $actions += [pscustomobject]@{ action = 'STOP_MCP_SERVER'; result = (Stop-McpServer | ConvertFrom-Json) }
+            Start-Worker | Out-Null
+            $actions += [pscustomobject]@{ action = 'START_MCP_SERVER'; result = (Start-McpServer | ConvertFrom-Json) }
+        }
+        'START_NAMED_TUNNEL' {
+            $actions += [pscustomobject]@{ action = 'START_NAMED_TUNNEL'; result = (Start-NamedTunnel | ConvertFrom-Json) }
+        }
+        'START_SHARED_BROWSER_OR_ENABLE_EXTERNAL_BROWSER' {
+            $actions += [pscustomobject]@{ action = 'START_SHARED_BROWSER'; result = Start-SharedBrowserOwner }
+            $actions += [pscustomobject]@{ action = 'RESTART_WORKER'; result = (Stop-Worker | ConvertFrom-Json) }
+            $actions += [pscustomobject]@{ action = 'START_WORKER'; result = (Start-Worker | ConvertFrom-Json) }
+        }
+        default {
+            $actions += [pscustomobject]@{ action = 'NO_AUTOMATIC_RECOVERY'; reason = $before.reason; recommended_action = $before.recommended_action }
+        }
+    }
+
+    $after = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $after
+
+    [pscustomobject]@{
+        ok = $after.ok
+        state = $after.state
+        reason = $after.reason
+        before = $before
+        actions = $actions
+        after = $after
+    } | ConvertTo-Json -Depth 12
+}
+
+function Invoke-WatchTick {
+    Ensure-Directories
+    $before = Get-RuntimeDoctorSnapshot
+    $recovery = $null
+    if (-not $before.ok) {
+        $recovery = Invoke-RuntimeRecover | ConvertFrom-Json
+    }
+    $after = Get-RuntimeDoctorSnapshot
+    Save-RuntimeSnapshot -Snapshot $after
+
+    $tick = [pscustomobject]@{
+        ts = (Get-Date).ToUniversalTime().ToString('o')
+        ok = $after.ok
+        state = $after.state
+        reason = $after.reason
+        recommended_action = $after.recommended_action
+        before_state = $before.state
+        before_reason = $before.reason
+        recovery = $recovery
+    }
+
+    ($tick | ConvertTo-Json -Depth 12 -Compress) | Add-Content -LiteralPath $WatchdogLogFile -Encoding utf8
+    $tick | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $WatchdogStateFile -Encoding utf8
+    return ($tick | ConvertTo-Json -Depth 12)
+}
+
+function Show-WatchStatus {
+    Ensure-Directories
+    $state = $null
+    if (Test-Path -LiteralPath $WatchdogStateFile) {
+        try {
+            $state = Get-Content -LiteralPath $WatchdogStateFile -Raw | ConvertFrom-Json
+        } catch {
+            $state = Get-Content -LiteralPath $WatchdogStateFile -Raw
+        }
+    }
+
+    [pscustomobject]@{
+        ok = [bool]$state
+        state_file = $WatchdogStateFile
+        log_file = $WatchdogLogFile
+        last_tick = $state
+    } | ConvertTo-Json -Depth 12
+}
+
 function Show-Status {
+    Ensure-SharedBrowserEnvironment
     $workerState = Get-WorkerState
     $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
@@ -1249,143 +822,6 @@ function Deploy-Worker {
     }
 }
 
-function Install-McpStartupTask {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    $pwsh = Get-Command pwsh.exe -ErrorAction Stop
-    $launcherPath = Join-Path $Root 'tool\start-persistent-mcp.ps1'
-    if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
-        throw "Persistent MCP launcher was not found: $launcherPath"
-    }
-
-    $argument = '-NoProfile -ExecutionPolicy Bypass -File "' + $launcherPath + '"'
-    $action = New-ScheduledTaskAction -Execute $pwsh.Source -Argument $argument -WorkingDirectory $Root
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-
-    Register-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Keep the local Network MCP server running under Windows Task Scheduler.' -Force | Out-Null
-    return (Show-McpStartupTask)
-}
-
-function Start-McpStartupTask {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    $task = Get-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-    if (-not $task) {
-        throw 'Network MCP startup task is not installed. Run install-mcp-startup-task first.'
-    }
-
-    $state = Get-McpState
-    if ($state.pid) {
-        Stop-McpServer | Out-Null
-        Start-Sleep -Milliseconds 500
-    } elseif ($state.port_conflict) {
-        throw "Cannot start persistent Network MCP because port $($state.port) is owned by an unmanaged process."
-    }
-
-    Start-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath
-
-    $deadline = (Get-Date).AddSeconds(20)
-    do {
-        Start-Sleep -Milliseconds 250
-        $state = Get-McpState
-        if ($state.running) {
-            $smoke = Invoke-McpSmoke | ConvertFrom-Json
-            if (-not $smoke.ok) {
-                throw 'Persistent Network MCP started but MCP smoke failed.'
-            }
-
-            return [pscustomobject]@{
-                ok = $true
-                task = Show-McpStartupTask | ConvertFrom-Json
-                mcp = $state
-                smoke = $smoke
-            } | ConvertTo-Json -Depth 10
-        }
-    } while ((Get-Date) -lt $deadline)
-
-    $taskState = Show-McpStartupTask | ConvertFrom-Json
-    throw "Persistent Network MCP did not become ready in time. Task state: $($taskState.state)"
-}
-
-function Stop-McpStartupTask {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    $task = Get-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-    if ($task -and [string]$task.State -eq 'Running') {
-        Stop-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 750
-    }
-
-    $state = Get-McpState
-    if ($state.pid) {
-        Stop-McpServer | Out-Null
-    }
-
-    return [pscustomobject]@{
-        ok = $true
-        task = Show-McpStartupTask | ConvertFrom-Json
-        mcp = Get-McpState
-    } | ConvertTo-Json -Depth 8
-}
-
-function Uninstall-McpStartupTask {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    Stop-McpStartupTask | Out-Null
-    $existing = Get-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-    if ($existing) {
-        Unregister-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -Confirm:$false | Out-Null
-    }
-
-    return [pscustomobject]@{
-        task_name = $McpStartupTaskName
-        removed = [bool]$existing
-    } | ConvertTo-Json -Depth 4
-}
-
-function Show-McpStartupTask {
-    Import-Module ScheduledTasks -ErrorAction Stop
-    $task = Get-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-    if (-not $task) {
-        return [pscustomobject]@{
-            task_name = $McpStartupTaskName
-            task_path = $StartupTaskPath
-            exists = $false
-            mcp = Get-McpState
-        } | ConvertTo-Json -Depth 6
-    }
-
-    $info = Get-ScheduledTaskInfo -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
-    $action = $task.Actions | Select-Object -First 1
-    $trigger = $task.Triggers | Select-Object -First 1
-
-    return [pscustomobject]@{
-        task_name = $McpStartupTaskName
-        task_path = $StartupTaskPath
-        exists = $true
-        state = [string]$task.State
-        last_run_time = if ($info) { $info.LastRunTime } else { $null }
-        next_run_time = if ($info) { $info.NextRunTime } else { $null }
-        last_task_result = if ($info) { $info.LastTaskResult } else { $null }
-        action = if ($action) {
-            [pscustomobject]@{
-                execute = $action.Execute
-                arguments = $action.Arguments
-                working_directory = $action.WorkingDirectory
-            }
-        } else {
-            $null
-        }
-        trigger = if ($trigger) {
-            [pscustomobject]@{
-                enabled = $trigger.Enabled
-                start_boundary = $trigger.StartBoundary
-            }
-        } else {
-            $null
-        }
-        mcp = Get-McpState
-    } | ConvertTo-Json -Depth 8
-}
-
 function Install-StartupTask {
     Import-Module ScheduledTasks -ErrorAction Stop
     $cmd = Get-Command cmd.exe -ErrorAction Stop
@@ -1459,12 +895,27 @@ switch ($Command) {
     'doctor' { Show-Doctor }
     'doctor-json' { Show-DoctorJson }
     'status' { Show-Status }
+    'runtime-doctor' { Show-RuntimeDoctor }
+    'runtime-recover' { Invoke-RuntimeRecover }
+    'watch-tick' { Invoke-WatchTick }
+    'watch-status' { Show-WatchStatus }
+    'shared-browser-status' { Get-SharedBrowserOwnerStatus | ConvertTo-Json -Depth 8 }
+    'browser-cdp-targets' { Invoke-WorkerBrowserCdpTargets }
+    'browser-cdp-cleanup-plan' { Invoke-WorkerBrowserCdpCleanupPlan }
+    'browser-cdp-cleanup-blocked' { Invoke-WorkerBrowserCdpCleanupBlocked }
+    'browser-cdp-cleanup-confirmed' { Invoke-WorkerBrowserCdpCleanupConfirmed }
+    'shared-browser-start' { Start-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
+    'shared-browser-stop' { Stop-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
+    'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'start' { Start-Stack }
     'start-visible-worker' { & (Join-Path $Root 'tool\start-visible-worker.cmd') }
     'stop' { Stop-Stack }
     'restart' {
         Stop-Stack | Out-Null
-        Start-Stack
+        Start-Stack | Out-Null
+        $snapshot = Get-RuntimeDoctorSnapshot
+        Save-RuntimeSnapshot -Snapshot $snapshot
+        $snapshot | ConvertTo-Json -Depth 12
     }
     'start-mcp' { Start-McpServer }
     'stop-mcp' { Stop-McpServer }

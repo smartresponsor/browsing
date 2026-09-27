@@ -62,6 +62,128 @@ function registerNetworkTools(mcpServer, registry) {
   );
 
   mcpServer.registerTool(
+    'network.health_full',
+    {
+      description: 'Run deep supervised browser diagnostics including worker, browser, target, profile, and DevTools reachability.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.health_full', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.shared_browser_status',
+    {
+      description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.shared_browser_status', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_cdp_targets',
+    {
+      description: 'List raw shared browser CDP targets without attaching through Playwright or opening pages.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.browser_cdp_targets', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_cdp_verify_chatgpt_home',
+    {
+      description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
+      inputSchema: z.object({
+        index: z.number().int().nonnegative().optional(),
+        id: z.string().optional(),
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ index, id, maxVerify, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_verify_chatgpt_home', { index, id, maxVerify, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_cdp_cleanup_plan_chatgpt_home',
+    {
+      description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets.',
+      inputSchema: z.object({
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        maxClose: z.number().int().min(1).max(50).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_plan_chatgpt_home', { maxVerify, maxClose, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_cdp_cleanup_chatgpt_home',
+    {
+      description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmation, then verify conversation tabs were preserved.',
+      inputSchema: z.object({
+        confirmCleanup: z.boolean().default(false),
+        maxVerify: z.number().int().min(1).max(50).optional(),
+        maxClose: z.number().int().min(1).max(10).optional(),
+        timeoutMs: z.number().int().min(250).max(10000).optional()
+      }).strict()
+    },
+    async ({ confirmCleanup, maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_chatgpt_home', { confirmCleanup, maxVerify, maxClose, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
+    'network.surface_plan',
+    {
+      description: 'Build a read-only publication update plan for network-mcp.',
+      inputSchema: z.object({
+        connectorName: z.string().optional(),
+        connectorId: z.string().optional(),
+        timeoutMs: z.number().int().min(5000).max(120000).optional()
+      }).strict()
+    },
+    async ({ connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.surface_plan', { connectorName, connectorId, timeoutMs }))
+  );
+
+  mcpServer.registerTool(
+    'network.surface_execute',
+    {
+      description: 'Run the approved publication update for network-mcp.',
+      inputSchema: z.object({
+        confirmSync: z.boolean().default(false),
+        connectorName: z.string().optional(),
+        connectorId: z.string().optional(),
+        timeoutMs: z.number().int().min(5000).max(120000).optional()
+      }).strict()
+    },
+    async ({ confirmSync, connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.connector_sync_execute', {
+      confirmRefresh: confirmSync === true,
+      connectorName,
+      connectorId,
+      timeoutMs
+    }))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_targets',
+    {
+      description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
+      inputSchema: z.object({}).strict()
+    },
+    async () => toolResult(await registry.callTool('network.browser_targets', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.browser_bind',
+    {
+      description: 'Bind the supervised worker to a specific browser page by index, exact URL, or URL fragment.',
+      inputSchema: z.object({
+        index: z.number().int().nonnegative().optional(),
+        url: z.string().optional(),
+        urlContains: z.string().optional()
+      }).strict()
+    },
+    async ({ index, url, urlContains }) => toolResult(await registry.callTool('network.browser_bind', { index, url, urlContains }))
+  );
+
+  mcpServer.registerTool(
     'network.open',
     {
       description: 'Open a target URL in the supervised browser worker.',
@@ -94,6 +216,31 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({}).strict()
     },
     async () => toolResult(await registry.callTool('network.chatgpt_snapshot', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.page_capture',
+    {
+      description: 'Capture the current page URL, title, visible text hash, form hash, submit candidates, and optional screenshot review artifact.',
+      inputSchema: z.object({
+        screenshot: z.boolean().optional()
+      }).strict()
+    },
+    async ({ screenshot }) => toolResult(await registry.callTool('network.page_capture', { screenshot }))
+  );
+
+  mcpServer.registerTool(
+    'network.wait_for_ready',
+    {
+      description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, network idle, or mutation quietness.',
+      inputSchema: z.object({
+        selector: z.string().optional(),
+        state: z.enum(['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet']).optional(),
+        timeoutMs: z.number().int().min(250).max(60000).optional(),
+        quietMs: z.number().int().min(100).max(10000).optional()
+      }).strict()
+    },
+    async ({ selector, state, timeoutMs, quietMs }) => toolResult(await registry.callTool('network.wait_for_ready', { selector, state, timeoutMs, quietMs }))
   );
 
   mcpServer.registerTool(
@@ -170,6 +317,29 @@ function registerNetworkTools(mcpServer, registry) {
       inputSchema: z.object({}).strict()
     },
     async () => toolResult(await registry.callTool('network.review_before_submit', {}))
+  );
+
+  mcpServer.registerTool(
+    'network.submit_after_approval',
+    {
+      description: 'Perform a final submit/destructive click only after explicit approval and optional review snapshot hash validation.',
+      inputSchema: z.object({
+        approved: z.boolean(),
+        approvalText: z.string(),
+        reviewHash: z.string().optional(),
+        text: z.string().optional(),
+        selector: z.string().optional(),
+        nth: z.number().int().nonnegative().optional()
+      }).strict()
+    },
+    async ({ approved, approvalText, reviewHash, text, selector, nth }) => toolResult(await registry.callTool('network.submit_after_approval', {
+      approved,
+      approvalText,
+      reviewHash,
+      text,
+      selector,
+      nth
+    }))
   );
 }
 

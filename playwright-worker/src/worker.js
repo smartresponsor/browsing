@@ -1,11 +1,33 @@
-import express from 'express';
+﻿import express from 'express';
 import { chromium } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'fs/promises';
+import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'node:util';
+import {
+  DEFAULT_WORKER_PORT,
+  JOB_BOARD_HOSTS,
+  SAFE_FIELD_TAGS,
+  TRACKING_QUERY_PARAMS,
+  hostMatches,
+  isAllowedHostOverride,
+  isBuiltInDeniedHost,
+  isChallengeText,
+  isJobBoardHost,
+  isSafeEditableInputType,
+  normalizeBrowserChannel,
+  parseList
+} from './browser-policy.js';
 
+import {
+  buildChatGptHomeCleanupPlan,
+  cleanupChatGptHomeTargets,
+  compactRawCdpTarget,
+  evaluateRawCdpTarget,
+  listRawCdpTargets,
+  verifyChatGptHomeTarget
+} from './cdp-target-inventory.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -17,44 +39,21 @@ let sessionStartedAt = null;
 let pageVisitCount = 0;
 let formFillCount = 0;
 let fieldWriteCount = 0;
-const SAFE_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
-const UNSAFE_INPUT_TYPES = new Set(['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset']);
-const DEFAULT_WORKER_PORT = 8791;
-const JOB_BOARD_HOSTS = new Set([
-  'job-boards.greenhouse.io',
-  'boards.greenhouse.io',
-  'jobs.lever.co',
-  'ashbyhq.com',
-  'jobs.ashbyhq.com',
-  'workable.com',
-  'bamboohr.com',
-  'smartrecruiters.com',
-  'myworkdayjobs.com'
-]);
-const TRACKING_QUERY_PARAMS = new Set([
-  'gh_src',
-  'utm_source',
-  'utm_medium',
-  'utm_campaign',
-  'utm_content',
-  'utm_term',
-  'ref',
-  'src',
-  'source',
-  'trk'
-]);
-const DEFAULT_BROWSER_CHANNEL = 'msedge';
-const PLAYWRIGHT_BROWSER_CHANNELS = new Set(['chromium', 'chrome', 'msedge']);
-
-function parseList(value) {
-  return String(value || '')
-    .split(/[,;\r\n]+/)
-    .map(entry => entry.trim().toLowerCase())
-    .filter(Boolean);
-}
-
+let lastExternalAttachError = '';
 function parseBrowserWorkerToken() {
   return String(process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || '').trim();
+}
+
+function getSharedBrowserRoot() {
+  return path.resolve(String(process.env.NETWORK_MCP_SHARED_BROWSER_ROOT || path.join(process.cwd(), '..', 'mcp', 'browser')).trim());
+}
+
+function getDefaultUserDataDir() {
+  return path.join(getSharedBrowserRoot(), 'profile');
+}
+
+function getSharedBrowserRuntimeFile(policy = getPolicy()) {
+  return path.join(policy.sharedBrowserRoot, 'run', 'browser-runtime.json');
 }
 
 function getManagedUserDataDir(policy = getPolicy()) {
@@ -71,30 +70,69 @@ function normalizeError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function normalizeBrowserChannel(value) {
-  const browserChannel = String(value || DEFAULT_BROWSER_CHANNEL).trim().toLowerCase();
-  if (browserChannel === 'edge') {
-    return 'msedge';
-  }
-
-  if (!PLAYWRIGHT_BROWSER_CHANNELS.has(browserChannel)) {
-    throw new Error(`Unsupported NETWORK_MCP_BROWSER_CHANNEL "${browserChannel}". Use chromium, chrome, or msedge.`);
-  }
-
-  return browserChannel;
-}
-
 function getBrowserMode(policy) {
-  if (policy.externalVisibleChrome) {
+  if (policy.externalVisibleBrowser) {
     return 'external-browser-cdp';
   }
 
   return `playwright-${policy.browserChannel}`;
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableJson(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function hashStableJson(value) {
+  return createHash('sha256').update(stableJson(value), 'utf8').digest('hex');
+}
+
+async function writeReviewScreenshot(target, prefix = 'review') {
+  const outputDir = path.join('var', 'browser');
+  await mkdir(outputDir, { recursive: true });
+  const screenshotPath = path.join(outputDir, `${prefix}-${Date.now()}.png`);
+  await target.screenshot({ path: screenshotPath, fullPage: true });
+  return screenshotPath;
+}
+
+async function getDevToolsStatus(policy = getPolicy()) {
+  if (!policy.externalVisibleChrome) {
+    return { ok: true, enabled: false, reason: 'External visible Chrome mode is disabled.' };
+  }
+
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}/json/version`;
+  try {
+    const response = await fetch(endpoint);
+    const bodyText = await response.text();
+    let parsed = null;
+    try {
+      parsed = bodyText ? JSON.parse(bodyText) : null;
+    } catch (_error) {
+      parsed = null;
+    }
+    const userAgent = parsed?.['User-Agent'] || '';
+    const product = userAgent.includes('Edg/') ? 'msedge' : userAgent.includes('Chrome/') ? 'chrome' : '';
+    return { ok: response.ok, enabled: true, endpoint, status: response.status, product, userAgent, body: bodyText };
+  } catch (error) {
+    return { ok: false, enabled: true, endpoint, error: normalizeError(error) };
+  }
+}
+
 function getPolicy() {
   const headless = String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true';
   const browserChannel = normalizeBrowserChannel(process.env.NETWORK_MCP_BROWSER_CHANNEL);
+  const externalVisibleBrowser = process.platform === 'win32' && !headless && String(
+    process.env.NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER ??
+      process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME ??
+      'true'
+  ).toLowerCase() === 'true';
 
   return {
     headless,
@@ -108,9 +146,12 @@ function getPolicy() {
     allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS),
     browserChannel,
-    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim(),
-    externalVisibleChrome: process.platform === 'win32' && !headless && String(process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME || 'false').toLowerCase() === 'true',
-    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223)
+    sharedBrowserRoot: getSharedBrowserRoot(),
+    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
+    externalVisibleBrowser,
+    externalVisibleChrome: externalVisibleBrowser,
+    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223),
+    externalAttachTimeoutMs: Number(process.env.NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 5000)
   };
 }
 
@@ -123,88 +164,9 @@ function getStartupUrl() {
   ).trim();
 }
 
-function hostMatches(host, pattern) {
-  return host === pattern || host.endsWith(`.${pattern}`);
-}
-
-function isIPv4Address(host) {
-  const parts = host.split('.');
-  if (parts.length !== 4) {
-    return false;
-  }
-
-  return parts.every(part => {
-    if (!/^\d+$/.test(part)) {
-      return false;
-    }
-
-    const value = Number(part);
-    if (part.length > 1 && part.startsWith('0')) {
-      return false;
-    }
-
-    return Number.isInteger(value) && value >= 0 && value <= 255;
-  });
-}
-
-function isBuiltInDeniedHost(host) {
-  if (host === 'localhost' || host.endsWith('.localhost')) {
-    return true;
-  }
-
-  if (host === 'metadata.google.internal' || host.endsWith('.metadata.google.internal')) {
-    return true;
-  }
-
-  if (host === '0.0.0.0' || host === '::1') {
-    return true;
-  }
-
-  if (isIPv4Address(host)) {
-    const parts = host.split('.').map(part => Number(part));
-    const [a, b] = parts;
-
-    if (a === 127) {
-      return true;
-    }
-
-    if (a === 10) {
-      return true;
-    }
-
-    if (a === 169 && b === 254) {
-      return true;
-    }
-
-    if (a === 192 && b === 168) {
-      return true;
-    }
-
-    if (a === 172 && b >= 16 && b <= 31) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function isAllowedHostOverride(host, policy) {
-  return policy.allowedHosts.some(pattern => hostMatches(host, pattern));
-}
-
-function isSafeEditableInputType(type) {
-  return !UNSAFE_INPUT_TYPES.has(type);
-}
-
-function isChallengeText(text) {
-  return /captcha|2fa|two-factor|security check|challenge|bot detection|verify you are human|access denied/i.test(text);
-}
-
 async function closeSession() {
   if (connectedBrowser) {
-    if (typeof connectedBrowser.disconnect === 'function') {
-      await Promise.resolve(connectedBrowser.disconnect()).catch(() => {});
-    }
+    await connectedBrowser.close().catch(() => {});
     connectedBrowser = undefined;
     browser = undefined;
     page = undefined;
@@ -254,8 +216,10 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       maxPageVisits: policy.maxPageVisits,
       maxFormFills: policy.maxFormFills,
       maxFieldWrites: policy.maxFieldWrites,
+      externalVisibleBrowser: policy.externalVisibleBrowser,
       externalVisibleChrome: policy.externalVisibleChrome,
-      remoteDebuggingPort: policy.remoteDebuggingPort
+      remoteDebuggingPort: policy.remoteDebuggingPort,
+      externalAttachTimeoutMs: policy.externalAttachTimeoutMs
     },
     session: {
       startedAt: sessionStartedAt ? new Date(sessionStartedAt).toISOString() : null,
@@ -268,6 +232,7 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       contextOpen: Boolean(browser),
       pageOpen: Boolean(activePage),
       pageCount: pages.length,
+      activePageIndex: activePage ? pages.findIndex(item => item === activePage) : null,
       currentUrl: activePage ? activePage.url() : null
     }
   };
@@ -288,9 +253,131 @@ async function getBrowserStatus() {
     configuredVisible: !policy.headless,
     detectedVisibleWindow,
     browserVisible: detectedVisibleWindow,
+    lastExternalAttachError,
     runtime,
     managedProcesses
   };
+}
+
+async function getFullHealthStatus() {
+  const policy = getPolicy();
+  const browserStatus = await getBrowserStatus().catch(error => ({ ok: false, error: normalizeError(error) }));
+  const devTools = await getDevToolsStatus(policy);
+  const activePage = page && !page.isClosed() ? page : null;
+  return {
+    ok: Boolean(browserStatus.ok) && (devTools.enabled ? devTools.ok : true),
+    service: 'network-mcp-browser-worker',
+    worker: { ok: true, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), port },
+    browser: browserStatus,
+    devTools,
+    target: activePage ? { ok: true, url: activePage.url(), closed: activePage.isClosed() } : { ok: false, reason: 'No active page bound.' },
+    profile: { userDataDir: getManagedUserDataDir(policy), externalVisibleChrome: policy.externalVisibleChrome, configuredBrowserChannel: policy.browserChannel },
+    actualBrowser: devTools.enabled ? { product: devTools.product || '', userAgent: devTools.userAgent || '' } : null
+  };
+}
+
+async function getSharedBrowserRuntimeStatus() {
+  const policy = getPolicy();
+  const runtimeFile = getSharedBrowserRuntimeFile(policy);
+  let registry = null;
+  let registryError = '';
+
+  try {
+    registry = JSON.parse(await readFile(runtimeFile, 'utf8'));
+  } catch (error) {
+    registryError = normalizeError(error);
+  }
+
+  const devTools = await getDevToolsStatus(policy);
+  const attached = Boolean(devTools.ok && browser && browser.pages().length > 0);
+  return {
+    ok: Boolean(registry?.ok || attached),
+    service: 'network-mcp-browser-worker',
+    runtimeFile,
+    registry: registry || null,
+    registryError: registry ? null : registryError,
+    live: {
+      attached,
+      pageCount: browser ? browser.pages().length : 0,
+      activeUrl: page && !page.isClosed() ? page.url() : null,
+      cdp: devTools
+    }
+  };
+}
+
+function buildConnectorSettingsUrl(connectorId = '') {
+  return connectorId
+    ? `https://chatgpt.com/#settings/Connectors?connector=${encodeURIComponent(connectorId)}`
+    : 'https://chatgpt.com/#settings/Apps';
+}
+
+function planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs } = {}) {
+  const name = String(connectorName || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_NAME || 'network-mcp');
+  const id = String(connectorId || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_ID || '');
+  const boundedTimeoutMs = Number.isInteger(timeoutMs) ? Math.min(Math.max(timeoutMs, 5000), 120000) : 90000;
+  return {
+    ok: true,
+    status: 'NETWORK_CONNECTOR_REFRESH_PLAN_READY',
+    connectorName: name,
+    connectorId: id || null,
+    targetUrl: buildConnectorSettingsUrl(id),
+    executeTool: 'network.surface_execute',
+    executeRequires: { confirmSync: true, connectorName: name, connectorId: id || undefined },
+    timeoutMs: boundedTimeoutMs,
+    policy: {
+      browserMutation: false,
+      connectorRefresh: false,
+      writesInput: false,
+      submitsInput: false,
+      closesTabs: false
+    }
+  };
+}
+
+async function createRawCdpTarget(policy, targetUrl, timeoutMs) {
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(targetUrl)}`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+  });
+  if (!response.ok) throw new Error(`DevTools target create failed with HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, timeoutMs) {
+  const inventory = await listRawCdpTargets(policy);
+  const targets = inventory.targets.filter(target => target.type === 'page' && typeof target.webSocketDebuggerUrl === 'string');
+  const existing = targets.find(target => connectorId && String(target.url || '').includes(connectorId))
+    || targets.find(target => String(target.url || '').includes('#settings/Connectors'))
+    || targets.find(target => String(target.url || '').includes('#settings/Apps'));
+  if (existing) return { ...existing, reused: true };
+  const created = await createRawCdpTarget(policy, targetUrl, timeoutMs);
+  const deadline = Date.now() + Math.min(timeoutMs, 15000);
+  while (Date.now() <= deadline) {
+    const refreshed = await listRawCdpTargets(policy);
+    const createdTarget = refreshed.targets.find(target => target.id === created.id && target.webSocketDebuggerUrl);
+    if (createdTarget) return { ...createdTarget, reused: false };
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return { ...created, reused: false };
+}
+
+function buildNetworkConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
+  return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const networkToolsVisible = /network\./.test(pageText); if (!result && networkToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_NETWORK_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
+}
+
+async function executeNetworkConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
+  const plan = planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs });
+  if (confirmRefresh !== true) {
+    return { ok: false, status: 'CONFIRM_CONNECTOR_REFRESH_REQUIRED', willRefreshConnector: true, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true } };
+  }
+  const policy = getPolicy();
+  const target = await resolveConnectorRefreshTarget(policy, plan.targetUrl, plan.connectorId || '', plan.timeoutMs);
+  if (!target.webSocketDebuggerUrl) return { ok: false, status: 'CONNECTOR_REFRESH_TARGET_WEBSOCKET_MISSING', target, plan };
+  const result = await evaluateRawCdpTarget(target, buildNetworkConnectorRefreshExpression(plan.connectorName, plan.connectorId || '', plan.targetUrl), Math.min(plan.timeoutMs, 120000));
+  const pageText = typeof result?.pageText === 'string' ? result.pageText : '';
+  const observedTools = [...new Set([...pageText.matchAll(/\bnetwork\.[A-Za-z0-9_.]+/g)].map(match => match[0]))].sort();
+  return { ok: Boolean(result?.ok), status: result?.ok ? 'NETWORK_CONNECTOR_REFRESH_DONE' : String(result?.status || 'NETWORK_CONNECTOR_REFRESH_FAILED'), connectorName: plan.connectorName, connectorId: plan.connectorId, target: compactRawCdpTarget(target), refresh: result, observedSchema: { exposed: observedTools.length > 0, count: observedTools.length, tools: observedTools }, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true, writesInput: false, submitsInput: false, closesTabs: false } };
 }
 
 async function restartBrowserSession({ force = false, reopen = true, reason = '' } = {}) {
@@ -416,9 +503,11 @@ async function ensurePage() {
         const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
         connectedBrowser = externalRuntime.connectedBrowser;
         browser = externalRuntime.context;
+        lastExternalAttachError = '';
       } catch (error) {
         connectedBrowser = undefined;
-        throw new Error(`External browser CDP mode failed and fallback launch is disabled for visible browser mode. ${normalizeError(error)}`);
+        lastExternalAttachError = normalizeError(error);
+        throw new Error(`Shared browser CDP attach failed. ${lastExternalAttachError}`);
       }
     }
 
@@ -446,7 +535,16 @@ async function ensurePage() {
           throw error;
         }
 
-        throw new Error(`Failed to launch configured browser channel ${policy.browserChannel}. Set NETWORK_MCP_BROWSER_CHANNEL or NETWORK_MCP_BROWSER_EXECUTABLE explicitly. ${normalizeError(error)}`);
+        console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
+        browser = await chromium.launchPersistentContext(userDataDir, {
+          headless: policy.headless,
+          args: [
+            '--new-window',
+            '--start-maximized',
+            '--window-position=80,80',
+            '--window-size=1400,1000'
+          ]
+        });
       }
     }
   }
@@ -465,120 +563,33 @@ async function ensurePage() {
   return page;
 }
 
-async function connectToExistingCdpEndpoint(endpoint) {
-  const cdpBrowser = await chromium.connectOverCDP(endpoint);
+async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 5000) {
+  let connectEndpoint = endpoint;
+  try {
+    const versionResponse = await fetch(`${endpoint.replace(/\/$/, '')}/json/version`, {
+      signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+    });
+    const version = await versionResponse.json();
+    if (typeof version.webSocketDebuggerUrl === 'string' && version.webSocketDebuggerUrl.trim()) {
+      connectEndpoint = version.webSocketDebuggerUrl.trim();
+    }
+  } catch (_error) {
+    connectEndpoint = endpoint;
+  }
+
+  const cdpBrowser = await chromium.connectOverCDP(connectEndpoint, { timeout: Math.max(250, timeoutMs) });
   const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
   return { connectedBrowser: cdpBrowser, context };
 }
 
-async function connectExternalVisibleChrome(policy, userDataDir) {
+async function connectExternalVisibleChrome(policy, _userDataDir) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
-  const existingRuntime = await connectToExistingCdpEndpoint(endpoint).catch(() => null);
-
-  if (existingRuntime) {
-    return existingRuntime;
+  const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
+  try {
+    return await connectToExistingCdpEndpoint(endpoint, timeoutMs);
+  } catch (error) {
+    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint} within ${timeoutMs} ms. ${normalizeError(error)}`);
   }
-
-  const executablePath = await resolveExternalBrowserExecutable();
-  let lastError = null;
-
-  await launchExternalVisibleChrome(policy, userDataDir, executablePath, getStartupUrl());
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      return await connectToExistingCdpEndpoint(endpoint);
-    } catch (error) {
-      lastError = error;
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-  }
-
-  throw new Error(`Unable to connect to browser CDP endpoint ${endpoint}. ${normalizeError(lastError)}`);
-}
-
-async function launchExternalVisibleChrome(policy, userDataDir, executablePath, startupUrl) {
-  const scriptPath = path.join(process.cwd(), 'var', 'run', `external-visible-browser-${process.pid}.ps1`);
-  const script = `
-param(
-  [Parameter(Mandatory = $true)]
-  [string]$ExecutablePath,
-  [Parameter(Mandatory = $true)]
-  [string]$UserDataDir,
-  [Parameter(Mandatory = $true)]
-  [int]$Port,
-  [Parameter(Mandatory = $true)]
-  [string]$StartupUrl
-)
-$ErrorActionPreference = 'Stop'
-$arguments = @(
-  "--remote-debugging-port=$Port",
-  "--user-data-dir=$UserDataDir",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-background-mode",
-  "--new-window",
-  "--start-maximized",
-  "--window-position=80,80",
-  "--window-size=1400,1000",
-  $StartupUrl
-)
-$commandLine = 'start "" "' + $ExecutablePath + '" ' + (($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
-# cmd launcher disabled; shortcut launcher below is the active path.
-$shortcutPath = Join-Path ([System.IO.Path]::GetDirectoryName($UserDataDir)) 'network-mcp-visible-browser.lnk'
-$shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $ExecutablePath
-$shortcut.Arguments = (($arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
-$shortcut.WindowStyle = 3
-$shortcut.Save()
-Invoke-Item $shortcutPath
-`;
-
-  const { writeFile: writeTextFile } = await import('node:fs/promises');
-  await mkdir(path.dirname(scriptPath), { recursive: true });
-  await writeTextFile(scriptPath, script, 'utf8');
-  await execFileAsync(resolvePowerShellExecutable(), [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    '-ExecutablePath',
-    executablePath,
-    '-UserDataDir',
-    userDataDir,
-    '-Port',
-    String(policy.remoteDebuggingPort),
-    '-StartupUrl',
-    startupUrl
-  ], { timeout: 15000, maxBuffer: 1024 * 1024 });
-  await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-async function resolveExternalBrowserExecutable() {
-  const override = String(process.env.NETWORK_MCP_BROWSER_EXECUTABLE || '').trim();
-  if (override) {
-    if (await fileExists(override)) {
-      return override;
-    }
-
-    throw new Error(`Configured NETWORK_MCP_BROWSER_EXECUTABLE does not exist: ${override}`);
-  }
-
-  const candidates = [
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-  ];
-
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error('No supported browser executable was found. Set NETWORK_MCP_BROWSER_EXECUTABLE to chrome.exe or msedge.exe.');
 }
 
 async function fileExists(filePath) {
@@ -713,6 +724,134 @@ async function snapshotFields(target) {
     })(),
     value: node.value || ''
   })));
+}
+
+async function snapshotSubmitCandidates(target) {
+  return target.locator('button, input[type="submit"], input[type="button"], a').evaluateAll(nodes => nodes.map((node, index) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+    const style = window.getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    const tag = node.tagName.toLowerCase();
+    const type = String(node.getAttribute('type') || '').toLowerCase();
+    const text = normalize(node.innerText || node.textContent || node.getAttribute('value') || node.getAttribute('aria-label') || '');
+    const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
+    const isFinal = /submit|apply|send|confirm|finish|complete|delete|withdraw|purchase|payment/i.test(text) || type === 'submit';
+    return {
+      index,
+      tag,
+      type,
+      text,
+      name: node.getAttribute('name') || '',
+      id: node.getAttribute('id') || '',
+      ariaLabel: node.getAttribute('aria-label') || '',
+      visible: isVisible,
+      enabled: !node.disabled,
+      finalCandidate: isFinal
+    };
+  })).then(items => items.filter(item => item.visible && item.enabled && item.text));
+}
+
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture' } = {}) {
+  await ensureNotChallenge(target);
+  const fields = await snapshotFields(target);
+  const submitCandidates = await snapshotSubmitCandidates(target);
+  const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
+  const artifact = {
+    ok: true,
+    url: target.url(),
+    title: await target.title(),
+    textHash: hashChatGptSnapshotText(visibleText),
+    fields,
+    formHash: hashStableJson(fields),
+    submitCandidates
+  };
+  const reviewHash = hashStableJson({
+    url: artifact.url,
+    title: artifact.title,
+    textHash: artifact.textHash,
+    formHash: artifact.formHash,
+    submitCandidates: artifact.submitCandidates
+  });
+
+  return {
+    ...artifact,
+    reviewHash,
+    screenshot: screenshot ? await writeReviewScreenshot(target, screenshotPrefix) : null
+  };
+}
+
+async function listBrowserTargets() {
+  await ensurePage();
+  const pages = browser ? browser.pages() : [];
+  const targets = [];
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const item = pages[index];
+    targets.push({
+      index,
+      active: item === page,
+      closed: item.isClosed(),
+      url: item.isClosed() ? null : item.url(),
+      title: item.isClosed() ? null : await item.title().catch(() => null)
+    });
+  }
+
+  return { ok: true, activeIndex: targets.find(item => item.active)?.index ?? null, targets };
+}
+
+async function bindBrowserTarget({ index, url, urlContains } = {}) {
+  await ensurePage();
+  const pages = browser ? browser.pages() : [];
+  let selected = null;
+
+  if (Number.isInteger(index)) {
+    selected = pages[index] ?? null;
+  } else if (url) {
+    selected = pages.find(item => !item.isClosed() && item.url() === String(url)) ?? null;
+  } else if (urlContains) {
+    selected = pages.find(item => !item.isClosed() && item.url().includes(String(urlContains))) ?? null;
+  }
+
+  if (!selected || selected.isClosed()) {
+    throw new Error('Requested browser target was not found or is closed.');
+  }
+
+  page = selected;
+  await page.bringToFront().catch(() => {});
+  return { ok: true, bound: { index: pages.findIndex(item => item === page), url: page.url(), title: await page.title().catch(() => '') } };
+}
+
+async function waitForReadiness(target, { selector = '', state = 'domcontentloaded', timeoutMs = 15000, quietMs = 500 } = {}) {
+  const startedAt = Date.now();
+  if (state === 'selector-visible' || state === 'selector-attached') {
+    if (!selector) {
+      throw new Error(`selector is required for ${state}.`);
+    }
+    await target.locator(selector).first().waitFor({ state: state === 'selector-visible' ? 'visible' : 'attached', timeout: timeoutMs });
+  } else if (state === 'mutation-quiet') {
+    await target.evaluate(({ quietMs: browserQuietMs, timeoutMs: browserTimeoutMs }) => new Promise((resolve, reject) => {
+      let timer = window.setTimeout(done, browserQuietMs);
+      const fail = window.setTimeout(() => {
+        observer.disconnect();
+        reject(new Error('Mutation quiet wait timed out.'));
+      }, browserTimeoutMs);
+      const observer = new MutationObserver(() => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(done, browserQuietMs);
+      });
+      function done() {
+        window.clearTimeout(fail);
+        observer.disconnect();
+        resolve(true);
+      }
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+    }), { quietMs, timeoutMs });
+  } else {
+    await target.waitForLoadState(state, { timeout: timeoutMs });
+  }
+
+  await ensureNotChallenge(target);
+  return { ok: true, state, selector: selector || null, elapsedMs: Date.now() - startedAt, url: target.url(), title: await target.title() };
 }
 
 async function writeField(locator, value) {
@@ -901,6 +1040,122 @@ app.post('/browser-kill', async (req, res) => {
   }
 });
 
+app.post('/health-full', async (_req, res) => {
+  try {
+    res.json(await getFullHealthStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/shared-browser-status', async (_req, res) => {
+  try {
+    res.json(await getSharedBrowserRuntimeStatus());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/connector-sync-plan', async (req, res) => {
+  try {
+    res.json(planNetworkConnectorRefresh({ connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/connector-sync-execute', async (req, res) => {
+  try {
+    res.json(await executeNetworkConnectorRefresh({ confirmRefresh: req.body?.confirmRefresh === true || req.body?.confirmSync === true, connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-targets', async (_req, res) => {
+  try {
+    res.json(await listRawCdpTargets(getPolicy()));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
+  try {
+    const inventory = await listRawCdpTargets(getPolicy());
+    const timeoutMs = Number.isInteger(req.body?.timeoutMs) ? Math.min(Math.max(req.body.timeoutMs, 250), 10000) : 5000;
+    const maxVerify = Number.isInteger(req.body?.maxVerify) ? Math.min(Math.max(req.body.maxVerify, 1), 50) : 10;
+    const requestedIndex = Number.isInteger(req.body?.index) ? req.body.index : null;
+    const requestedId = typeof req.body?.id === 'string' && req.body.id.trim() ? req.body.id.trim() : null;
+    const candidates = inventory.targets
+      .filter(target => target.classification.rawCleanupCandidate)
+      .filter(target => requestedIndex === null || target.index === requestedIndex)
+      .filter(target => requestedId === null || target.id === requestedId)
+      .slice(0, maxVerify);
+    const verified = [];
+    for (const target of candidates) {
+      verified.push(await verifyChatGptHomeTarget(target, timeoutMs));
+    }
+    res.json({
+      ok: true,
+      service: 'network-mcp-browser-worker',
+      action: 'browser_cdp_verify_chatgpt_home',
+      requested: { index: requestedIndex, id: requestedId, maxVerify, timeoutMs },
+      candidateCount: candidates.length,
+      verifiedEmptyHomeCount: verified.filter(item => item.verifiedEmptyHome).length,
+      verified,
+      safety: 'read-only-dom-verification-no-write-no-click-no-close'
+    });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-cleanup-plan-chatgpt-home', async (req, res) => {
+  try {
+    res.json(await buildChatGptHomeCleanupPlan(getPolicy(), {
+      maxVerify: req.body?.maxVerify,
+      maxClose: req.body?.maxClose,
+      timeoutMs: req.body?.timeoutMs
+    }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-cleanup-chatgpt-home', async (req, res) => {
+  try {
+    res.json(await cleanupChatGptHomeTargets(getPolicy(), {
+      confirmCleanup: req.body?.confirmCleanup === true,
+      maxVerify: req.body?.maxVerify,
+      maxClose: req.body?.maxClose,
+      timeoutMs: req.body?.timeoutMs
+    }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-targets', async (_req, res) => {
+  try {
+    res.json(await listBrowserTargets());
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-bind', async (req, res) => {
+  try {
+    res.json(await bindBrowserTarget({
+      index: Number.isInteger(req.body?.index) ? req.body.index : undefined,
+      url: typeof req.body?.url === 'string' ? req.body.url : undefined,
+      urlContains: typeof req.body?.urlContains === 'string' ? req.body.urlContains : undefined
+    }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
 app.post('/open-fresh', async (req, res) => {
   try {
     const policy = getPolicy();
@@ -908,7 +1163,7 @@ app.post('/open-fresh', async (req, res) => {
     const force = req.body?.force === true;
     const reason = String(req.body?.reason || '').slice(0, 200);
     const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
-    const isJobBoardUrl = Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(rawTargetUrl.hostname.toLowerCase(), pattern));
+    const isJobBoardUrl = isJobBoardHost(rawTargetUrl.hostname.toLowerCase());
     const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
 
     const restart = await restartBrowserSession({ force, reopen: false, reason: reason || 'open_fresh' });
@@ -942,7 +1197,7 @@ app.post('/open', async (req, res) => {
     const target = await ensurePage();
     const requestedUrl = String(req.body?.url || '').trim();
     const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
-    const isJobBoardUrl = Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(rawTargetUrl.hostname.toLowerCase(), pattern));
+    const isJobBoardUrl = isJobBoardHost(rawTargetUrl.hostname.toLowerCase());
     const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
 
     if (pageVisitCount >= policy.maxPageVisits) {
@@ -997,6 +1252,32 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
     const target = await ensurePage();
     await target.bringToFront().catch(() => {});
     res.json(await snapshotChatGptPage(target));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/page-capture', async (req, res) => {
+  try {
+    const target = await ensurePage();
+    await target.bringToFront().catch(() => {});
+    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/wait-for-ready', async (req, res) => {
+  try {
+    const target = await ensurePage();
+    const allowedStates = new Set(['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet']);
+    const state = allowedStates.has(req.body?.state) ? req.body.state : 'domcontentloaded';
+    res.json(await waitForReadiness(target, {
+      selector: typeof req.body?.selector === 'string' ? req.body.selector : '',
+      state,
+      timeoutMs: Number.isInteger(req.body?.timeoutMs) ? Math.min(Math.max(req.body.timeoutMs, 250), 60000) : 15000,
+      quietMs: Number.isInteger(req.body?.quietMs) ? Math.min(Math.max(req.body.quietMs, 100), 10000) : 500
+    }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
@@ -1132,13 +1413,63 @@ app.post('/review-before-submit', async (_req, res) => {
   try {
     const target = await ensurePage();
     await ensureNotChallenge(target);
-    const outputDir = path.join('var', 'browser');
-    await mkdir(outputDir, { recursive: true });
-    const screenshotPath = path.join(outputDir, `review-${Date.now()}.png`);
-    await target.screenshot({ path: screenshotPath, fullPage: true });
-    res.json({ ok: true, url: target.url(), screenshot: screenshotPath, message: 'Review manually before submit.' });
+    const artifact = await capturePageArtifact(target, { screenshot: true, screenshotPrefix: 'review' });
+    res.json({ ...artifact, message: 'Review manually before submit. Use reviewHash with submit-after-approval if the final action is approved.' });
   } catch (error) {
     res.status(409).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/submit-after-approval', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const approved = req.body?.approved === true;
+    const approvalText = String(req.body?.approvalText || '');
+    if (!policy.submitEnabled) {
+      throw new Error('Final submit is disabled. Set NETWORK_MCP_ENABLE_SUBMIT=true to enable controlled submit actions.');
+    }
+    if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
+      throw new Error('Explicit approvalText=SUBMIT is required for final submit actions.');
+    }
+
+    const target = await ensurePage();
+    await ensureNotChallenge(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
+    const expectedReviewHash = String(req.body?.reviewHash || '').trim();
+    if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
+      throw new Error('Current page reviewHash does not match the approved reviewHash. Capture a fresh review artifact before submitting.');
+    }
+
+    const text = String(req.body?.text || '').trim();
+    const selector = String(req.body?.selector || '').trim();
+    const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
+    let locator;
+    if (selector) {
+      locator = target.locator(selector);
+    } else if (text) {
+      locator = target.getByRole('button', { name: text, exact: true });
+      if (await locator.count() === 0) {
+        locator = target.getByRole('link', { name: text, exact: true });
+      }
+      if (await locator.count() === 0) {
+        locator = target.getByText(text, { exact: true });
+      }
+    } else {
+      locator = target.locator('button[type="submit"], input[type="submit"]').first();
+    }
+
+    const count = await locator.count();
+    if (count <= nth) {
+      throw new Error(`Submit target not found. Matches: ${count}. Requested index: ${nth}.`);
+    }
+
+    await locator.nth(nth).click();
+    await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+    await ensureNotChallenge(target);
+    const after = await capturePageArtifact(target, { screenshot: false });
+    res.json({ ok: true, action: 'submit_after_approval', clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
+  } catch (error) {
+    res.status(409).json({ ok: false, error: normalizeError(error) });
   }
 });
 
@@ -1267,7 +1598,5 @@ function sanitizeProcessInfo(item) {
 const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
 app.listen(port, '127.0.0.1', () => {
   console.log(`Network browser worker listening on http://127.0.0.1:${port}`);
-  ensurePage().catch(error => {
-    console.warn(`Startup browser open failed. ${normalizeError(error)}`);
-  });
 });
+

@@ -31,6 +31,133 @@ type McpTool = {
 
 const MCP_TOOLS: McpTool[] = [
   {
+    name: 'network.health_full',
+    description: 'Run deep supervised browser diagnostics including worker, browser, target, profile, and DevTools reachability.',
+    route: '/health-full',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.shared_browser_status',
+    description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
+    route: '/shared-browser-status',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.browser_cdp_targets',
+    description: 'List raw shared browser CDP targets without attaching through Playwright or opening pages.',
+    route: '/browser-cdp-targets',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.browser_cdp_verify_chatgpt_home',
+    description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
+    route: '/browser-cdp-verify-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer', minimum: 0 },
+        id: { type: 'string' },
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
+    name: 'network.browser_cdp_cleanup_plan_chatgpt_home',
+    description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets.',
+    route: '/browser-cdp-cleanup-plan-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        maxClose: { type: 'integer', minimum: 1, maximum: 50 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
+    name: 'network.browser_cdp_cleanup_chatgpt_home',
+    description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmCleanup, then verify conversation tabs were preserved.',
+    route: '/browser-cdp-cleanup-chatgpt-home',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        confirmCleanup: { type: 'boolean', default: false },
+        maxVerify: { type: 'integer', minimum: 1, maximum: 50 },
+        maxClose: { type: 'integer', minimum: 1, maximum: 10 },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 10000 }
+      }
+    }
+  },
+  {
+    name: 'network.surface_plan',
+    description: 'Build a read-only publication update plan for network-mcp.',
+    route: '/connector-sync-plan',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        connectorName: { type: 'string' },
+        connectorId: { type: 'string' },
+        timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000 }
+      }
+    }
+  },
+  {
+    name: 'network.surface_execute',
+    description: 'Run the approved publication update for network-mcp.',
+    route: '/connector-sync-execute',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        confirmSync: { type: 'boolean', default: false },
+        connectorName: { type: 'string' },
+        connectorId: { type: 'string' },
+        timeoutMs: { type: 'integer', minimum: 5000, maximum: 120000 }
+      }
+    }
+  },
+  {
+    name: 'network.browser_targets',
+    description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
+    route: '/browser-targets',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {}
+    }
+  },
+  {
+    name: 'network.browser_bind',
+    description: 'Bind the supervised worker to a specific browser page by index, exact URL, or URL fragment.',
+    route: '/browser-bind',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        index: { type: 'integer', minimum: 0 },
+        url: { type: 'string' },
+        urlContains: { type: 'string' }
+      }
+    }
+  },
+  {
     name: 'network.open',
     description: 'Open a target URL in the supervised browser worker.',
     route: '/open',
@@ -67,6 +194,33 @@ const MCP_TOOLS: McpTool[] = [
         text: { type: 'string' },
         selector: { type: 'string' },
         nth: { type: 'integer', minimum: 0 }
+      }
+    }
+  },
+  {
+    name: 'network.page_capture',
+    description: 'Capture the current page URL, title, visible text hash, form hash, submit candidates, and optional screenshot review artifact.',
+    route: '/page-capture',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        screenshot: { type: 'boolean' }
+      }
+    }
+  },
+  {
+    name: 'network.wait_for_ready',
+    description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, network idle, or mutation quietness.',
+    route: '/wait-for-ready',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        selector: { type: 'string' },
+        state: { type: 'string', enum: ['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet'] },
+        timeoutMs: { type: 'integer', minimum: 250, maximum: 60000 },
+        quietMs: { type: 'integer', minimum: 100, maximum: 10000 }
       }
     }
   },
@@ -138,6 +292,24 @@ const MCP_TOOLS: McpTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {}
+    }
+  },
+  {
+    name: 'network.submit_after_approval',
+    description: 'Perform a final submit/destructive click only after explicit approval and optional review snapshot hash validation.',
+    route: '/submit-after-approval',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        approved: { type: 'boolean' },
+        approvalText: { type: 'string' },
+        reviewHash: { type: 'string' },
+        text: { type: 'string' },
+        selector: { type: 'string' },
+        nth: { type: 'integer', minimum: 0 }
+      },
+      required: ['approved', 'approvalText']
     }
   }
 ];

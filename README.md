@@ -43,7 +43,8 @@ NETWORK_MCP_DENIED_HOSTS=
 NETWORK_MCP_PUBLIC_ORIGIN=
 NETWORK_MCP_WORKER_PORT=8791
 NETWORK_MCP_BROWSER_CHANNEL=msedge
-NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=false
+NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true
+NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true
 ```
 
 ## Tool contract
@@ -70,7 +71,7 @@ Documented safe operations:
 ## Local commands
 
 ```powershell
-cd D:\PhpstormProjects\www\network-mcp
+cd D:\PhpstormProjects\www\mcp\network-mcp
 npm install
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 doctor
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start

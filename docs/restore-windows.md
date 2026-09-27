@@ -12,8 +12,8 @@ This is the minimal restore path for `network-mcp`.
 ## 2. Clone the repo
 
 ```powershell
-git clone <repo-url> D:\PhpstormProjects\www\network-mcp
-cd D:\PhpstormProjects\www\network-mcp
+git clone <repo-url> D:\PhpstormProjects\www\mcp\network-mcp
+cd D:\PhpstormProjects\www\mcp\network-mcp
 ```
 
 ## 3. Install dependencies

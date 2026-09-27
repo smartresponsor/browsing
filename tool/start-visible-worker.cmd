@@ -22,22 +22,25 @@ if exist "%PID_FILE%" (
 set "PORT=8791"
 set "NETWORK_MCP_HEADLESS=false"
 if "%NETWORK_MCP_BROWSER_CHANNEL%"=="" set "NETWORK_MCP_BROWSER_CHANNEL=msedge"
-if "%NETWORK_MCP_USER_DATA_DIR%"=="" set "NETWORK_MCP_USER_DATA_DIR=var\browser\profile"
-if "%NETWORK_MCP_EXTERNAL_VISIBLE_CHROME%"=="" set "NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true"
+if "%NETWORK_MCP_SHARED_BROWSER_ROOT%"=="" set "NETWORK_MCP_SHARED_BROWSER_ROOT=%ROOT%\..\browser"
+if "%NETWORK_MCP_USER_DATA_DIR%"=="" set "NETWORK_MCP_USER_DATA_DIR=%NETWORK_MCP_SHARED_BROWSER_ROOT%\profile"
+if "%NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER%"=="" set "NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true"
+if "%NETWORK_MCP_EXTERNAL_VISIBLE_CHROME%"=="" set "NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=%NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER%"
 set "NETWORK_MCP_REMOTE_DEBUGGING_PORT=9223"
 
 title Network MCP visible playwright-worker
 cd /d "%ROOT%"
 echo Starting visible Network MCP playwright-worker on port %PORT% ...
 echo Browser channel: %NETWORK_MCP_BROWSER_CHANNEL%
-echo External visible Chrome: %NETWORK_MCP_EXTERNAL_VISIBLE_CHROME%
+echo External visible browser: %NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER%
+echo Shared browser root: %NETWORK_MCP_SHARED_BROWSER_ROOT%
 echo User data dir: %NETWORK_MCP_USER_DATA_DIR%
 echo Log: %LOG_FILE%
 echo Error log: %ERR_FILE%
 echo This window must stay open while using the supervised browser.
 echo.
 
->> "%LOG_FILE%" echo [%date% %time%] Starting visible worker on port %PORT%, channel=%NETWORK_MCP_BROWSER_CHANNEL%, externalVisibleChrome=%NETWORK_MCP_EXTERNAL_VISIBLE_CHROME%, userDataDir=%NETWORK_MCP_USER_DATA_DIR%
+>> "%LOG_FILE%" echo [%date% %time%] Starting visible worker on port %PORT%, channel=%NETWORK_MCP_BROWSER_CHANNEL%, externalVisibleBrowser=%NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER%, legacyExternalVisibleChrome=%NETWORK_MCP_EXTERNAL_VISIBLE_CHROME%, sharedBrowserRoot=%NETWORK_MCP_SHARED_BROWSER_ROOT%, userDataDir=%NETWORK_MCP_USER_DATA_DIR%
 node --enable-source-maps "%WORKER%" >> "%LOG_FILE%" 2>> "%ERR_FILE%"
 set "EXIT_CODE=%ERRORLEVEL%"
 >> "%LOG_FILE%" echo [%date% %time%] Visible worker exited with code %EXIT_CODE%.

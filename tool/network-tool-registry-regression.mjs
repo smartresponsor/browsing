@@ -6,14 +6,6 @@ const registry = new NetworkToolRegistry("http://127.0.0.1:8791");
 const publicTools = registry.listTools();
 const workerCapabilities = registry.listWorkerCapabilities();
 
-assert.equal(publicTools.length, 21, "public Network MCP surface should contain 12 legacy/current names plus nine canonical aliases");
-assert.equal(publicTools.includes("network.open_fresh"), false, "network.open_fresh must not be reported as a public MCP tool");
-assert.equal(workerCapabilities.length, 22, "worker capability surface should include the 21 public names plus open_fresh");
-assert.equal(workerCapabilities.includes("network.open_fresh"), true, "network.open_fresh must remain an internal worker capability");
-for (const name of publicTools) {
-  assert.equal(workerCapabilities.includes(name), true, `worker capability surface must retain public tool: ${name}`);
-}
-
 const expectedCanonicalAliases = [
   "network.browser.status",
   "network.browser.restart",
@@ -25,8 +17,41 @@ const expectedCanonicalAliases = [
   "network.form.review.snapshot",
   "network.form.proposal.preview",
 ];
+
+const expectedMergedCapabilities = [
+  "network.health_full",
+  "network.shared_browser_status",
+  "network.browser_cdp_targets",
+  "network.browser_cdp_verify_chatgpt_home",
+  "network.browser_cdp_cleanup_plan_chatgpt_home",
+  "network.browser_cdp_cleanup_chatgpt_home",
+  "network.surface_plan",
+  "network.surface_execute",
+  "network.browser_targets",
+  "network.browser_bind",
+  "network.page_capture",
+  "network.wait_for_ready",
+  "network.submit_after_approval",
+];
+
+assert.equal(publicTools.length, 34, "public Network MCP surface should preserve merged runtime capabilities plus canonical aliases");
+assert.equal(workerCapabilities.length, 27, "worker capability contract should preserve all merged worker routes");
+assert.equal(publicTools.includes("network.open_fresh"), false, "network.open_fresh must not be reported as a public MCP tool");
+assert.equal(publicTools.includes("network.connector_sync_execute"), false, "network.connector_sync_execute must remain an internal worker capability");
+assert.equal(workerCapabilities.includes("network.open_fresh"), true, "network.open_fresh must remain an internal worker capability");
+assert.equal(workerCapabilities.includes("network.connector_sync_execute"), true, "network.connector_sync_execute must remain available to the bundle implementation");
+
 for (const name of expectedCanonicalAliases) {
   assert.equal(publicTools.includes(name), true, `public surface must include canonical alias: ${name}`);
+}
+for (const name of expectedMergedCapabilities) {
+  assert.equal(publicTools.includes(name), true, `public surface must preserve merged capability: ${name}`);
+}
+for (const name of publicTools) {
+  if (expectedCanonicalAliases.includes(name)) {
+    continue;
+  }
+  assert.equal(workerCapabilities.includes(name), true, `worker capability surface must retain public worker tool: ${name}`);
 }
 
 const registered = [];

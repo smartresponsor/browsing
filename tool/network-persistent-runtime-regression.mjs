@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const supervisor = fs.readFileSync(new URL("../tool/dev-network.ps1", import.meta.url), "utf8");
+const persistentTaskModule = fs.readFileSync(new URL("../tool/dev-network.d/47-mcp-persistent-task.ps1", import.meta.url), "utf8");
 const launcher = fs.readFileSync(new URL("../tool/start-persistent-mcp.ps1", import.meta.url), "utf8");
 const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const persistentRuntime = supervisor + "\n" + persistentTaskModule;
 
 for (const command of [
   "install-mcp-startup-task",
@@ -20,9 +22,10 @@ assert.equal(supervisor.includes("$NetworkRoot = $Root"), true, "supervisor must
 assert.equal(supervisor.includes("$RequestedSupervisorCommand = $Command"), true, "supervisor must preserve Command before dot-sourcing secret-runtime");
 assert.equal(supervisor.includes("$Root = $NetworkRoot"), true, "supervisor must restore NetworkRoot after secret-runtime export-env");
 assert.equal(supervisor.includes("$Command = $RequestedSupervisorCommand"), true, "supervisor must restore Command after secret-runtime export-env");
-assert.equal(supervisor.includes("-ExecutionTimeLimit ([TimeSpan]::Zero)"), true, "persistent MCP task must not have a finite execution timeout");
-assert.equal(supervisor.includes("Invoke-McpSmoke | ConvertFrom-Json"), true, "persistent MCP start must verify smoke before reporting success");
-assert.equal(supervisor.includes("start-persistent-mcp.ps1"), true, "persistent MCP task must invoke the foreground launcher");
+assert.equal(supervisor.includes("dev-network.d\\47-mcp-persistent-task.ps1"), true, "persistent MCP task lifecycle module must be loaded");
+assert.equal(persistentRuntime.includes("-ExecutionTimeLimit ([TimeSpan]::Zero)"), true, "persistent MCP task must not have a finite execution timeout");
+assert.equal(persistentRuntime.includes("Invoke-McpSmoke | ConvertFrom-Json"), true, "persistent MCP start must verify smoke before reporting success");
+assert.equal(persistentRuntime.includes("start-persistent-mcp.ps1"), true, "persistent MCP task must invoke the foreground launcher");
 
 assert.equal(launcher.includes("AwsSecretContract\\tool\\secret-runtime.ps1"), true, "persistent launcher must import the shared secret runtime");
 assert.equal(launcher.includes("NETWORK_MCP_SERVER_PORT"), true, "persistent launcher must bind the configured MCP port");
