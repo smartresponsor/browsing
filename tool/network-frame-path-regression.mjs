@@ -37,7 +37,7 @@ for (const token of [
   "for (const frameInfo of enumerateFrameTree(target))",
   "framePath: [...framePath]",
   "localIndex: field.index",
-  "semanticModelVersion: 3",
+  "semanticModelVersion: 4",
   "framePath,",
   "async function locatorForFieldSnapshot(target, field)",
   "const frame = resolveFrameByPath(target, framePath)",

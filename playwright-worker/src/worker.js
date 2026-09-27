@@ -717,6 +717,21 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     const labelText = normalize(labelledBy || explicit?.innerText || explicit?.textContent || wrapping?.innerText || wrapping?.textContent || '');
     const container = node.closest('fieldset, li, tr, .question, .form-group, .form-row, .field, .field-wrapper, .formField, .questionWrapper, .questionContainer, section, article, div');
     const contextText = container ? normalize(container.innerText || container.textContent || '') : '';
+    const shadowPath = [];
+    let shadowRoot = node.getRootNode();
+    while (shadowRoot && shadowRoot.host) {
+      const host = shadowRoot.host;
+      const parent = host.parentNode;
+      const siblings = parent && parent.children ? Array.from(parent.children) : [];
+      shadowPath.unshift({
+        tag: host.tagName.toLowerCase(),
+        id: host.getAttribute('id') || '',
+        name: host.getAttribute('name') || '',
+        role: host.getAttribute('role') || '',
+        index: siblings.indexOf(host),
+      });
+      shadowRoot = host.getRootNode();
+    }
 
     let semanticType = 'unsupported';
     if (tag === 'select') semanticType = 'select';
@@ -828,6 +843,8 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       ariaLabel: node.getAttribute('aria-label') || '',
       labelText,
       contextText,
+      shadowPath,
+      shadowDepth: shadowPath.length,
       required: node.hasAttribute('required') || node.getAttribute('aria-required') === 'true',
       visible,
       enabled,
@@ -849,6 +866,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
   return rawFields.map(field => {
     const fingerprint = hashStableJson({
       framePath,
+      shadowPath: field.shadowPath,
       tag: field.tag,
       semanticType: field.semanticType,
       name: field.name,
@@ -869,7 +887,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       frameUrl,
       frameName,
       controlId: `control:${hashStableJson({ fingerprint, occurrence })}`,
-      semanticModelVersion: 3,
+      semanticModelVersion: 4,
     };
   });
 }
@@ -1387,7 +1405,35 @@ async function locatorForFieldSnapshot(target, field) {
     });
   }
 
-  return frame.locator(SEMANTIC_FIELD_SELECTOR).nth(localIndex);
+  const locator = frame.locator(SEMANTIC_FIELD_SELECTOR).nth(localIndex);
+  const actualShadowPath = await locator.evaluate(node => {
+    const path = [];
+    let root = node.getRootNode();
+    while (root && root.host) {
+      const host = root.host;
+      const parent = host.parentNode;
+      const siblings = parent && parent.children ? Array.from(parent.children) : [];
+      path.unshift({
+        tag: host.tagName.toLowerCase(),
+        id: host.getAttribute('id') || '',
+        name: host.getAttribute('name') || '',
+        role: host.getAttribute('role') || '',
+        index: siblings.indexOf(host),
+      });
+      root = host.getRootNode();
+    }
+    return path;
+  });
+  const expectedShadowPath = Array.isArray(field?.shadowPath) ? field.shadowPath : [];
+  if (hashStableJson(actualShadowPath) !== hashStableJson(expectedShadowPath)) {
+    throw revisionError(
+      'NETWORK_SHADOW_PATH_STALE',
+      'The open-shadow host path for this control changed. Re-inspect the form before mutating.',
+      { expectedShadowPath, actualShadowPath, controlId: field?.controlId || null }
+    );
+  }
+
+  return locator;
 }
 
 async function resolveRequestedFieldLocator(target, item, fields) {
