@@ -1,60 +1,92 @@
 # Architecture
 
-`network-mcp` is a hybrid career-apply stack:
+`network-mcp` is the supervised browser/network capability consumer in the MCP workspace.
 
-- a Cloudflare Worker gateway in `cloudflare-worker/src/index.ts`
-- a local visible Playwright browser worker in `playwright-worker/src/worker.js`
-- a local MCP server in `mcp-server/src/server.js`
+Its canonical role is to provide browser/form semantics on top of Console-owned execution infrastructure.
 
-The product logic is intentionally supervised. The browser worker exposes only the safe career flow:
+## Ownership boundary
 
-1. open
-2. inspect
-3. extract form
-4. propose
-5. fill after approval
-6. review before submit
+Console MCP owns:
 
-Final submit is not auto-implemented.
+- the ChatGPT-facing MCP connector and tool gateway;
+- browser process/runtime lifecycle;
+- generic task/run identity;
+- async execution lifecycle, cancellation, timeout, capacity, and leases;
+- shared DevTools/CDP availability and browser resource hygiene.
 
-## Current entrypoints
+Network MCP owns:
 
-- `cloudflare-worker/src/index.ts` - public health, OIDC metadata, MCP gateway, and worker proxying.
-- `playwright-worker/src/worker.js` - local browser automation worker on port `8791`.
-- `mcp-server/src/server.js` - local MCP endpoint on port `8792`.
+- browser/network domain semantics;
+- target identity and page/form revisions;
+- semantic form extraction;
+- type-specific field mutations and postcondition verification;
+- guarded upload semantics;
+- review/approval domain receipts;
+- human-boundary classification;
+- domain-specific navigation and confirmation evidence.
+
+Network MCP must not introduce a competing generic orchestration engine or generic async run lifecycle.
+
+## Runtime components
+
+The repository still contains three runtime components:
+
+- `playwright-worker/src/worker.js` — local Network browser capability worker on port `8791`;
+- `mcp-server/src/server.js` — compatibility/local-validation MCP surface on port `8792`;
+- `cloudflare-worker/src/index.ts` — legacy/public gateway and proxy surface.
+
+The local `mcp-server` is not the canonical ChatGPT-facing connector. The canonical ChatGPT-facing registration plane is Console MCP.
+
+## Browser model
+
+The canonical browser runtime is Console-owned.
+
+Network attaches to the shared supervised browser over CDP and must not launch a competing browser in normal Console-owned mode.
+
+Fallback standalone browser behavior may remain only for bounded local development/compatibility testing and must not redefine runtime ownership.
+
+## Supervised domain flow
+
+The Network domain flow is intentionally supervised:
+
+1. inspect/bind an explicit target;
+2. capture page/form revisions;
+3. extract semantic controls;
+4. propose bounded operations;
+5. require approval where policy requires it;
+6. apply type-specific mutations;
+7. verify postconditions;
+8. capture review evidence;
+9. perform final submit only when explicitly enabled and approved;
+10. verify or explicitly report an unverified terminal outcome.
 
 ## Architectural guardrails
 
-- Keep the Cloudflare Worker as a public gateway and proxy. It must not own browser automation, persistent browser profiles, cookies, form-fill logic, or the MCP tool schema.
-- Keep the local MCP server as the schema owner for MCP tools. Cloudflare may proxy `/mcp`, but it must not fork or duplicate the tool registry.
-- Keep the browser worker local and supervised. It owns visible browser control, profile locking recovery, click/open/inspect/extract/fill endpoints, and challenge-page pauses.
-- Keep startup passive. The default startup page is the local worker health endpoint, `http://127.0.0.1:8791/healthz`; startup must not click, fill, submit, or navigate to third-party sites unless an operator explicitly sets `NETWORK_MCP_START_URL`.
-- Keep destructive actions out of automation. Final submit remains disabled by default and cannot be added without an explicit policy and documentation change.
-- Keep profile cleanup scoped to managed processes for the configured `NETWORK_MCP_USER_DATA_DIR`; do not terminate unrelated user browser sessions.
+- Console MCP is the execution/orchestration owner.
+- Network MCP is the capability/domain-state owner.
+- Do not create Network-owned generic `runId`, process leases, async start/status/output/stop, or retry/cancel engines.
+- Do not launch a second browser when Console-owned CDP runtime is available.
+- Bind mutations to explicit target/page/form revisions and fail closed on stale state.
+- Keep credentials manual and never log password values.
+- Treat CAPTCHA, 2FA, login/security challenges, and unsupported controls as typed human boundaries.
+- Keep uploads guarded by a dedicated artifact root, type/size/hash validation, and exact file-control binding.
+- Final submit remains disabled by default and approval-gated when enabled.
+- Never close unrelated user/Console browser targets.
 
 ## Local ports
 
-- `playwright-worker` listens on `127.0.0.1:8791` by default.
-- `mcp-server` listens on `127.0.0.1:8792/mcp` by default.
-- The durable public browser-worker path should use a Cloudflare named tunnel hostname; quick `cloudflared tunnel --url ...` tunnels are transition-only.
+- `playwright-worker`: `127.0.0.1:8791`
+- compatibility `mcp-server`: `127.0.0.1:8792/mcp`
+- shared browser/CDP: Console-owned, normally port `9223`
 
-## Auth model
+## Auth and transport
 
-- `cloudflare-worker` accepts a bearer token through `NETWORK_MCP_TOKEN`.
-- The worker also proxies Auth0/OIDC metadata and userinfo for the public ChatGPT-style path.
 - The browser worker must remain local-only or be protected with `NETWORK_MCP_BROWSER_WORKER_TOKEN`.
-- If the browser worker is exposed through Cloudflare Tunnel, token protection is required.
+- Public/tunnel surfaces are compatibility/deployment concerns and must not move browser ownership out of Console.
+- Secret values come from runtime secret injection and must not be committed.
 
-## Cloudflare usage
+## Validation
 
-- Deployment is through `cloudflare-worker/wrangler.jsonc`.
-- `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are expected from the environment.
-- `CAREER_WORKER_URL` points the Cloudflare Worker at the public tunnel for the local browser worker.
-
-## Operational notes
-
-- The browser launches with `headless: false`, so Playwright stays visible on Windows by default.
-- The canonical runtime uses the Console-owned shared visible browser over CDP, with Microsoft Edge preferred on Windows (`NETWORK_MCP_BROWSER_CHANNEL=msedge`). Chrome and bundled Chromium remain fallback/development modes.
-- Shared external browser/CDP attachment is controlled through `NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true`; `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME` remains a legacy compatibility alias.
-- Local smoke checks use a data URL form to avoid depending on external sites.
-- Health and smoke commands are operational checks, not product features.
+- `npm run typecheck` validates worker/server syntax.
+- `npm run test` validates capability symmetry, revision semantics, semantic form behavior, guarded uploads, registry symmetry, and persistent-runtime compatibility.
+- Console `schema:validate` independently verifies the Network/Console ownership contract.

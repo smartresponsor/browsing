@@ -1,93 +1,91 @@
 # network-mcp
 
-`network-mcp` is a ChatGPT-driven, supervised opportunity-assistance MVP for Windows.
+`network-mcp` is the supervised browser/network capability consumer in the canonical MCP workspace.
 
-It combines:
+It provides browser/form domain semantics while Console MCP remains the ChatGPT-facing connector and generic execution/runtime owner.
 
-- a thin Cloudflare Worker gateway
-- a local visible Playwright browser worker
-- a small MCP tool registry skeleton
-- explicit approval before fill actions
-- submit disabled by default
+## Canonical role
 
-## MVP flow
+Network MCP owns:
 
-1. User provides one URL in ChatGPT.
-2. The browser worker opens it visibly.
-3. The worker discovers likely opportunity links within a limited scope.
-4. ChatGPT presents options.
-5. The user selects a page or form.
-6. The worker opens it visibly and inspects fields.
-7. ChatGPT proposes values.
-8. The user approves.
-9. The worker fills approved fields only.
-10. Submit stays manual unless an explicit submit mode is enabled later.
+- target/page/form inspection;
+- semantic form extraction;
+- verified field mutations;
+- guarded artifact upload;
+- review and submit domain policy;
+- human-boundary detection;
+- browser-domain evidence and statuses.
 
-Final submit is intentionally not auto-implemented in the MVP.
+Console MCP owns:
+
+- browser runtime/process lifecycle;
+- ChatGPT-facing tool gateway;
+- generic task/run identity;
+- async execution, leases, capacity, retry, timeout, and cancellation.
+
+The local `mcp-server` remains a compatibility/local-validation surface. It is not the canonical ChatGPT-facing connector.
+
+## Current supervised flow
+
+1. Console binds or opens the browser target.
+2. Network captures exact target/page/form identity.
+3. Network extracts semantic controls.
+4. Values/actions are proposed.
+5. Approval-gated mutations are applied.
+6. Network verifies each supported postcondition.
+7. Files are uploaded only through guarded artifact references.
+8. A review artifact is captured.
+9. Final submit remains disabled by default and requires explicit approval when enabled.
+10. Network returns verified or explicitly unverified terminal evidence.
+
+## Safety defaults
+
+- Network must not launch a competing browser in Console-owned mode.
+- Credentials remain manual.
+- CAPTCHA, 2FA, login/security challenges pause automation as human boundaries.
+- Form mutations use target/page/form revision guards.
+- Password fields are not writable.
+- Uploads accept only guarded relative artifact references inside the dedicated upload root.
+- Form values and credential material are not logged by default.
+- Unrelated browser tabs/processes must not be closed.
 
 ## Policy defaults
 
 ```env
 NETWORK_MCP_MODE=local-assist
-NETWORK_MCP_HEADLESS=false
 NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL=true
+NETWORK_MCP_REQUIRE_APPROVAL_FOR_UPLOAD=true
 NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT=true
-NETWORK_MCP_SUBMIT_DEFAULT=false
 NETWORK_MCP_ENABLE_SUBMIT=false
-NETWORK_MCP_MAX_SESSION_SECONDS=900
-NETWORK_MCP_MAX_PAGE_VISITS=20
-NETWORK_MCP_MAX_FORM_FILLS=1
-NETWORK_MCP_MAX_FIELD_WRITES=80
-NETWORK_MCP_ALLOWED_HOSTS=
-NETWORK_MCP_DENIED_HOSTS=
-NETWORK_MCP_PUBLIC_ORIGIN=
+NETWORK_MCP_UPLOAD_ROOT=var\artifacts\uploads
+NETWORK_MCP_MAX_UPLOAD_BYTES=26214400
 NETWORK_MCP_WORKER_PORT=8791
 NETWORK_MCP_BROWSER_CHANNEL=msedge
 NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true
-NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true
 ```
 
-## Tool contract
+## Capability contract
 
-Documented safe operations:
+The machine-readable source of truth is:
 
-- `network.open`
-- `network.inspect`
-- `network.extract_form`
-- `network.propose`
-- `network.fill_after_approval`
-- `network.review_before_submit`
+`mcp-server/src/capability-contract.js`
 
-## Safety defaults
+It defines Console/Network ownership, risk classes, approvals, binding, replay policy, timeout class, artifact behavior, postconditions, visibility, and compatibility aliases.
 
-- Browser is visible by default.
-- Login and registration are user-driven.
-- CAPTCHA, 2FA, and security challenge pages pause automation.
-- Credentials are entered manually by the user.
-- Form values are not logged by default.
-- Browser storage, cookies, screenshots, traces, videos, and downloads stay in ignored runtime directories such as `var\browser\`.
-- One active browser session is the default operating model.
-
-## Local commands
+## Local validation
 
 ```powershell
 cd D:\PhpstormProjects\www\mcp\network-mcp
-npm install
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 doctor
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 smoke-local
+npm run typecheck
+npm run test
 ```
+
+Operational lifecycle commands remain available for compatibility/local validation, but normal browser ownership belongs to Console MCP.
 
 ## Documentation
 
-- [MVP assisted application](docs/mvp-assisted-application.md)
+- [Architecture](docs/architecture.md)
+- [Network/Console parity milestone](docs/milestone-network-mcp-console-parity.md)
 - [Operations](docs/operations.md)
 - [Security](docs/security.md)
 - [Restore on Windows](docs/restore-windows.md)
-- [ChatGPT session availability](docs/chatgpt-session-availability.md)
-
-## Cloudflare
-
-- Worker config: `cloudflare-worker/wrangler.jsonc`
-- Public health check: `/healthz` returns `service: "network-mcp"`
-- Worker deploy remains a manual action through the supervisor or `wrangler`
