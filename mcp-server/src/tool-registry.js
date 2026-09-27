@@ -1,26 +1,13 @@
-import { getNetworkCapabilityRoute, listNetworkCapabilityToolNames } from './capability-contract.js';
-
-const internalWorkerCapabilityNames = new Set([
-  'network.open_fresh',
-  'network.connector_sync_execute'
-]);
-
-const canonicalAliases = Object.freeze({
-  'network.browser.status': 'network.browser_status',
-  'network.browser.restart': 'network.browser_restart',
-  'network.browser.kill': 'network.browser_kill',
-  'network.job.open': 'network.open_job',
-  'network.chatgpt.snapshot': 'network.chatgpt_snapshot',
-  'network.form.extract': 'network.extract_form',
-  'network.form.proposal.preview': 'network.propose',
-  'network.form.fill': 'network.fill_after_approval',
-  'network.form.review.snapshot': 'network.review_before_submit'
-});
+import {
+  getNetworkCapabilityRoute,
+  listNetworkCapabilityToolNames,
+  networkCapabilityAliases
+} from './capability-contract.js';
 
 const workerCapabilityNames = Object.freeze(listNetworkCapabilityToolNames());
 const publicToolNames = Object.freeze([
-  ...workerCapabilityNames.filter((name) => !internalWorkerCapabilityNames.has(name)),
-  ...Object.keys(canonicalAliases)
+  ...listNetworkCapabilityToolNames({ publicOnly: true }),
+  ...Object.keys(networkCapabilityAliases)
 ]);
 
 export class NetworkToolRegistry {
@@ -90,8 +77,7 @@ export class NetworkToolRegistry {
   }
 
   async callTool(toolName, payload) {
-    const workerToolName = canonicalAliases[toolName] ?? toolName;
-    const route = getNetworkCapabilityRoute(workerToolName);
+    const route = getNetworkCapabilityRoute(toolName);
     if (!route) {
       throw new Error(`Unknown network tool: ${toolName}`);
     }

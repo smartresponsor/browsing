@@ -1,6 +1,6 @@
 # Milestone: Network MCP maturity uplift and Console MCP parity
 
-Status: proposed  
+Status: active  
 Repository: `D:\PhpstormProjects\www\mcp\network-mcp`  
 Baseline date: 2026-09-26
 
@@ -501,6 +501,8 @@ Exit criteria:
 ### Phase 1 — Capability Contract v2
 
 Priority: P0
+
+Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status.
 
 Create a typed machine-readable Network capability contract containing:
 
