@@ -725,6 +725,8 @@ Exit criteria:
 
 Priority: P1
 
+Implementation status: guarded upload slice complete. Network exposes approval-gated `network.form.upload` / `network.upload_artifact`, accepts only relative artifact references inside a dedicated upload root, rejects absolute/traversal paths, validates realpath/extension/size/SHA-256, binds upload to target/page/form revisions and an exact file control, and verifies the resulting browser `FileList` by filename and size. Generic artifact materialization into the upload root remains a Console-owned infrastructure concern.
+
 Implement guarded:
 
 - upload;
@@ -964,7 +966,7 @@ Instead of growing a flat tool list indefinitely, organize Network capabilities 
 
 This milestone is complete when Network MCP can take a real multi-step external form from URL to verified pre-submit review with:
 
-- one durable workflow ID;
+- one durable Console-owned execution/correlation identity plus Network-owned semantic step receipts;
 - deterministic target/form identities;
 - semantic field extraction;
 - safe document upload;

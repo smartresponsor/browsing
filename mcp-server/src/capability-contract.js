@@ -7,6 +7,7 @@ export const networkCapabilityAliases = Object.freeze({
   'network.form.extract': 'network.extract_form',
   'network.form.proposal.preview': 'network.propose',
   'network.form.fill': 'network.fill_after_approval',
+  'network.form.upload': 'network.upload_artifact',
   'network.form.review.snapshot': 'network.review_before_submit'
 });
 
@@ -113,6 +114,11 @@ export const networkCapabilityContract = Object.freeze({
     tool('network.fill_after_approval', '/fill-after-approval', 'write', {
       riskClass: 'data-entry', binding: 'required', approvalPolicy: 'explicit-apply',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', postcondition: 'field-values-verified'
+    }),
+    tool('network.upload_artifact', '/upload-artifact', 'write', {
+      riskClass: 'local-artifact-upload', binding: 'required', approvalPolicy: 'explicit-upload',
+      requiresExplicitApproval: true, replayPolicy: 'non-idempotent', artifactBehavior: 'guarded-local-upload',
+      postcondition: 'file-name-and-size-verified'
     }),
     tool('network.review_before_submit', '/review-before-submit', 'read', {
       riskClass: 'observation', binding: 'required', artifactBehavior: 'review-snapshot',

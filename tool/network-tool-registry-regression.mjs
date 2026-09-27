@@ -12,6 +12,7 @@ const expectedCanonicalAliases = [
   "network.browser.kill",
   "network.job.open",
   "network.form.fill",
+  "network.form.upload",
   "network.chatgpt.snapshot",
   "network.form.extract",
   "network.form.review.snapshot",
@@ -31,11 +32,12 @@ const expectedMergedCapabilities = [
   "network.browser_bind",
   "network.page_capture",
   "network.wait_for_ready",
+  "network.upload_artifact",
   "network.submit_after_approval",
 ];
 
-assert.equal(publicTools.length, 34, "public Network MCP surface should preserve merged runtime capabilities plus canonical aliases");
-assert.equal(workerCapabilities.length, 27, "worker capability contract should preserve all merged worker routes");
+assert.equal(publicTools.length, 36, "public Network MCP surface should preserve merged runtime capabilities plus canonical aliases");
+assert.equal(workerCapabilities.length, 28, "worker capability contract should preserve all merged worker routes");
 assert.equal(publicTools.includes("network.open_fresh"), false, "network.open_fresh must not be reported as a public MCP tool");
 assert.equal(publicTools.includes("network.connector_sync_execute"), false, "network.connector_sync_execute must remain an internal worker capability");
 assert.equal(workerCapabilities.includes("network.open_fresh"), true, "network.open_fresh must remain an internal worker capability");
@@ -73,6 +75,7 @@ for (const [canonical, legacy] of [
   ["network.browser.kill", "network.browser_kill"],
   ["network.job.open", "network.open_job"],
   ["network.form.fill", "network.fill_after_approval"],
+  ["network.form.upload", "network.upload_artifact"],
   ["network.chatgpt.snapshot", "network.chatgpt_snapshot"],
   ["network.form.extract", "network.extract_form"],
   ["network.form.review.snapshot", "network.review_before_submit"],

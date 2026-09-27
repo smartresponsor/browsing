@@ -316,6 +316,37 @@ function registerNetworkTools(mcpServer, registry) {
 
   registerNetworkToolWithLegacyAlias(
     mcpServer,
+    'network.form.upload',
+    'network.upload_artifact',
+    {
+      description: 'Upload one approved artifact to an exact file control using a guarded relative artifact reference.',
+      inputSchema: z.object({
+        approved: z.boolean(),
+        approvalText: z.string(),
+        expectedTargetId: z.string().optional(),
+        expectedPageRevision: z.string().optional(),
+        expectedFormRevision: z.string().optional(),
+        controlId: z.string().optional(),
+        selector: z.string().optional(),
+        artifactRef: z.string().min(1),
+        expectedSha256: z.string().regex(/^[A-Fa-f0-9]{64}$/).optional()
+      }).strict()
+    },
+    async ({ approved, approvalText, expectedTargetId, expectedPageRevision, expectedFormRevision, controlId, selector, artifactRef, expectedSha256 }) => toolResult(await registry.callTool('network.upload_artifact', {
+      approved,
+      approvalText,
+      expectedTargetId,
+      expectedPageRevision,
+      expectedFormRevision,
+      controlId,
+      selector,
+      artifactRef,
+      expectedSha256
+    }))
+  );
+
+  registerNetworkToolWithLegacyAlias(
+    mcpServer,
     'network.form.review.snapshot',
     'network.review_before_submit',
     {

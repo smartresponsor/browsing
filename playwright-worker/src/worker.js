@@ -33,6 +33,7 @@ import {
   hashStableJson,
   revisionError
 } from './revision-contract.js';
+import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -127,6 +128,9 @@ function getPolicy() {
     headless,
     requireApprovalForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
     requireApprovalForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
+    requireApprovalForUpload: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_UPLOAD || 'true').toLowerCase() !== 'false',
+    uploadRoot: path.resolve(String(process.env.NETWORK_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
+    maxUploadBytes: Number(process.env.NETWORK_MCP_MAX_UPLOAD_BYTES || 26214400),
     submitEnabled: String(process.env.NETWORK_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
     maxSessionSeconds: Number(process.env.NETWORK_MCP_MAX_SESSION_SECONDS || 7200),
     maxPageVisits: Number(process.env.NETWORK_MCP_MAX_PAGE_VISITS || 100),
@@ -1183,6 +1187,62 @@ async function resolveRequestedFieldLocator(target, item, fields) {
   throw new Error('Each field must include a controlId, an index from the inspected field list, or a selector.');
 }
 
+async function resolveUploadControl(target, item, fields) {
+  const controlId = getRequestedControlId(item);
+  if (controlId) {
+    const field = fields.find(candidate => candidate.controlId === controlId);
+    if (!field) {
+      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Upload control identity is stale or missing from the current form revision.', { controlId });
+    }
+    if (field.semanticType !== 'file') {
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
+    }
+    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };
+  }
+
+  const selector = typeof item?.selector === 'string' ? item.selector.trim() : '';
+  if (!selector) {
+    throw revisionError('NETWORK_UPLOAD_CONTROL_REQUIRED', 'Upload requires an exact file controlId or selector.');
+  }
+
+  const locator = target.locator(selector);
+  const count = await locator.count();
+  if (count !== 1) {
+    throw revisionError(
+      count === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+      'Upload selector must resolve to exactly one file control.',
+      { selector, count }
+    );
+  }
+
+  const field = await locator.evaluate(node => ({
+    tag: node.tagName.toLowerCase(),
+    type: String(node.getAttribute('type') || '').toLowerCase(),
+    visible: (() => {
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    })(),
+    enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
+  }));
+  if (field.tag !== 'input' || field.type !== 'file') {
+    throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
+  }
+  if (!field.enabled) {
+    throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
+  }
+
+  return {
+    locator,
+    field: {
+      ...field,
+      semanticType: 'file',
+      controlId: `selector:${hashStableJson({ selector, type: 'file' })}`,
+      semanticModelVersion: 2
+    }
+  };
+}
+
 async function describeSelectorField(target, selector) {
   const locator = target.locator(selector);
   const count = await locator.count();
@@ -1682,6 +1742,80 @@ app.post('/fill-after-approval', async (req, res) => {
     });
   } catch (error) {
     sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED');
+  }
+});
+
+app.post('/upload-artifact', async (req, res) => {
+  try {
+    const policy = getPolicy();
+    const approved = req.body?.approved === true;
+    const approvalText = String(req.body?.approvalText || '');
+    if (policy.requireApprovalForUpload && (!approved || approvalText !== 'UPLOAD')) {
+      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=UPLOAD is required for file upload actions.');
+    }
+
+    const target = await ensurePage();
+    await ensureNotChallenge(target);
+    const before = await capturePageArtifact(target, { screenshot: false });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
+
+    const resolvedControl = await resolveUploadControl(target, {
+      controlId: req.body?.controlId,
+      selector: req.body?.selector
+    }, before.fields);
+
+    const guarded = await resolveGuardedUploadArtifact({
+      artifactRef: req.body?.artifactRef,
+      uploadRoot: policy.uploadRoot,
+      expectedSha256: req.body?.expectedSha256,
+      maxBytes: policy.maxUploadBytes
+    });
+
+    await resolvedControl.locator.setInputFiles(guarded.filePath);
+    const uploaded = await resolvedControl.locator.evaluate(node => Array.from(node.files || []).map(file => ({
+      name: String(file.name || ''),
+      size: Number(file.size || 0),
+      type: String(file.type || '')
+    })));
+
+    const matched = uploaded.find(file => file.name === guarded.artifact.filename && file.size === guarded.artifact.size);
+    if (!matched) {
+      throw revisionError(
+        'NETWORK_VALIDATION_FAILED',
+        'File upload postcondition did not confirm the expected file name and size.',
+        {
+          controlId: resolvedControl.field.controlId || null,
+          expectedFilename: guarded.artifact.filename,
+          expectedSize: guarded.artifact.size,
+          uploaded
+        }
+      );
+    }
+
+    const after = await capturePageArtifact(target, { screenshot: false });
+    res.json({
+      ok: true,
+      status: 'NETWORK_UPLOAD_VERIFIED',
+      controlId: resolvedControl.field.controlId || null,
+      artifact: guarded.artifact,
+      uploaded: {
+        filename: matched.name,
+        size: matched.size,
+        type: matched.type
+      },
+      before: {
+        targetId: before.targetId,
+        pageRevision: before.pageRevision,
+        formRevision: before.formRevision
+      },
+      after: {
+        targetId: after.targetId,
+        pageRevision: after.pageRevision,
+        formRevision: after.formRevision
+      }
+    });
+  } catch (error) {
+    sendNetworkError(res, error, 'NETWORK_UPLOAD_FAILED');
   }
 });
 
