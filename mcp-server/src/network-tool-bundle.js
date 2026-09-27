@@ -181,12 +181,13 @@ function registerNetworkTools(mcpServer, registry) {
     {
       description: 'Bind the supervised worker to a specific browser page by index, exact URL, or URL fragment.',
       inputSchema: z.object({
+        targetId: z.string().min(1).optional(),
         index: z.number().int().nonnegative().optional(),
         url: z.string().optional(),
         urlContains: z.string().optional()
       }).strict()
     },
-    async ({ index, url, urlContains }) => toolResult(await registry.callTool('network.browser_bind', { index, url, urlContains }))
+    async ({ targetId, index, url, urlContains }) => toolResult(await registry.callTool('network.browser_bind', { targetId, index, url, urlContains }))
   );
 
   mcpServer.registerTool(

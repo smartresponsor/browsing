@@ -561,7 +561,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: target/revision foundation started. Page/review captures now produce durable CDP `targetId`, `pageRevision`, and `formRevision`; approved fill and submit accept expected revisions and reject stale target/page/form state with stable Network statuses.
+Implementation status: target/revision foundation advanced. Page/review captures produce durable CDP `targetId`, `pageRevision`, and `formRevision`; target inventory now exposes exact `targetId`, `network.browser_bind` prefers exact target identity over compatibility index/URL locators and stale IDs fail `NETWORK_TARGET_STALE`; approved mutations reject stale target/page/form state with stable Network statuses.
 
 Ownership rule:
 

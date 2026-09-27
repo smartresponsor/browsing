@@ -967,24 +967,40 @@ async function listBrowserTargets() {
 
   for (let index = 0; index < pages.length; index += 1) {
     const item = pages[index];
+    const closed = item.isClosed();
     targets.push({
       index,
+      targetId: closed ? null : await getPageTargetId(item),
       active: item === page,
-      closed: item.isClosed(),
-      url: item.isClosed() ? null : item.url(),
-      title: item.isClosed() ? null : await item.title().catch(() => null)
+      closed,
+      url: closed ? null : item.url(),
+      title: closed ? null : await item.title().catch(() => null)
     });
   }
 
-  return { ok: true, activeIndex: targets.find(item => item.active)?.index ?? null, targets };
+  const active = targets.find(item => item.active) ?? null;
+  return {
+    ok: true,
+    activeIndex: active?.index ?? null,
+    activeTargetId: active?.targetId ?? null,
+    targets
+  };
 }
 
-async function bindBrowserTarget({ index, url, urlContains } = {}) {
+async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
   await ensurePage();
   const pages = browser ? browser.pages() : [];
   let selected = null;
 
-  if (Number.isInteger(index)) {
+  if (targetId) {
+    for (const candidate of pages) {
+      if (candidate.isClosed()) continue;
+      if (await getPageTargetId(candidate) === String(targetId)) {
+        selected = candidate;
+        break;
+      }
+    }
+  } else if (Number.isInteger(index)) {
     selected = pages[index] ?? null;
   } else if (url) {
     selected = pages.find(item => !item.isClosed() && item.url() === String(url)) ?? null;
@@ -993,12 +1009,26 @@ async function bindBrowserTarget({ index, url, urlContains } = {}) {
   }
 
   if (!selected || selected.isClosed()) {
-    throw new Error('Requested browser target was not found or is closed.');
+    throw revisionError('NETWORK_TARGET_STALE', 'Requested browser target was not found or is closed.', {
+      targetId: targetId ? String(targetId) : null,
+      index: Number.isInteger(index) ? index : null,
+      url: url ? String(url) : null,
+      urlContains: urlContains ? String(urlContains) : null
+    });
   }
 
   page = selected;
   await page.bringToFront().catch(() => {});
-  return { ok: true, bound: { index: pages.findIndex(item => item === page), url: page.url(), title: await page.title().catch(() => '') } };
+  return {
+    ok: true,
+    status: 'NETWORK_TARGET_BOUND',
+    bound: {
+      targetId: await getPageTargetId(page),
+      index: pages.findIndex(item => item === page),
+      url: page.url(),
+      title: await page.title().catch(() => '')
+    }
+  };
 }
 
 async function waitForReadiness(target, { selector = '', state = 'domcontentloaded', timeoutMs = 15000, quietMs = 500 } = {}) {
@@ -1535,12 +1565,13 @@ app.post('/browser-targets', async (_req, res) => {
 app.post('/browser-bind', async (req, res) => {
   try {
     res.json(await bindBrowserTarget({
+      targetId: typeof req.body?.targetId === 'string' ? req.body.targetId.trim() : undefined,
       index: Number.isInteger(req.body?.index) ? req.body.index : undefined,
       url: typeof req.body?.url === 'string' ? req.body.url : undefined,
       urlContains: typeof req.body?.urlContains === 'string' ? req.body.urlContains : undefined
     }));
   } catch (error) {
-    res.status(409).json({ ok: false, error: normalizeError(error) });
+    sendNetworkError(res, error, 'NETWORK_TARGET_BIND_FAILED');
   }
 });
 
