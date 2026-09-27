@@ -36,7 +36,7 @@ for (const required of [
   "console.write.network.form.fill",
   "console.write.network.form.upload",
   "console.write.network.form.review.snapshot",
-  "console.write.network.submit",
+  "console.write.network.form.submit",
 ]) {
   assert.ok(definitions.some((tool) => tool.consoleName === required), `Required Console Network domain definition missing: ${required}`);
 }

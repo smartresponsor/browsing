@@ -189,7 +189,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.submit_after_approval',
-      consoleName: 'console.write.network.submit',
+      consoleName: 'console.write.network.form.submit',
       route: '/submit-after-approval',
       capabilityName: 'network.submit_after_approval',
       access: 'write',
