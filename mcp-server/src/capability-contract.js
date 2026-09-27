@@ -17,9 +17,14 @@ export const networkCapabilityContract = Object.freeze({
   boundary: Object.freeze({
     chatgptFacingConnector: 'console-mcp',
     browserOwner: 'console-mcp',
+    executionOwner: 'console-mcp',
+    orchestrationOwner: 'console-mcp',
     capabilityOwner: 'network-mcp',
+    domainStateOwner: 'network-mcp',
     standaloneConnectorRequired: false,
-    competingBrowserLaunchAllowed: false
+    competingBrowserLaunchAllowed: false,
+    genericAsyncLifecycleOwnedByNetwork: false,
+    genericExecutionLeaseOwnedByNetwork: false
   }),
   worker: Object.freeze({
     defaultUrl: 'http://127.0.0.1:8791',

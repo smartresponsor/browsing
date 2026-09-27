@@ -19,7 +19,12 @@ const publicContractTools = contractTools.filter((tool) => tool.visibility !== "
 
 assert.equal(networkCapabilityContract.schemaVersion, 2, "Network contract schemaVersion must be 2");
 assert.equal(networkCapabilityContract.boundary.browserOwner, "console-mcp", "Console MCP must remain the browser runtime owner");
+assert.equal(networkCapabilityContract.boundary.executionOwner, "console-mcp", "Console MCP must own generic execution identity and lifecycle");
+assert.equal(networkCapabilityContract.boundary.orchestrationOwner, "console-mcp", "Console MCP must own generic orchestration");
 assert.equal(networkCapabilityContract.boundary.capabilityOwner, "network-mcp", "Network MCP must remain the capability owner");
+assert.equal(networkCapabilityContract.boundary.domainStateOwner, "network-mcp", "Network MCP must own browser/form domain state");
+assert.equal(networkCapabilityContract.boundary.genericAsyncLifecycleOwnedByNetwork, false, "Network must not own a duplicate generic async lifecycle");
+assert.equal(networkCapabilityContract.boundary.genericExecutionLeaseOwnedByNetwork, false, "Network must not own duplicate generic execution leases");
 assert.equal(networkCapabilityContract.boundary.competingBrowserLaunchAllowed, false, "Network must not launch a competing browser in Console-owned mode");
 assert.equal(networkCapabilityContract.worker.browserAttachment, "console-owned-cdp", "Network must attach to the Console-owned browser over CDP");
 

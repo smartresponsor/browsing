@@ -65,26 +65,57 @@ The canonical MCP workspace is `D:\PhpstormProjects\www\mcp`, and the authoritat
 
 A legacy mirror remained at `D:\PhpstormProjects\www\network-mcp` and accumulated unique browser/CDP work after the original mirror-first migration. That history has now been merged back into the canonical repository. The legacy root copy is evacuation-only and must not receive further development.
 
+## Ownership matrix: Console MCP vs Network MCP
+
+This boundary is architectural, not optional.
+
+| Concern | Owner | Notes |
+| --- | --- | --- |
+| Browser process/runtime lifecycle | Console MCP | Launch/restart/stop, CDP availability, resource hygiene. |
+| Generic task/run identity | Console MCP | Durable taskId/runId and execution correlation. |
+| Async start/status/output/stop | Console MCP | Network must not duplicate this substrate. |
+| Capacity/semaphore/leases | Console MCP | Includes heavy execution and per-task execution ownership. |
+| Retry/cancel/timeout policy | Console MCP | Generic orchestration responsibility. |
+| Target identity | Network MCP | Exact CDP target identity used by browser semantics. |
+| Page/form revisions | Network MCP | Optimistic concurrency and stale-state rejection. |
+| Semantic controls/form model | Network MCP | Domain-specific browser/form interpretation. |
+| Field mutation/postconditions | Network MCP | Type-specific browser semantics with evidence. |
+| Review/approval domain receipts | Network MCP | Bound to exact target/revisions/operations. |
+| Human-boundary classification | Network MCP | CAPTCHA/login/2FA/unsupported-control domain status; Console orchestrates pause/resume. |
+| Long workflow ordering | Console MCP | Calls Network domain transitions and checkpoints their receipts. |
+| Domain step semantics | Network MCP | inspect/propose/apply/validate/review/submit/confirmation semantics. |
+| Generic event/output transport | Console MCP | Network emits bounded structured results; Console owns durable transport. |
+
+Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/network/form domain state, keep it in Network MCP.
+
 ## Major gaps relative to Console MCP maturity
 
-### 1. Durable execution identity is missing
+### 1. Execution ownership must stay in Console MCP
 
-Console MCP has durable task/run identities, lifecycle status, bounded execution, checkpointed progress, leases, and recovery semantics.
+Console MCP already owns the generic execution substrate: task/run identities, bounded async execution, leases, checkpointing, capacity control, output/status retrieval, cancellation, and recovery.
 
-Network MCP still relies heavily on process-global mutable state such as:
+Network MCP must not grow a second generic run engine. Its responsibility is domain state and browser/form semantics only.
+
+Network still has process-global mutable state such as:
 
 - current `page`;
 - browser/context handle;
-- session start timestamp;
-- page/fill/write counters;
+- session counters;
 - mutable active target binding.
 
-Consequences:
+The required correction is therefore split ownership:
 
-- a restart loses workflow identity;
-- concurrent callers can interfere through one active page;
-- retries cannot distinguish replay from a new action;
-- a tool result cannot reliably prove which exact target/form revision was mutated.
+- Console MCP owns execution/run identity and process/task leases;
+- Network MCP owns target identity, page/form revisions, semantic form state, review/approval state, and human-boundary state;
+- Console passes correlation/execution identity into Network calls where useful;
+- Network returns domain evidence and stable statuses, not its own competing orchestration lifecycle.
+
+Consequences if this boundary is ignored:
+
+- duplicated run engines drift;
+- retries and leases can disagree across Console and Network;
+- browser ownership becomes ambiguous;
+- failures become harder to recover because two runtimes believe they own the same work.
 
 ### 2. Capability contract is too shallow
 
@@ -201,7 +232,7 @@ Every mutating action should optionally/usually require:
 
 If the page or control changed, fail closed and require reinspection.
 
-### 7. Multi-step workflows are not first-class
+### 7. Multi-step domain state is not first-class
 
 Real application forms are state machines:
 
@@ -216,25 +247,27 @@ Real application forms are state machines:
 9. submit;
 10. confirmation.
 
-Network currently exposes atomic browser actions but no durable workflow state.
+Network should model this as domain state, not as a second orchestration engine.
 
-Add a workflow/session record that persists:
+Network-owned state may include:
 
-- workflow ID;
-- target binding;
-- current step;
-- completed steps;
-- form revisions;
+- domain workflow key supplied/correlated by Console;
+- target binding identity;
+- current semantic step;
+- completed semantic steps;
+- page/form revisions;
 - pending human boundary;
 - approvals consumed;
 - uploaded artifact references;
 - latest validation errors;
 - latest review artifact;
-- terminal status.
+- terminal domain outcome.
 
-### 8. No Network equivalent of durable async command lifecycle
+Generic task/run scheduling, retry policy, process ownership, leases, cancellation, and long-running command lifecycle stay in Console MCP.
 
-Some browser operations can legitimately exceed a normal synchronous MCP request:
+### 8. Long-running execution must delegate to Console MCP
+
+Some browser operations can legitimately outlive one synchronous Network call:
 
 - waiting for dynamic navigation;
 - large file upload;
@@ -242,16 +275,14 @@ Some browser operations can legitimately exceed a normal synchronous MCP request
 - long login/manual-human boundaries;
 - post-submit confirmation polling.
 
-Introduce durable run primitives analogous to Console MCP:
+Do not create Network-owned generic start/status/output/stop primitives for these.
 
-- start;
-- status;
-- incremental output/events;
-- stop/cancel;
-- timeout;
-- lease ownership.
+Instead:
 
-Do not force every complex browser action into one synchronous HTTP request.
+- Console MCP owns the durable run and its `runId`;
+- Console MCP owns timeout, cancellation, lease, capacity, and retry policy;
+- Network exposes bounded domain operations plus resumable domain receipts/statuses;
+- long operations are composed/orchestrated by Console around those bounded Network capabilities.
 
 ### 9. Human-boundary handling is only exception-based
 
@@ -526,30 +557,36 @@ Exit criteria:
 - contract ↔ MCP schema ↔ worker route symmetry test is green;
 - legacy aliases are explicit and removable.
 
-### Phase 2 — Durable target/workflow identity
+### Phase 2 — Durable Network domain identity over Console execution
 
 Priority: P0
 
-Implementation status: target/revision foundation started. Page/review captures now produce durable CDP `targetId`, `pageRevision`, and `formRevision`; approved fill and submit accept expected revisions and reject stale target/page/form state with stable Network statuses. Workflow/run persistence and leases remain pending.
+Implementation status: target/revision foundation started. Page/review captures now produce durable CDP `targetId`, `pageRevision`, and `formRevision`; approved fill and submit accept expected revisions and reject stale target/page/form state with stable Network statuses.
 
-Add durable records for:
+Ownership rule:
 
-- `workflowId`;
+- Console MCP owns generic `taskId` / `runId`, async lifecycle, leases, cancellation, capacity, and retry;
+- Network MCP owns `targetId`, page/form revision identity, semantic step/domain state, approval/review state, and human-boundary state.
+
+Network may accept Console correlation identifiers, but it must not mint or persist a competing generic execution `runId`.
+
+Add/retain domain records for:
+
+- Console correlation/task/run reference when provided;
 - `targetId`;
-- `runId`;
 - page revision;
 - form revision;
-- active step/status.
+- semantic step/status;
+- pending review/approval/human-boundary state.
 
-Use atomic persistence under ignored runtime state.
-
-Add exclusive mutation lease per workflow/target.
+If durable Network domain persistence is needed, persist only these domain receipts atomically under ignored runtime state. Generic process/task leases remain Console-owned.
 
 Exit criteria:
 
-- worker restart can recover inspectable workflow state;
-- two callers cannot mutate the same workflow concurrently;
-- stale target IDs fail closed.
+- stale target/form identities fail closed;
+- Console can correlate each Network mutation with its own durable run identity;
+- Network restart does not require reconstructing generic execution state;
+- no Network-owned generic execution lease exists.
 
 ### Phase 3 — Semantic Form Model v2
 
@@ -621,11 +658,11 @@ Exit criteria:
 
 - no generic mutation reports success without postcondition verification.
 
-### Phase 5 — Multi-step workflow engine
+### Phase 5 — Multi-step domain protocol
 
 Priority: P1
 
-Add deterministic workflow transitions:
+Define deterministic Network domain transitions:
 
 - inspect;
 - propose;
@@ -637,13 +674,16 @@ Add deterministic workflow transitions:
 - review;
 - submit;
 - verify confirmation;
-- complete/failed/cancelled.
+- domain complete/failed.
 
-Persist step history and pending actions.
+Network returns semantic step receipts and resumable domain evidence. Console MCP decides when to invoke the next transition, how to retry it, when to cancel it, and which durable run owns it.
+
+Persist only domain step history/pending domain actions when persistence is required.
 
 Exit criteria:
 
-- a multi-page fixture can be interrupted/restarted and resumed without guessing current state.
+- a multi-page fixture can be interrupted and resumed from Network domain receipts;
+- no Network-owned orchestration loop or generic runner is introduced.
 
 ### Phase 6 — Approval receipts v2
 
@@ -696,24 +736,26 @@ Exit criteria:
 - resume/CV/document upload works through a safe artifact reference;
 - no arbitrary host filesystem path is accepted from the model.
 
-### Phase 9 — Async run lifecycle
+### Phase 9 — Console-owned async orchestration integration
 
 Priority: P1
 
-Introduce Network equivalents of:
+Do not introduce Network equivalents of generic start/status/output/stop.
 
-- start;
-- status;
-- event/output read;
-- cancel/stop;
-- timeout;
-- durable completion/failure state.
+Integrate long-running Network work with Console MCP's existing durable async execution substrate:
 
-Use this for long waits, downloads/uploads, complex transitions, and submit verification.
+- Console owns start/status/output/stop;
+- Console owns `runId`, timeout and cancellation;
+- Console owns capacity and leases;
+- Network exposes bounded resumable operations and stable domain receipts;
+- Network responses carry correlation metadata sufficient for Console to checkpoint and resume.
+
+Use this composition for long waits, downloads/uploads, complex transitions, and submit verification.
 
 Exit criteria:
 
-- long browser actions do not depend on a single MCP request staying alive.
+- long browser work can survive caller interruption through Console-owned durable execution;
+- Network has no duplicate generic async runtime.
 
 ### Phase 10 — Structured observability
 
