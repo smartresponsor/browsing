@@ -653,65 +653,169 @@ async function snapshotChatGptPage(target) {
   };
 }
 
-async function snapshotFields(target) {
-  return target.locator('input, textarea, select').evaluateAll(nodes => nodes.map((node, index) => ({
-    index,
-    tag: node.tagName.toLowerCase(),
-    type: node.getAttribute('type') || '',
-    name: node.getAttribute('name') || '',
-    id: node.getAttribute('id') || '',
-    placeholder: node.getAttribute('placeholder') || '',
-    ariaLabel: node.getAttribute('aria-label') || '',
-    labelText: (() => {
-      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
-      const id = node.getAttribute('id') || '';
-      const explicit = id ? document.querySelector('label[for="' + id.replace(/"/g, '\\"') + '"]') : null;
-      const wrapping = node.closest('label');
-      const labelledBy = String(node.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean).map(item => document.getElementById(item)).filter(Boolean).map(element => normalize(element.innerText || element.textContent || '')).join(' ');
-      return normalize(labelledBy || explicit?.innerText || explicit?.textContent || wrapping?.innerText || wrapping?.textContent || '');
-    })(),
-    contextText: (() => {
-      const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
-      const container = node.closest('fieldset, li, tr, .question, .form-group, .form-row, .field, .field-wrapper, .formField, .questionWrapper, .questionContainer, section, article, div');
-      if (!container) {
-        return '';
-      }
+const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"]';
 
-      return normalize(container.innerText || container.textContent || '');
-    })(),
-    required: node.hasAttribute('required'),
-    visible: (() => {
-      const style = window.getComputedStyle(node);
-      const rect = node.getBoundingClientRect();
-      return style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
-    })(),
-    enabled: !node.disabled,
-    readOnly: Boolean(node.readOnly),
-    safeEditable: node.tagName.toLowerCase() === 'textarea' || node.tagName.toLowerCase() === 'select' || (node.tagName.toLowerCase() === 'input' && !['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset'].includes(String(node.getAttribute('type') || '').toLowerCase())),
-    blockedReason: (() => {
-      const tag = node.tagName.toLowerCase();
-      const type = String(node.getAttribute('type') || '').toLowerCase();
-      if (!['input', 'textarea', 'select'].includes(tag)) {
-        return `Unsupported field tag: ${tag}`;
-      }
-      if (tag === 'input' && ['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset'].includes(type)) {
-        return `Unsupported field type: ${type || '(default)'}`;
-      }
-      const style = window.getComputedStyle(node);
-      const rect = node.getBoundingClientRect();
-      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || rect.width <= 0 || rect.height <= 0) {
-        return 'Field is not visible';
-      }
-      if (node.disabled) {
-        return 'Field is disabled';
-      }
-      if (node.readOnly) {
-        return 'Field is read-only';
-      }
-      return '';
-    })(),
-    value: node.value || ''
-  })));
+async function snapshotFields(target) {
+  const rawFields = await target.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
+    const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    const tag = node.tagName.toLowerCase();
+    const type = String(node.getAttribute('type') || '').toLowerCase();
+    const role = String(node.getAttribute('role') || '').toLowerCase();
+    const style = window.getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    const visible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
+    const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true';
+    const readOnly = Boolean(node.readOnly) || node.getAttribute('aria-readonly') === 'true';
+    const id = node.getAttribute('id') || '';
+    const explicit = id ? document.querySelector('label[for="' + id.replace(/"/g, '\\"') + '"]') : null;
+    const wrapping = node.closest('label');
+    const labelledBy = String(node.getAttribute('aria-labelledby') || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(item => document.getElementById(item))
+      .filter(Boolean)
+      .map(element => normalize(element.innerText || element.textContent || ''))
+      .join(' ');
+    const labelText = normalize(labelledBy || explicit?.innerText || explicit?.textContent || wrapping?.innerText || wrapping?.textContent || '');
+    const container = node.closest('fieldset, li, tr, .question, .form-group, .form-row, .field, .field-wrapper, .formField, .questionWrapper, .questionContainer, section, article, div');
+    const contextText = container ? normalize(container.innerText || container.textContent || '') : '';
+
+    let semanticType = 'unsupported';
+    if (tag === 'select') semanticType = 'select';
+    else if (tag === 'textarea') semanticType = 'textarea';
+    else if (role === 'combobox') semanticType = 'combobox';
+    else if (node.getAttribute('contenteditable') === 'true') semanticType = 'contenteditable';
+    else if (tag === 'input') {
+      if (type === 'checkbox') semanticType = 'checkbox';
+      else if (type === 'radio') semanticType = 'radio';
+      else if (type === 'file') semanticType = 'file';
+      else if (type === 'email') semanticType = 'email';
+      else if (type === 'tel') semanticType = 'phone';
+      else if (type === 'number' || type === 'range') semanticType = 'number';
+      else if (['date', 'datetime-local', 'month', 'time', 'week'].includes(type)) semanticType = 'date-time';
+      else if (type === 'password') semanticType = 'password';
+      else semanticType = 'text';
+    }
+
+    const nativeTextEditable = tag === 'textarea'
+      || tag === 'select'
+      || (tag === 'input' && !['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset', 'checkbox', 'radio'].includes(type));
+
+    let blockedReason = '';
+    if (!visible) blockedReason = 'Field is not visible';
+    else if (!enabled) blockedReason = 'Field is disabled';
+    else if (readOnly) blockedReason = 'Field is read-only';
+    else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
+    else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
+    else if (['checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)) blockedReason = 'Control requires a type-specific mutation capability';
+    else if (!nativeTextEditable) blockedReason = `Unsupported semantic control type: ${semanticType}`;
+
+    const supportedOperations = semanticType === 'file'
+      ? ['upload']
+      : semanticType === 'checkbox'
+        ? ['check', 'uncheck']
+        : semanticType === 'radio'
+          ? ['choose']
+          : semanticType === 'select'
+            ? ['select']
+            : ['text', 'textarea', 'email', 'phone', 'number', 'date-time'].includes(semanticType)
+              ? ['set', 'clear']
+              : semanticType === 'combobox'
+                ? ['choose-option']
+                : semanticType === 'contenteditable'
+                  ? ['set-rich-text']
+                  : [];
+
+    const options = tag === 'select'
+      ? Array.from(node.options || []).slice(0, 500).map(option => ({
+          value: String(option.value ?? ''),
+          label: normalize(option.label || option.textContent || ''),
+          selected: Boolean(option.selected),
+          disabled: Boolean(option.disabled),
+        }))
+      : semanticType === 'radio' && node.getAttribute('name')
+        ? Array.from(document.querySelectorAll('input[type="radio"][name="' + String(node.getAttribute('name')).replace(/"/g, '\\"') + '"]')).slice(0, 200).map(option => ({
+            value: String(option.value || ''),
+            label: (() => {
+              const optionId = option.getAttribute('id') || '';
+              const optionLabel = optionId ? document.querySelector('label[for="' + optionId.replace(/"/g, '\\"') + '"]') : option.closest('label');
+              return normalize(optionLabel?.innerText || optionLabel?.textContent || option.getAttribute('aria-label') || option.value || '');
+            })(),
+            selected: Boolean(option.checked),
+            disabled: Boolean(option.disabled),
+          }))
+        : [];
+
+    const semanticValue = semanticType === 'checkbox' || semanticType === 'radio'
+      ? Boolean(node.checked)
+      : tag === 'select' && node.multiple
+        ? Array.from(node.selectedOptions || []).map(option => String(option.value ?? ''))
+        : node.getAttribute('contenteditable') === 'true'
+          ? normalize(node.innerText || node.textContent || '')
+          : String(node.value ?? '');
+
+    const validity = typeof node.checkValidity === 'function'
+      ? {
+          valid: node.checkValidity(),
+          validationMessage: normalize(node.validationMessage || ''),
+          ariaInvalid: node.getAttribute('aria-invalid') || '',
+        }
+      : {
+          valid: node.getAttribute('aria-invalid') !== 'true',
+          validationMessage: '',
+          ariaInvalid: node.getAttribute('aria-invalid') || '',
+        };
+
+    return {
+      index,
+      tag,
+      type,
+      role,
+      semanticType,
+      name: node.getAttribute('name') || '',
+      id,
+      placeholder: node.getAttribute('placeholder') || '',
+      ariaLabel: node.getAttribute('aria-label') || '',
+      labelText,
+      contextText,
+      required: node.hasAttribute('required') || node.getAttribute('aria-required') === 'true',
+      visible,
+      enabled,
+      readOnly,
+      safeEditable: nativeTextEditable && visible && enabled && !readOnly && !blockedReason,
+      blockedReason,
+      sensitive: semanticType === 'password',
+      checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
+      multiple: Boolean(node.multiple),
+      options,
+      supportedOperations,
+      validation: validity,
+      value: semanticValue,
+    };
+  }));
+
+  const occurrenceByFingerprint = new Map();
+  return rawFields.map(field => {
+    const fingerprint = hashStableJson({
+      tag: field.tag,
+      semanticType: field.semanticType,
+      name: field.name,
+      id: field.id,
+      labelText: field.labelText,
+      ariaLabel: field.ariaLabel,
+      placeholder: field.placeholder,
+      contextText: String(field.contextText || '').slice(0, 300),
+      options: Array.isArray(field.options) ? field.options.map(option => [option.value, option.label]) : [],
+    });
+    const occurrence = occurrenceByFingerprint.get(fingerprint) ?? 0;
+    occurrenceByFingerprint.set(fingerprint, occurrence + 1);
+
+    return {
+      ...field,
+      controlId: `control:${hashStableJson({ fingerprint, occurrence })}`,
+      semanticModelVersion: 2,
+    };
+  });
 }
 
 async function snapshotSubmitCandidates(target) {
@@ -932,7 +1036,24 @@ function getRequestedFieldIndex(item) {
   return null;
 }
 
+function getRequestedControlId(item) {
+  return typeof item?.controlId === 'string' && item.controlId.trim() ? item.controlId.trim() : null;
+}
+
 async function resolveRequestedFieldLocator(target, item, fields) {
+  const controlId = getRequestedControlId(item);
+  if (controlId) {
+    const field = fields.find(candidate => candidate.controlId === controlId);
+    if (!field) {
+      throw new Error(`Control identity ${controlId} is stale or was not found in the current form revision.`);
+    }
+    if (!isSafeFieldSnapshot(field)) {
+      throw new Error(field.blockedReason || `Control ${controlId} is not a safe editable field.`);
+    }
+
+    return target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index);
+  }
+
   const index = getRequestedFieldIndex(item);
   if (index !== null) {
     const field = fields[index];
@@ -944,14 +1065,14 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw new Error(field.blockedReason || `Field index ${index} is not a safe editable field.`);
     }
 
-    return target.locator('input, textarea, select').nth(index);
+    return target.locator(SEMANTIC_FIELD_SELECTOR).nth(index);
   }
 
   if (typeof item?.selector === 'string' && item.selector.trim()) {
     return describeSelectorField(target, item.selector.trim());
   }
 
-  throw new Error('Each field must include either an index from the inspected field list or a selector.');
+  throw new Error('Each field must include a controlId, an index from the inspected field list, or a selector.');
 }
 
 async function describeSelectorField(target, selector) {

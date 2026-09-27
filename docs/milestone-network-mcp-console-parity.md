@@ -592,6 +592,8 @@ Exit criteria:
 
 Priority: P0
 
+Implementation status: first semantic extraction slice complete. Network now classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Type-specific checkbox/radio/combobox/contenteditable/upload mutations remain pending.
+
 Replace flat field snapshots with semantic controls.
 
 Control types should include at minimum:
