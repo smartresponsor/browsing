@@ -1211,7 +1211,8 @@ async function writeField(target, locator, value, field = {}) {
 
     await locator.click();
     await locator.fill(desired);
-    const option = target.getByRole('option', { name: desired, exact: true });
+    const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
+    const option = optionFrame.getByRole('option', { name: desired, exact: true });
     const optionCount = await option.count();
     if (optionCount !== 1) {
       throw revisionError(

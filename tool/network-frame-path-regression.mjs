@@ -43,6 +43,8 @@ for (const token of [
   "const frame = resolveFrameByPath(target, framePath)",
   "'NETWORK_FRAME_STALE'",
   "await locatorForFieldSnapshot(target, field)",
+  "const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame()",
+  "optionFrame.getByRole('option', { name: desired, exact: true })",
 ]) {
   assert.equal(worker.includes(token), true, `Iframe semantic-model invariant missing: ${token}`);
 }

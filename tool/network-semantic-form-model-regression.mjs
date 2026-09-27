@@ -22,7 +22,7 @@ for (const token of [
   "await locator.uncheck()",
   "semanticType === 'contenteditable'",
   "semanticType === 'combobox'",
-  "target.getByRole('option', { name: desired, exact: true })",
+  "optionFrame.getByRole('option', { name: desired, exact: true })",
   "optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS'",
   "optionMatch: 'exact-accessible-name'",
   "NETWORK_VALIDATION_FAILED",
