@@ -34,6 +34,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { classifyChallengeText } from './human-boundary.js';
+import { classifySubmitPostcondition } from './submit-postcondition.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 const execFileAsync = promisify(execFile);
@@ -1950,7 +1951,20 @@ app.post('/submit-after-approval', async (req, res) => {
     await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
     await ensureNotChallenge(target);
     const after = await capturePageArtifact(target, { screenshot: false });
-    res.json({ ok: true, action: 'submit_after_approval', correlation, clicked: selector || text || 'default-submit', nth, beforeReviewHash: before.reviewHash, after });
+    const postSubmitText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 20000));
+    const postcondition = classifySubmitPostcondition({ before, after, visibleText: postSubmitText });
+    res.json({
+      ...postcondition,
+      action: 'submit_after_approval',
+      correlation,
+      clicked: selector || text || 'default-submit',
+      nth,
+      beforeReviewHash: before.reviewHash,
+      after,
+      recommendedAction: postcondition.verified
+        ? 'Submission confirmation was detected. Preserve the returned evidence.'
+        : 'Inspect the current page and resolve validation or confirmation uncertainty. Do not automatically repeat submit.'
+    });
   } catch (error) {
     sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED', correlation);
   }
