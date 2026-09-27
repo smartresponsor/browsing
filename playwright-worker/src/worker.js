@@ -754,7 +754,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
         : semanticType === 'radio'
           ? ['choose']
           : semanticType === 'select'
-            ? ['select']
+            ? (node.multiple ? ['select-multiple'] : ['select'])
             : ['text', 'textarea', 'email', 'phone', 'number', 'date-time'].includes(semanticType)
               ? ['set', 'clear']
               : semanticType === 'combobox'
@@ -1116,13 +1116,29 @@ async function writeField(target, locator, value, field = {}) {
   });
 
   if (semanticType === 'select' || tagName === 'select') {
+    const multiple = field.multiple === true || await locator.evaluate(node => Boolean(node.multiple));
+    if (multiple) {
+      if (!Array.isArray(value)) {
+        throw revisionError('NETWORK_VALIDATION_FAILED', 'Multi-select mutation requires an array of option values.', { controlId: field.controlId || null });
+      }
+      const desired = [...new Set(value.map(item => String(item)))];
+      await locator.selectOption(desired);
+      const actual = await locator.evaluate(node => Array.from(node.selectedOptions || []).map(option => String(option.value ?? '')));
+      const normalizedDesired = [...desired].sort();
+      const normalizedActual = [...actual].sort();
+      if (JSON.stringify(normalizedActual) !== JSON.stringify(normalizedDesired)) {
+        throw revisionError('NETWORK_VALIDATION_FAILED', 'Multi-select postcondition did not match the requested option set.', { desired, actual, controlId: field.controlId || null });
+      }
+      return { semanticType: 'select', multiple: true, requested: desired, actual };
+    }
+
     const desired = String(value ?? '');
     await locator.selectOption(desired);
     const actual = await locator.inputValue();
     if (actual !== desired) {
       throw revisionError('NETWORK_VALIDATION_FAILED', 'Select postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
     }
-    return { semanticType: 'select', requested: desired, actual };
+    return { semanticType: 'select', multiple: false, requested: desired, actual };
   }
 
   if (semanticType === 'checkbox') {
