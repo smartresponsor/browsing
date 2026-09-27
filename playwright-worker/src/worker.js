@@ -691,7 +691,7 @@ async function snapshotChatGptPage(target) {
   };
 }
 
-const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"]';
+const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
   const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
@@ -722,6 +722,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     if (tag === 'select') semanticType = 'select';
     else if (tag === 'textarea') semanticType = 'textarea';
     else if (role === 'switch') semanticType = 'switch';
+    else if (node.hasAttribute('aria-autocomplete') || (tag === 'input' && node.hasAttribute('list'))) semanticType = 'autocomplete';
     else if (role === 'combobox') semanticType = 'combobox';
     else if (node.getAttribute('contenteditable') === 'true') semanticType = 'contenteditable';
     else if (tag === 'input') {
@@ -746,7 +747,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     else if (readOnly) blockedReason = 'Field is read-only';
     else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
     else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
-    else if (!nativeTextEditable && !['contenteditable', 'combobox', 'switch'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
+    else if (!nativeTextEditable && !['contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     const supportedOperations = semanticType === 'file'
       ? ['upload']
@@ -760,7 +761,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
             ? (node.multiple ? ['select-multiple'] : ['select'])
             : ['text', 'textarea', 'email', 'phone', 'number', 'date-time'].includes(semanticType)
               ? ['set', 'clear']
-              : semanticType === 'combobox'
+              : ['combobox', 'autocomplete'].includes(semanticType)
                 ? ['choose-option']
                 : semanticType === 'contenteditable'
                   ? ['set-rich-text']
@@ -773,6 +774,13 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
           selected: Boolean(option.selected),
           disabled: Boolean(option.disabled),
         }))
+      : semanticType === 'autocomplete' && tag === 'input' && node.list
+        ? Array.from(node.list.options || []).slice(0, 500).map(option => ({
+            value: String(option.value ?? ''),
+            label: normalize(option.label || option.textContent || option.value || ''),
+            selected: String(node.value ?? '') === String(option.value ?? ''),
+            disabled: Boolean(option.disabled),
+          }))
       : semanticType === 'radio' && node.getAttribute('name')
         ? Array.from(document.querySelectorAll('input[type="radio"][name="' + String(node.getAttribute('name')).replace(/"/g, '\\"') + '"]')).slice(0, 200).map(option => ({
             value: String(option.value || ''),
@@ -824,11 +832,12 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       visible,
       enabled,
       readOnly,
-      safeEditable: (nativeTextEditable || ['checkbox', 'radio', 'contenteditable', 'combobox', 'switch'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
+      safeEditable: (nativeTextEditable || ['checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
       blockedReason,
       sensitive: semanticType === 'password',
       checked: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
       multiple: Boolean(node.multiple),
+      autocompleteMode: semanticType === 'autocomplete' ? (tag === 'input' && node.list ? 'native-datalist' : 'aria') : null,
       options,
       supportedOperations,
       validation: validity,
@@ -1114,6 +1123,7 @@ async function writeField(target, locator, value, field = {}) {
     if (tag === 'select') return 'select';
     if (tag === 'textarea') return 'textarea';
     if (role === 'switch') return 'switch';
+    if (node.hasAttribute('aria-autocomplete') || (tag === 'input' && node.hasAttribute('list'))) return 'autocomplete';
     if (role === 'combobox') return 'combobox';
     if (node.getAttribute('contenteditable') === 'true') return 'contenteditable';
     if (type === 'checkbox') return 'checkbox';
@@ -1193,6 +1203,71 @@ async function writeField(target, locator, value, field = {}) {
       throw revisionError('NETWORK_VALIDATION_FAILED', 'Contenteditable postcondition did not match the requested text.', { desired: normalizedDesired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'contenteditable', requested: normalizedDesired, actual };
+  }
+
+  if (semanticType === 'autocomplete') {
+    const desired = String(value ?? '').trim();
+    if (!desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Autocomplete mutation requires a non-empty option label or value.', { controlId: field.controlId || null });
+    }
+
+    const autocompleteMode = field.autocompleteMode || await locator.evaluate(node => node.tagName.toLowerCase() === 'input' && node.list ? 'native-datalist' : 'aria');
+    if (autocompleteMode === 'native-datalist') {
+      const options = await locator.evaluate(node => Array.from(node.list?.options || []).slice(0, 500).map(option => ({
+        value: String(option.value ?? ''),
+        label: String(option.label || option.textContent || option.value || '').replace(/\s+/g, ' ').trim(),
+        disabled: Boolean(option.disabled),
+      })));
+      const matches = options.filter(option => !option.disabled && (option.value === desired || option.label === desired));
+      if (matches.length !== 1) {
+        throw revisionError(
+          matches.length === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          matches.length === 0
+            ? 'Native datalist option was not found by exact value or label.'
+            : 'Native datalist option is ambiguous by exact value or label.',
+          { desired, optionCount: matches.length, controlId: field.controlId || null }
+        );
+      }
+      const canonicalValue = matches[0].value;
+      await locator.fill(canonicalValue);
+      const actual = await locator.inputValue();
+      if (actual !== canonicalValue) {
+        throw revisionError('NETWORK_VALIDATION_FAILED', 'Native datalist postcondition did not match the selected value.', { desired, canonicalValue, actual, controlId: field.controlId || null });
+      }
+      return { semanticType: 'autocomplete', mode: 'native-datalist', requested: desired, actual, optionMatch: 'exact-value-or-label' };
+    }
+
+    const fillable = await locator.evaluate(node => {
+      const tag = node.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || node.getAttribute('contenteditable') === 'true';
+    });
+    if (!fillable) {
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'ARIA autocomplete mutation only supports input/textarea/contenteditable controls.', { controlId: field.controlId || null, tagName });
+    }
+
+    await locator.click();
+    await locator.fill(desired);
+    const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
+    const option = optionFrame.getByRole('option', { name: desired, exact: true });
+    const optionCount = await option.count();
+    if (optionCount !== 1) {
+      throw revisionError(
+        optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+        optionCount === 0
+          ? 'Autocomplete option was not found by exact accessible name.'
+          : 'Autocomplete option accessible name is ambiguous.',
+        { desired, optionCount, controlId: field.controlId || null }
+      );
+    }
+    await option.click();
+    const actual = await locator.evaluate(node => {
+      if ('value' in node) return String(node.value ?? '').trim();
+      return String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+    });
+    if (actual !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Autocomplete postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'autocomplete', mode: 'aria', requested: desired, actual, optionMatch: 'exact-accessible-name' };
   }
 
   if (semanticType === 'combobox') {
@@ -1428,8 +1503,10 @@ async function describeSelectorField(target, selector) {
         ? 'textarea'
         : role === 'switch'
           ? 'switch'
-          : role === 'combobox'
-            ? 'combobox'
+          : node.hasAttribute('aria-autocomplete') || (tag === 'input' && node.hasAttribute('list'))
+            ? 'autocomplete'
+            : role === 'combobox'
+              ? 'combobox'
           : node.getAttribute('contenteditable') === 'true'
             ? 'contenteditable'
             : type === 'checkbox'
@@ -1441,7 +1518,7 @@ async function describeSelectorField(target, selector) {
                   : type === 'password'
                     ? 'password'
                     : 'text';
-    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox', 'switch'].includes(semanticType)
+    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)
       && visible
       && enabled
       && !readOnly;

@@ -8,7 +8,7 @@ for (const token of [
   "semanticType = 'switch'",
   "['switch-on', 'switch-off']",
   "node.getAttribute('aria-checked') === 'true'",
-  "['checkbox', 'radio', 'contenteditable', 'combobox', 'switch']",
+  "['checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch']",
   "if (semanticType === 'switch') {",
   "const before = await locator.getAttribute('aria-checked') === 'true';",
   "await locator.click();",
