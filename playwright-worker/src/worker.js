@@ -30,7 +30,8 @@ import {
 import {
   assertExpectedRevisions,
   buildRevisionEnvelope,
-  hashStableJson
+  hashStableJson,
+  revisionError
 } from './revision-contract.js';
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -707,7 +708,7 @@ async function snapshotFields(target) {
     else if (readOnly) blockedReason = 'Field is read-only';
     else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
     else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
-    else if (['checkbox', 'radio', 'contenteditable', 'combobox'].includes(semanticType)) blockedReason = 'Control requires a type-specific mutation capability';
+    else if (['contenteditable', 'combobox'].includes(semanticType)) blockedReason = 'Control requires a type-specific mutation capability';
     else if (!nativeTextEditable) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     const supportedOperations = semanticType === 'file'
@@ -782,7 +783,7 @@ async function snapshotFields(target) {
       visible,
       enabled,
       readOnly,
-      safeEditable: nativeTextEditable && visible && enabled && !readOnly && !blockedReason,
+      safeEditable: (nativeTextEditable || ['checkbox', 'radio'].includes(semanticType)) && visible && enabled && !readOnly && !blockedReason,
       blockedReason,
       sensitive: semanticType === 'password',
       checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
@@ -991,14 +992,69 @@ async function waitForReadiness(target, { selector = '', state = 'domcontentload
   return { ok: true, state, selector: selector || null, elapsedMs: Date.now() - startedAt, url: target.url(), title: await target.title() };
 }
 
-async function writeField(locator, value) {
+async function writeField(locator, value, field = {}) {
   const tagName = await locator.evaluate(node => node.tagName.toLowerCase());
-  if (tagName === 'select') {
-    await locator.selectOption(String(value ?? ''));
-    return;
+  const semanticType = field.semanticType || await locator.evaluate(node => {
+    const tag = node.tagName.toLowerCase();
+    const type = String(node.getAttribute('type') || '').toLowerCase();
+    if (tag === 'select') return 'select';
+    if (tag === 'textarea') return 'textarea';
+    if (type === 'checkbox') return 'checkbox';
+    if (type === 'radio') return 'radio';
+    return 'text';
+  });
+
+  if (semanticType === 'select' || tagName === 'select') {
+    const desired = String(value ?? '');
+    await locator.selectOption(desired);
+    const actual = await locator.inputValue();
+    if (actual !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Select postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'select', requested: desired, actual };
   }
 
-  await locator.fill(String(value ?? ''));
+  if (semanticType === 'checkbox') {
+    const desired = normalizeBooleanMutationValue(value);
+    if (desired) await locator.check();
+    else await locator.uncheck();
+    const actual = await locator.isChecked();
+    if (actual !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Checkbox postcondition did not match the requested checked state.', { desired, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'checkbox', requested: desired, actual };
+  }
+
+  if (semanticType === 'radio') {
+    const desired = normalizeBooleanMutationValue(value, true);
+    if (!desired) {
+      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'A radio control can only be selected; deselect by choosing another option in the group.', { controlId: field.controlId || null });
+    }
+    await locator.check();
+    const actual = await locator.isChecked();
+    if (!actual) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio postcondition did not confirm the requested option.', { desired: true, actual, controlId: field.controlId || null });
+    }
+    return { semanticType: 'radio', requested: true, actual };
+  }
+
+  const desired = String(value ?? '');
+  await locator.fill(desired);
+  const actual = await locator.inputValue();
+  if (actual !== desired) {
+    throw revisionError('NETWORK_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+  }
+  return { semanticType, requested: desired, actual };
+}
+
+function normalizeBooleanMutationValue(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  if (['true', '1', 'yes', 'on', 'checked', 'select', 'selected'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off', 'unchecked'].includes(normalized)) return false;
+  throw revisionError('NETWORK_VALIDATION_FAILED', 'Boolean control value must be an explicit boolean-like value.', { received: String(value) });
 }
 
 function authorizeBrowserWorkerRequest(req, res) {
@@ -1051,7 +1107,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw new Error(field.blockedReason || `Control ${controlId} is not a safe editable field.`);
     }
 
-    return target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index);
+    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };
   }
 
   const index = getRequestedFieldIndex(item);
@@ -1065,7 +1121,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
       throw new Error(field.blockedReason || `Field index ${index} is not a safe editable field.`);
     }
 
-    return target.locator(SEMANTIC_FIELD_SELECTOR).nth(index);
+    return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(index), field };
   }
 
   if (typeof item?.selector === 'string' && item.selector.trim()) {
@@ -1084,39 +1140,54 @@ async function describeSelectorField(target, selector) {
 
   const field = await locator.evaluate(node => {
     const tag = node.tagName.toLowerCase();
-    const type = node.getAttribute('type') || '';
+    const type = String(node.getAttribute('type') || '').toLowerCase();
     const style = window.getComputedStyle(node);
     const rect = node.getBoundingClientRect();
     const visible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
-    const enabled = !node.disabled;
-    const readOnly = Boolean(node.readOnly);
-    const safeEditable = tag === 'textarea' || tag === 'select' || (tag === 'input' && !['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset'].includes(String(type).toLowerCase()));
-    const blockedReason = !['input', 'textarea', 'select'].includes(tag)
-      ? `Unsupported field tag: ${tag}`
-      : tag === 'input' && ['hidden', 'password', 'file', 'submit', 'button', 'image', 'reset'].includes(String(type).toLowerCase())
-        ? `Unsupported field type: ${type || '(default)'}`
-        : !visible
-          ? 'Field is not visible'
-          : !enabled
-            ? 'Field is disabled'
-            : readOnly
-              ? 'Field is read-only'
-              : '';
+    const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true';
+    const readOnly = Boolean(node.readOnly) || node.getAttribute('aria-readonly') === 'true';
+    const semanticType = tag === 'select'
+      ? 'select'
+      : tag === 'textarea'
+        ? 'textarea'
+        : type === 'checkbox'
+          ? 'checkbox'
+          : type === 'radio'
+            ? 'radio'
+            : type === 'file'
+              ? 'file'
+              : type === 'password'
+                ? 'password'
+                : 'text';
+    const safeEditable = ['select', 'textarea', 'text', 'checkbox', 'radio'].includes(semanticType)
+      && visible
+      && enabled
+      && !readOnly;
+
+    let blockedReason = '';
+    if (!visible) blockedReason = 'Field is not visible';
+    else if (!enabled) blockedReason = 'Field is disabled';
+    else if (readOnly) blockedReason = 'Field is read-only';
+    else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
+    else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
+    else if (!safeEditable) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     return {
       tag,
       type,
+      semanticType,
       name: node.getAttribute('name') || '',
       id: node.getAttribute('id') || '',
       placeholder: node.getAttribute('placeholder') || '',
       ariaLabel: node.getAttribute('aria-label') || '',
-      required: node.hasAttribute('required'),
+      required: node.hasAttribute('required') || node.getAttribute('aria-required') === 'true',
       visible,
       enabled,
       readOnly,
       safeEditable,
       blockedReason,
-      value: node.value || ''
+      checked: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
+      value: semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : String(node.value ?? ''),
     };
   });
 
@@ -1124,7 +1195,14 @@ async function describeSelectorField(target, selector) {
     throw new Error(field.blockedReason || 'Selector did not resolve to a safe editable field.');
   }
 
-  return locator;
+  return {
+    locator,
+    field: {
+      ...field,
+      controlId: `selector:${hashStableJson({ selector, semanticType: field.semanticType, name: field.name, id: field.id })}`,
+      semanticModelVersion: 2,
+    },
+  };
 }
 
 app.get('/healthz', (_req, res) => {
@@ -1517,9 +1595,13 @@ app.post('/fill-after-approval', async (req, res) => {
 
     const filled = [];
     for (const item of requestedFields) {
-      const locator = await resolveRequestedFieldLocator(target, item, fields);
-      await writeField(locator, item.value);
-      filled.push(item.name || item.selector || item.index);
+      const resolved = await resolveRequestedFieldLocator(target, item, fields);
+      const evidence = await writeField(resolved.locator, item.value, resolved.field);
+      filled.push({
+        controlId: resolved.field.controlId || item.controlId || null,
+        requested: item.name || item.selector || item.index || item.controlId,
+        evidence,
+      });
     }
 
     formFillCount += 1;

@@ -17,7 +17,12 @@ for (const token of [
   "hashStableJson({ fingerprint, occurrence })",
   "const controlId = getRequestedControlId(item);",
   "fields.find(candidate => candidate.controlId === controlId)",
-  "return target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index);",
+  "await locator.selectOption(desired)",
+  "await locator.check()",
+  "await locator.uncheck()",
+  "NETWORK_VALIDATION_FAILED",
+  "NETWORK_CONTROL_UNSUPPORTED",
+  "return { locator: target.locator(SEMANTIC_FIELD_SELECTOR).nth(field.index), field };",
 ]) {
   assert.equal(source.includes(token), true, `Semantic Form Model v2 invariant missing: ${token}`);
 }
