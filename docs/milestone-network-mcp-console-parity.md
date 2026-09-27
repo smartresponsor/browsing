@@ -533,7 +533,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status.
+Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status. Core domain tool schemas are now defined once in `core-domain-tool-definitions.js`; the standalone Network MCP compatibility server registers from that reusable source instead of owning a second handwritten schema surface, preparing the same definitions for Console-prefixed registration.
 
 Create a typed machine-readable Network capability contract containing:
 

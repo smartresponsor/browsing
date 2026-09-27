@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const bundle = fs.readFileSync(new URL("../mcp-server/src/network-tool-bundle.js", import.meta.url), "utf8");
+const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.js", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 const contract = fs.readFileSync(new URL("../mcp-server/src/capability-contract.js", import.meta.url), "utf8");
 
 for (const token of [
+  "canonicalName: 'network.click'",
+  "capabilityName: 'network.click'",
   "expectedTargetId: z.string().optional()",
   "expectedPageRevision: z.string().optional()",
   "expectedFormRevision: z.string().optional()",
   "correlation: networkExecutionCorrelationSchema.optional()",
 ]) {
-  assert.equal(bundle.includes(token), true, `network.click schema invariant missing: ${token}`);
+  assert.equal(definitions.includes(token), true, `network.click definition invariant missing: ${token}`);
 }
 
 for (const token of [

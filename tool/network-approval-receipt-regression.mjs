@@ -99,7 +99,7 @@ try {
 }
 
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
-const bundleSource = fs.readFileSync(new URL("../mcp-server/src/network-tool-bundle.js", import.meta.url), "utf8");
+const definitionSource = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.js", import.meta.url), "utf8");
 
 for (const token of [
   "const approvalReceipt = await createApprovalReceipt({",
@@ -107,7 +107,7 @@ for (const token of [
   "approvalReceiptId",
   "approvalPayloadHash(hashStableJson",
 ]) {
-  assert.equal(workerSource.includes(token) || bundleSource.includes(token), true, `Approval receipt integration invariant missing: ${token}`);
+  assert.equal(workerSource.includes(token) || definitionSource.includes(token), true, `Approval receipt integration invariant missing: ${token}`);
 }
 
 console.log("Network approval receipt regression passed.");

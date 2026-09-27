@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const bundle = fs.readFileSync(new URL("../mcp-server/src/network-tool-bundle.js", import.meta.url), "utf8");
+const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.js", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 
 for (const token of [
+  "canonicalName: 'network.browser_bind'",
+  "capabilityName: 'network.browser_bind'",
   "targetId: z.string().min(1).optional()",
-  "async ({ targetId, index, url, urlContains })",
-  "registry.callTool('network.browser_bind', { targetId, index, url, urlContains })",
 ]) {
-  assert.equal(bundle.includes(token), true, `Target binding schema invariant missing: ${token}`);
+  assert.equal(definitions.includes(token), true, `Target binding definition invariant missing: ${token}`);
 }
 
 for (const token of [

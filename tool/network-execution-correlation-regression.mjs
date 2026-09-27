@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const bundle = fs.readFileSync(new URL("../mcp-server/src/network-tool-bundle.js", import.meta.url), "utf8");
+const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.js", import.meta.url), "utf8");
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 
 for (const token of [
@@ -11,7 +11,7 @@ for (const token of [
   "invocationId: z.string().min(1).max(200).optional()",
   "correlation: networkExecutionCorrelationSchema.optional()",
 ]) {
-  assert.equal(bundle.includes(token), true, `Network MCP correlation schema invariant missing: ${token}`);
+  assert.equal(definitions.includes(token), true, `Network MCP correlation definition invariant missing: ${token}`);
 }
 
 for (const token of [
