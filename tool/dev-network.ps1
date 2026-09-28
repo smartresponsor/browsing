@@ -20,6 +20,7 @@ param(
         'start',
         'stop',
         'start-visible-worker',
+        'restart-worker',
         'restart',
         'start-mcp',
         'stop-mcp',

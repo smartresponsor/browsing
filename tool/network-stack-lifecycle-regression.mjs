@@ -23,6 +23,7 @@ assert.equal(
 );
 
 for (const token of [
+  "'restart-worker',",
   "'restart-worker' {",
   "Stop-Worker | Out-Null",
   "Start-Worker",
