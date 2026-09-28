@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(new URL("../tool/dev-network.d/60-stack-lifecycle.ps1", import.meta.url), "utf8");
+const supervisor = fs.readFileSync(new URL("../tool/dev-network.ps1", import.meta.url), "utf8");
 
 for (const token of [
   "function Convert-StackComponentResult",
@@ -20,6 +21,14 @@ assert.equal(
   false,
   "Start-Stack must not blindly JSON-decode an already-object worker state",
 );
+
+for (const token of [
+  "'restart-worker' {",
+  "Stop-Worker | Out-Null",
+  "Start-Worker",
+]) {
+  assert.equal(supervisor.includes(token), true, `Worker-only restart invariant missing: ${token}`);
+}
 
 console.log("Network stack lifecycle normalization regression passed.");
 

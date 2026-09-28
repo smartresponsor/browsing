@@ -925,6 +925,10 @@ switch ($Command) {
     'shared-browser-restart' { Restart-SharedBrowserOwner | ConvertTo-Json -Depth 8 }
     'start' { Start-Stack }
     'start-visible-worker' { & (Join-Path $Root 'tool\start-visible-worker.cmd') }
+    'restart-worker' {
+        Stop-Worker | Out-Null
+        Start-Worker
+    }
     'stop' { Stop-Stack }
     'restart' {
         Stop-Stack | Out-Null
