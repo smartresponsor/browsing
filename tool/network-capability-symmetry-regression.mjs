@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 import {
+  getNetworkCapabilityAdmission,
+  networkCapabilityAdmissions,
   networkCapabilityAliases,
   networkCapabilityContract,
 } from "../mcp-server/src/capability-contract.js";
@@ -33,6 +35,13 @@ for (const tool of contractTools) {
   assert.match(tool.inputSchemaId, /^network\..+\.input\.v1$/, `invalid input schema id: ${tool.name}`);
   assert.match(tool.resultSchemaId, /^network\..+\.result\.v1$/, `invalid result schema id: ${tool.name}`);
   assert.ok(["read", "write"].includes(tool.risk), `invalid coarse risk: ${tool.name}`);
+  assert.equal(tool.admission?.name, tool.name, `admission name drift: ${tool.name}`);
+  assert.ok(["atomic", "domainCapability", "recipe", "orchestrationControl", "runtimeMaintenance"].includes(tool.admission?.kind), `invalid admission kind: ${tool.name}`);
+  assert.equal(tool.admission?.risk, tool.risk === "read" ? "read_" : "write", `admission risk drift: ${tool.name}`);
+  assert.deepEqual(tool.admission?.consumers, ["chatgpt", "codex", "runner"], `consumer projection drift: ${tool.name}`);
+  assert.equal(tool.admission?.lifecycle, "admitted", `Network capability must be admitted: ${tool.name}`);
+  assert.equal(networkCapabilityAdmissions[tool.name], tool.admission, `admission registry drift: ${tool.name}`);
+  assert.equal(getNetworkCapabilityAdmission(tool.name), tool.admission, `admission lookup drift: ${tool.name}`);
   assert.ok(typeof tool.riskClass === "string" && tool.riskClass.length > 0, `missing riskClass: ${tool.name}`);
   assert.ok(["public", "internal"].includes(tool.visibility), `invalid visibility: ${tool.name}`);
   assert.ok(["optional", "required"].includes(tool.binding), `invalid binding: ${tool.name}`);
@@ -50,6 +59,12 @@ for (const tool of contractTools) {
     assert.equal(tool.replayPolicy, "never-replay", "final external submit must never be replayed");
   }
 }
+
+assert.throws(
+  () => getNetworkCapabilityAdmission("network.unknown_capability"),
+  /not admitted/,
+  "declaration-less Network capabilities must fail closed",
+);
 
 for (const route of workerRoutes) {
   assert.ok(contractRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);

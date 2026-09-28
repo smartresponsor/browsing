@@ -140,6 +140,10 @@ export const networkCapabilityRoutes = Object.freeze(
   Object.fromEntries(networkCapabilityContract.tools.map((item) => [item.name, item.route]))
 );
 
+export const networkCapabilityAdmissions = Object.freeze(
+  Object.fromEntries(networkCapabilityContract.tools.map((item) => [item.name, item.admission]))
+);
+
 export function listNetworkCapabilityToolNames({ publicOnly = false } = {}) {
   const tools = publicOnly
     ? networkCapabilityContract.tools.filter((item) => item.visibility !== 'internal')
@@ -153,6 +157,15 @@ export function getNetworkCapabilityRoute(toolName) {
   return networkCapabilityRoutes[canonicalName] ?? null;
 }
 
+export function getNetworkCapabilityAdmission(toolName) {
+  const canonicalName = networkCapabilityAliases[toolName] ?? toolName;
+  const admission = networkCapabilityAdmissions[canonicalName];
+  if (!admission || admission.lifecycle === 'retired') {
+    throw new Error(`Network capability is not admitted: ${toolName}`);
+  }
+  return admission;
+}
+
 function tool(name, route, risk, metadata = {}) {
   const visibility = metadata.visibility ?? 'public';
   const riskClass = metadata.riskClass ?? (risk === 'read' ? 'observation' : 'reversible-ui');
@@ -162,6 +175,13 @@ function tool(name, route, risk, metadata = {}) {
     name,
     route,
     risk,
+    admission: Object.freeze({
+      name,
+      kind: metadata.kind ?? 'domainCapability',
+      risk: risk === 'read' ? 'read_' : 'write',
+      consumers: Object.freeze(metadata.consumers ?? ['chatgpt', 'codex', 'runner']),
+      lifecycle: metadata.lifecycle ?? 'admitted'
+    }),
     riskClass,
     visibility,
     inputSchemaId: `${name}.input.v1`,
