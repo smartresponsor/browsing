@@ -23,6 +23,8 @@ for (const token of [
   "const controlId = getRequestedControlId(item);",
   "fields.find(candidate => candidate.controlId === controlId)",
   "await locator.selectOption(desired)",
+  "selected.value !== desired && selected.label !== desired",
+  "actualLabel: selected.label",
   "await locator.check()",
   "await locator.uncheck()",
   "semanticType === 'contenteditable'",

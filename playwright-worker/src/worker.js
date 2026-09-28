@@ -1228,11 +1228,17 @@ async function writeField(target, locator, value, field = {}) {
 
     const desired = String(value ?? '');
     await locator.selectOption(desired);
-    const actual = await locator.inputValue();
-    if (actual !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Select postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+    const selected = await locator.evaluate(node => {
+      const option = node.selectedOptions?.[0] || null;
+      return {
+        value: String(option?.value ?? ''),
+        label: String(option?.label || option?.textContent || '').replace(/\s+/g, ' ').trim(),
+      };
+    });
+    if (selected.value !== desired && selected.label !== desired) {
+      throw revisionError('NETWORK_VALIDATION_FAILED', 'Select postcondition did not match the requested value or label.', { desired, actual: selected.value, actualLabel: selected.label, controlId: field.controlId || null });
     }
-    return { semanticType: 'select', multiple: false, requested: desired, actual };
+    return { semanticType: 'select', multiple: false, requested: desired, actual: selected.value, actualLabel: selected.label };
   }
 
   if (semanticType === 'checkbox') {
