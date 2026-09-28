@@ -429,9 +429,17 @@ function Resolve-RuntimeVerdict {
     $checks['browserCdpHomeVerification'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-home-verification' -Ok ([bool]($BrowserCdpHomeVerification.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_HOME_VERIFICATION_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpHomeVerification.ok) { 'BROWSER_CDP_HOME_VERIFICATION_FAILED' } else { $null }) -Detail $BrowserCdpHomeVerification
     $checks['browserCdpCleanupPlan'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-cleanup-plan' -Ok ([bool]($BrowserCdpCleanupPlan.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_CLEANUP_PLAN_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpCleanupPlan.ok) { 'BROWSER_CDP_CLEANUP_PLAN_FAILED' } else { $null }) -Detail $BrowserCdpCleanupPlan
     $checks['browserCdpCleanupBlocked'] = ConvertTo-HealthCheckResult -Name 'browser-cdp-cleanup-blocked' -Ok ([bool]($BrowserCdpCleanupBlocked.ok)) -Reason $(if (-not $WorkerState.running) { 'BROWSER_CDP_CLEANUP_BLOCKED_SKIPPED_WORKER_DOWN' } elseif (-not $BrowserCdpCleanupBlocked.ok) { 'BROWSER_CDP_CLEANUP_BLOCKED_FAILED' } else { $null }) -Detail $BrowserCdpCleanupBlocked
-    $browserBody = $BrowserStatus.body
-    $browserRuntime = $browserBody.runtime.browser
-    $browserPolicy = $browserBody.runtime.policy
+    $browserBody = if ($BrowserStatus.PSObject.Properties.Name -contains 'body') { $BrowserStatus.body } else { $null }
+    $browserRuntime = if ($browserBody -and $browserBody.PSObject.Properties.Name -contains 'runtime' -and $browserBody.runtime) {
+        $browserBody.runtime.browser
+    } else {
+        [pscustomobject]@{ contextOpen = $false; pageCount = 0; currentUrl = $null }
+    }
+    $browserPolicy = if ($browserBody -and $browserBody.PSObject.Properties.Name -contains 'runtime' -and $browserBody.runtime -and $browserBody.runtime.PSObject.Properties.Name -contains 'policy' -and $browserBody.runtime.policy) {
+        $browserBody.runtime.policy
+    } else {
+        [pscustomobject]@{ externalVisibleBrowser = $false; externalVisibleChrome = $false }
+    }
     $browserConfiguredVisible = [bool]($browserBody -and $browserBody.configuredVisible -eq $true)
     $browserDetectedVisible = [bool]($browserBody -and ($browserBody.detectedVisibleWindow -eq $true -or $browserBody.browserVisible -eq $true))
     $sharedBrowserOwner = $null
@@ -538,9 +546,17 @@ function Save-SharedBrowserRuntimeSnapshot {
     param([Parameter(Mandatory = $true)][object]$Snapshot)
 
     Ensure-SharedBrowserEnvironment
-    $browserBody = $Snapshot.browser.body
-    $browserRuntime = $browserBody.runtime.browser
-    $browserPolicy = $browserBody.runtime.policy
+    $browserBody = if ($Snapshot.browser -and $Snapshot.browser.PSObject.Properties.Name -contains 'body') { $Snapshot.browser.body } else { $null }
+    $browserRuntime = if ($browserBody -and $browserBody.PSObject.Properties.Name -contains 'runtime' -and $browserBody.runtime) {
+        $browserBody.runtime.browser
+    } else {
+        [pscustomobject]@{ contextOpen = $false; pageOpen = $false; pageCount = 0; currentUrl = $null }
+    }
+    $browserPolicy = if ($browserBody -and $browserBody.PSObject.Properties.Name -contains 'runtime' -and $browserBody.runtime -and $browserBody.runtime.PSObject.Properties.Name -contains 'policy' -and $browserBody.runtime.policy) {
+        $browserBody.runtime.policy
+    } else {
+        [pscustomobject]@{ externalVisibleBrowser = $false; externalVisibleChrome = $false }
+    }
     $visibilityCheck = $Snapshot.checks.browserVisibility.detail
     $cdpVersion = $null
     try {

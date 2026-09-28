@@ -6,6 +6,7 @@ const source = fs.readFileSync(new URL("../playwright-worker/src/worker.js", imp
 for (const token of [
   "const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable=\"true\"], [role=\"combobox\"], [role=\"switch\"], [aria-autocomplete], input[list], [role=\"slider\"], [role=\"spinbutton\"]';",
   "semanticType = 'checkbox'",
+  "!['checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)",
   "semanticType = 'radio'",
   "radioGroup: semanticType === 'radio' ? {",
   "semanticType = 'file'",

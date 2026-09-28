@@ -7,6 +7,8 @@ assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
+assert.equal(classifyChallengeText("Explore Security and Asset Protection careers"), null);
+assert.equal(classifyChallengeText("Assistance programs for life’s challenges"), null);
 
 assert.equal(
   classifyHumanBoundary({
@@ -25,6 +27,24 @@ assert.equal(
 
 assert.equal(classifyHumanBoundary({ text: "Sign in with your password", url: "https://example.test/login", hasPasswordField: true })?.type, "login_required");
 assert.equal(classifyHumanBoundary({ text: "Sign in", url: "https://example.test/login", hasPasswordField: false }), null);
+assert.equal(
+  classifyHumanBoundary({
+    text: "Login | Walmart",
+    url: "https://identity.walmart.com/account/login?client_id=test",
+    hasPasswordField: false,
+    hasCredentialIdentifierField: true,
+  })?.type,
+  "login_required",
+);
+assert.equal(
+  classifyHumanBoundary({
+    text: "Contact profile",
+    url: "https://example.test/profile",
+    hasPasswordField: false,
+    hasCredentialIdentifierField: true,
+  }),
+  null,
+);
 assert.equal(classifyHumanBoundary({ text: "Profile password policy", url: "https://example.test/profile", hasPasswordField: false }), null);
 
 assert.equal(
@@ -41,6 +61,7 @@ for (const token of [
   "'NETWORK_HUMAN_ACTION_REQUIRED'",
   "requestedAction: boundary.requestedAction",
   "hasPasswordField: Boolean(document.querySelector('input[type=\"password\"]'))",
+  "hasCredentialIdentifierField: Boolean(document.querySelector([",
   "consentText,",
   "alertDialogText,",
   "classifyHumanBoundary({",

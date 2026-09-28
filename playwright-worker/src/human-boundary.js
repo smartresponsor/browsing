@@ -15,7 +15,7 @@ export function classifyChallengeText(text) {
     };
   }
 
-  if (/security check|security challenge|unusual activity|access denied|challenge/i.test(normalized)) {
+  if (/security check|security challenge|unusual activity|suspicious activity|access denied|verify (?:your )?identity|complete (?:the )?challenge|challenge (?:required|verification)/i.test(normalized)) {
     return {
       type: 'security_challenge',
       requestedAction: 'Resolve the security challenge manually in the bound browser target.'
@@ -29,6 +29,7 @@ export function classifyHumanBoundary({
   text,
   url = '',
   hasPasswordField = false,
+  hasCredentialIdentifierField = false,
   consentText = '',
   alertDialogText = '',
   unsupportedControl = null,
@@ -53,7 +54,7 @@ export function classifyHumanBoundary({
   const loginText = /\b(sign[ -]?in|log[ -]?in|login|password)\b/i.test(normalizedText);
   const loginUrl = /\/(?:login|log-in|signin|sign-in|auth)(?:[/?#]|$)/i.test(normalizedUrl);
 
-  if (hasPasswordField && (loginText || loginUrl)) {
+  if ((hasPasswordField && (loginText || loginUrl)) || (loginUrl && hasCredentialIdentifierField)) {
     return {
       type: 'login_required',
       requestedAction: 'Complete login manually in the bound browser target. Network will not read or enter credentials.'

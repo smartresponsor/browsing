@@ -1,6 +1,7 @@
 ﻿import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'node:util';
@@ -17,6 +18,8 @@ import {
   normalizeBrowserChannel,
   parseList
 } from './browser-policy.js';
+import { settleClickTransition } from './click-transition-settle.js';
+import { classifyFinalActionCandidate } from './final-action-classifier.js';
 
 import {
   buildChatGptHomeCleanupPlan,
@@ -156,7 +159,7 @@ function getPolicy() {
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
     remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223),
-    externalAttachTimeoutMs: Number(process.env.NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 5000)
+    externalAttachTimeoutMs: Number(process.env.NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
   };
 }
 
@@ -519,6 +522,15 @@ async function ensureNotChallenge(target) {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
       hasPasswordField: Boolean(document.querySelector('input[type="password"]')),
+      hasCredentialIdentifierField: Boolean(document.querySelector([
+        'input[autocomplete="username"]',
+        'input[name*="username" i]',
+        'input[name*="userName" i]',
+        'input[name*="email" i]',
+        'input[name*="phone" i]',
+        'input[aria-label*="email" i]',
+        'input[aria-label*="phone" i]'
+      ].join(', '))),
       consentText,
       alertDialogText,
     };
@@ -528,6 +540,7 @@ async function ensureNotChallenge(target) {
     text: snapshot.text,
     url: target.url(),
     hasPasswordField: snapshot.hasPasswordField,
+    hasCredentialIdentifierField: snapshot.hasCredentialIdentifierField,
     consentText: snapshot.consentText,
     alertDialogText: snapshot.alertDialogText,
   });
@@ -622,7 +635,7 @@ async function ensurePage() {
   return page;
 }
 
-async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 5000) {
+async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
   let connectEndpoint = endpoint;
   try {
     const versionResponse = await fetch(`${endpoint.replace(/\/$/, '')}/json/version`, {
@@ -643,7 +656,7 @@ async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 5000) {
 
 async function connectExternalVisibleChrome(policy, _userDataDir) {
   const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
-  const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 5000;
+  const timeoutMs = Number.isFinite(policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 15000;
   try {
     return await connectToExistingCdpEndpoint(endpoint, timeoutMs);
   } catch (error) {
@@ -797,7 +810,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
     else if (readOnly) blockedReason = 'Field is read-only';
     else if (semanticType === 'password') blockedReason = 'Sensitive password field is not writable';
     else if (semanticType === 'file') blockedReason = 'File control requires the guarded upload capability';
-    else if (!nativeTextEditable && !['contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
+    else if (!nativeTextEditable && !['checkbox', 'radio', 'contenteditable', 'combobox', 'autocomplete', 'switch'].includes(semanticType)) blockedReason = `Unsupported semantic control type: ${semanticType}`;
 
     const supportedOperations = semanticType === 'file'
       ? ['upload']
@@ -964,7 +977,7 @@ async function snapshotSubmitCandidates(target) {
     const type = String(node.getAttribute('type') || '').toLowerCase();
     const text = normalize(node.innerText || node.textContent || node.getAttribute('value') || node.getAttribute('aria-label') || '');
     const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
-    const isFinal = /submit|apply|send|confirm|finish|complete|delete|withdraw|purchase|payment/i.test(text) || type === 'submit';
+    const isFinal = classifyFinalActionCandidate({ text, type });
     return {
       index,
       tag,
@@ -2297,13 +2310,13 @@ app.post('/click', async (req, res) => {
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
     await ensureNotChallenge(target);
-    const after = await capturePageArtifact(target, { screenshot: false });
-    const transition = {
-      targetChanged: before.targetId !== after.targetId,
-      urlChanged: before.url !== after.url,
-      pageRevisionChanged: before.pageRevision !== after.pageRevision,
-      formRevisionChanged: before.formRevision !== after.formRevision
-    };
+    const initialAfter = await capturePageArtifact(target, { screenshot: false });
+    const settled = await settleClickTransition({
+      before,
+      initialAfter,
+      capture: () => capturePageArtifact(target, { screenshot: false })
+    });
+    const { after, transition } = settled;
     const verified = Object.values(transition).some(Boolean);
     res.json({
       ok: verified,
@@ -2314,6 +2327,10 @@ app.post('/click', async (req, res) => {
       correlation,
       clicked: selector || text,
       nth,
+      settling: {
+        observedDelayedTransition: settled.settled,
+        elapsedMs: settled.elapsedMs
+      },
       transition,
       before: {
         targetId: before.targetId,
