@@ -9,6 +9,8 @@ for (const token of [
   "return createHash('sha256').update(String(text || '').replace(/\\r\\n/g, '\\n').trim(), 'utf8').digest('hex');",
   "app.post('/page-capture'",
   "capturePageArtifact(target, { screenshot: req.body?.screenshot === true })",
+  ".map(item => ({",
+  "finalCandidate: classifyFinalActionCandidate(item)",
 ]) {
   assert.equal(worker.includes(token), true, `Page capture hashing invariant missing: ${token}`);
 }

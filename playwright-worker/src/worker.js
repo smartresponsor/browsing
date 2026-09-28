@@ -977,7 +977,6 @@ async function snapshotSubmitCandidates(target) {
     const type = String(node.getAttribute('type') || '').toLowerCase();
     const text = normalize(node.innerText || node.textContent || node.getAttribute('value') || node.getAttribute('aria-label') || '');
     const isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' && rect.width > 0 && rect.height > 0;
-    const isFinal = classifyFinalActionCandidate({ text, type });
     return {
       index,
       tag,
@@ -987,10 +986,15 @@ async function snapshotSubmitCandidates(target) {
       id: node.getAttribute('id') || '',
       ariaLabel: node.getAttribute('aria-label') || '',
       visible: isVisible,
-      enabled: !node.disabled,
-      finalCandidate: isFinal
+      enabled: !node.disabled
     };
-  })).then(items => items.filter(item => item.visible && item.enabled && item.text));
+  })).then(items => items
+    .filter(item => item.visible && item.enabled && item.text)
+    .map(item => ({
+      ...item,
+      finalCandidate: classifyFinalActionCandidate(item)
+    }))
+  );
 }
 
 async function getPageTargetId(target) {
