@@ -10,7 +10,7 @@ function createNetworkCoreDomainToolDefinitions() {
   return Object.freeze([
     definition({
       canonicalName: 'network.browser_targets',
-      consoleName: 'console.read_.network.browser.targets',
+      consoleName: 'read_.web.browser.targets',
       route: '/browser-targets',
       capabilityName: 'network.browser_targets',
       access: 'read',
@@ -19,7 +19,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.browser_bind',
-      consoleName: 'console.write.network.browser.bind',
+      consoleName: 'write.web.browser.bind',
       route: '/browser-bind',
       capabilityName: 'network.browser_bind',
       access: 'write',
@@ -33,7 +33,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.open',
-      consoleName: 'console.write.network.target.open',
+      consoleName: 'write.web.target.open',
       route: '/open',
       capabilityName: 'network.open',
       access: 'write',
@@ -44,7 +44,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.job.open',
-      consoleName: 'console.write.network.job.open',
+      consoleName: 'write.web.job.open',
       route: '/open-job',
       legacyName: 'network.open_job',
       capabilityName: 'network.open_job',
@@ -56,7 +56,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.chatgpt.snapshot',
-      consoleName: 'console.read_.network.chatgpt.snapshot',
+      consoleName: 'read_.web.chatgpt.snapshot',
       route: '/chatgpt-snapshot',
       legacyName: 'network.chatgpt_snapshot',
       capabilityName: 'network.chatgpt_snapshot',
@@ -66,7 +66,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.page_capture',
-      consoleName: 'console.read_.network.page.capture',
+      consoleName: 'read_.web.page.capture',
       route: '/page-capture',
       capabilityName: 'network.page_capture',
       access: 'read',
@@ -77,7 +77,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.wait_for_ready',
-      consoleName: 'console.read_.network.page.wait',
+      consoleName: 'read_.web.page.wait',
       route: '/wait-for-ready',
       capabilityName: 'network.wait_for_ready',
       access: 'read',
@@ -91,7 +91,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.inspect',
-      consoleName: 'console.read_.network.form.inspect',
+      consoleName: 'read_.web.form.inspect',
       route: '/inspect',
       capabilityName: 'network.inspect',
       access: 'read',
@@ -100,7 +100,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.click',
-      consoleName: 'console.write.network.page.click',
+      consoleName: 'write.web.page.click',
       route: '/click',
       capabilityName: 'network.click',
       access: 'write',
@@ -117,7 +117,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.form.extract',
-      consoleName: 'console.read_.network.form.extract',
+      consoleName: 'read_.web.form.extract',
       route: '/extract-form',
       legacyName: 'network.extract_form',
       capabilityName: 'network.extract_form',
@@ -127,7 +127,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.form.proposal.preview',
-      consoleName: 'console.write.network.form.proposal.preview',
+      consoleName: 'write.web.form.proposal.preview',
       route: '/propose',
       legacyName: 'network.propose',
       capabilityName: 'network.propose',
@@ -139,7 +139,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.form.fill',
-      consoleName: 'console.write.network.form.fill',
+      consoleName: 'write.web.form.fill',
       route: '/fill-after-approval',
       legacyName: 'network.fill_after_approval',
       capabilityName: 'network.fill_after_approval',
@@ -158,7 +158,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.form.upload',
-      consoleName: 'console.write.network.form.upload',
+      consoleName: 'write.web.form.upload',
       route: '/upload-artifact',
       legacyName: 'network.upload_artifact',
       capabilityName: 'network.upload_artifact',
@@ -179,7 +179,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.form.review.snapshot',
-      consoleName: 'console.write.network.form.review.snapshot',
+      consoleName: 'write.web.form.review.snapshot',
       route: '/review-before-submit',
       legacyName: 'network.review_before_submit',
       capabilityName: 'network.review_before_submit',
@@ -189,7 +189,7 @@ function createNetworkCoreDomainToolDefinitions() {
     }),
     definition({
       canonicalName: 'network.submit_after_approval',
-      consoleName: 'console.write.network.form.submit',
+      consoleName: 'write.web.form.submit',
       route: '/submit-after-approval',
       capabilityName: 'network.submit_after_approval',
       access: 'write',

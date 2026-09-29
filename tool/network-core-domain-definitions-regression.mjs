@@ -13,7 +13,7 @@ assert.equal(new Set(definitions.map((tool) => tool.consoleName)).size, definiti
 for (const tool of definitions) {
   assert.ok(["read", "write"].includes(tool.access), `Invalid Network definition access: ${tool.canonicalName}`);
   assert.equal(
-    tool.consoleName.startsWith(tool.access === "read" ? "console.read_.network." : "console.write.network."),
+    tool.consoleName.startsWith(tool.access === "read" ? "read_.web." : "write.web."),
     true,
     `Console name access prefix mismatch: ${tool.consoleName}`,
   );
@@ -27,16 +27,16 @@ for (const tool of definitions) {
 }
 
 for (const required of [
-  "console.read_.network.browser.targets",
-  "console.write.network.browser.bind",
-  "console.read_.network.page.capture",
-  "console.read_.network.form.inspect",
-  "console.write.network.page.click",
-  "console.write.network.form.proposal.preview",
-  "console.write.network.form.fill",
-  "console.write.network.form.upload",
-  "console.write.network.form.review.snapshot",
-  "console.write.network.form.submit",
+  "read_.web.browser.targets",
+  "write.web.browser.bind",
+  "read_.web.page.capture",
+  "read_.web.form.inspect",
+  "write.web.page.click",
+  "write.web.form.proposal.preview",
+  "write.web.form.fill",
+  "write.web.form.upload",
+  "write.web.form.review.snapshot",
+  "write.web.form.submit",
 ]) {
   assert.ok(definitions.some((tool) => tool.consoleName === required), `Required Console Network domain definition missing: ${required}`);
 }
