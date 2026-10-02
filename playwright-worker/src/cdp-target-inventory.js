@@ -244,7 +244,7 @@ export async function buildChatGptHomeCleanupPlan(policy, { maxVerify = 20, maxC
 
   return {
     ok: true,
-    service: 'network-mcp-browser-worker',
+    service: 'browser-mcp-browser-worker',
     action: 'browser_cdp_cleanup_plan_chatgpt_home',
     mode: 'dry-run',
     requested: { maxVerify: boundedMaxVerify, maxClose: boundedMaxClose, timeoutMs: boundedTimeoutMs },
@@ -360,7 +360,7 @@ export async function listRawCdpTargets(policy) {
 
   return {
     ok: response.ok,
-    service: 'network-mcp-browser-worker',
+    service: 'browser-mcp-browser-worker',
     endpoint,
     status: response.status,
     timeoutMs,

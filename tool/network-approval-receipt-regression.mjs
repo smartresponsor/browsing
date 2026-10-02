@@ -73,6 +73,27 @@ try {
     (error) => error?.networkStatus === "NETWORK_APPROVAL_RECEIPT_REPLAYED",
   );
 
+  const dynamicFillReceipt = await createApprovalReceipt({
+    root,
+    kind: "fill",
+    targetId: "target-dynamic",
+    pageRevision: "page-before-animation",
+    formRevision: "form-stable",
+    payloadHash,
+    ttlMs: 60_000,
+  });
+  const dynamicConsumed = await consumeApprovalReceipt({
+    root,
+    id: dynamicFillReceipt.id,
+    kind: "fill",
+    targetId: "target-dynamic",
+    pageRevision: "page-after-animation",
+    formRevision: "form-stable",
+    payloadHash,
+    allowPageRevisionDriftWhenFormStable: true,
+  });
+  assert.equal(dynamicConsumed.id, dynamicFillReceipt.id);
+
   const staleReceipt = await createApprovalReceipt({
     root,
     kind: "submit",

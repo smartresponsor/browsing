@@ -4,7 +4,7 @@ export const DEFAULT_WORKER_PORT = 8791;
 export const DEFAULT_BROWSER_CHANNEL = 'msedge';
 export const PLAYWRIGHT_BROWSER_CHANNELS = new Set(['chromium', 'chrome', 'msedge']);
 
-export const JOB_BOARD_HOSTS = new Set([
+export const KNOWN_JOB_HOSTS = new Set([
   'job-boards.greenhouse.io',
   'boards.greenhouse.io',
   'jobs.lever.co',
@@ -13,7 +13,8 @@ export const JOB_BOARD_HOSTS = new Set([
   'workable.com',
   'bamboohr.com',
   'smartrecruiters.com',
-  'myworkdayjobs.com'
+  'myworkdayjobs.com',
+  'careers.walmart.com'
 ]);
 
 export const TRACKING_QUERY_PARAMS = new Set([
@@ -43,7 +44,7 @@ export function normalizeBrowserChannel(value) {
   }
 
   if (!PLAYWRIGHT_BROWSER_CHANNELS.has(browserChannel)) {
-    throw new Error(`Unsupported NETWORK_MCP_BROWSER_CHANNEL "${browserChannel}". Use chromium, chrome, or msedge.`);
+    throw new Error(`Unsupported BROWSER_MCP_BROWSER_CHANNEL "${browserChannel}". Use chromium, chrome, or msedge.`);
   }
 
   return browserChannel;
@@ -126,6 +127,6 @@ export function isChallengeText(text) {
   return /captcha|2fa|two-factor|security check|challenge|bot detection|verify you are human|access denied/i.test(text);
 }
 
-export function isJobBoardHost(host) {
-  return Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(host, pattern));
+export function isKnownJobHost(host) {
+  return Array.from(KNOWN_JOB_HOSTS).some(pattern => hostMatches(host, pattern));
 }

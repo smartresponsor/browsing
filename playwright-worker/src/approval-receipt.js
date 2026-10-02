@@ -48,6 +48,7 @@ export async function consumeApprovalReceipt({
   pageRevision,
   formRevision,
   payloadHash,
+  allowPageRevisionDriftWhenFormStable = false,
 }) {
   const directory = path.resolve(String(root || '').trim());
   const receiptId = normalizeReceiptId(id);
@@ -71,6 +72,7 @@ export async function consumeApprovalReceipt({
     pageRevision,
     formRevision,
     payloadHash,
+    allowPageRevisionDriftWhenFormStable,
   });
 
   const lockPath = path.join(directory, `${receiptId}.consume.lock`);
@@ -144,7 +146,9 @@ function validateRecord(record, expected) {
   const checks = [
     ['kind', requireString(expected.kind, 'kind')],
     ['targetId', requireString(expected.targetId, 'targetId')],
-    ['pageRevision', requireString(expected.pageRevision, 'pageRevision')],
+    ...((expected.allowPageRevisionDriftWhenFormStable === true && record.kind === 'fill' && record.formRevision === requireString(expected.formRevision, 'formRevision'))
+      ? []
+      : [['pageRevision', requireString(expected.pageRevision, 'pageRevision')]]),
     ['formRevision', requireString(expected.formRevision, 'formRevision')],
     ['payloadHash', requireHash(expected.payloadHash)],
   ];

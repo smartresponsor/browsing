@@ -34,10 +34,11 @@ export function buildRevisionEnvelope({ targetId, url, title, textHash, fields }
   };
 }
 
-export function assertExpectedRevisions(expected, actual) {
+export function assertExpectedRevisions(expected, actual, options = {}) {
   const expectedTargetId = normalize(expected?.targetId);
   const expectedPageRevision = normalize(expected?.pageRevision);
   const expectedFormRevision = normalize(expected?.formRevision);
+  const allowPageRevisionDriftWhenFormStable = options?.allowPageRevisionDriftWhenFormStable === true;
 
   if (expectedTargetId && expectedTargetId !== actual.targetId) {
     throw revisionError(
@@ -47,7 +48,12 @@ export function assertExpectedRevisions(expected, actual) {
     );
   }
 
-  if (expectedPageRevision && expectedPageRevision !== actual.pageRevision) {
+  const formRevisionStable = Boolean(expectedFormRevision && expectedFormRevision === actual.formRevision);
+  if (
+    expectedPageRevision &&
+    expectedPageRevision !== actual.pageRevision &&
+    !(allowPageRevisionDriftWhenFormStable && formRevisionStable)
+  ) {
     throw revisionError(
       'NETWORK_PAGE_REVISION_STALE',
       'The page revision changed after inspection. Capture a fresh page snapshot before mutating.',

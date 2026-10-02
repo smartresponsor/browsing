@@ -7,13 +7,12 @@ import path from 'path';
 import { promisify } from 'node:util';
 import {
   DEFAULT_WORKER_PORT,
-  JOB_BOARD_HOSTS,
   SAFE_FIELD_TAGS,
   TRACKING_QUERY_PARAMS,
   hostMatches,
   isAllowedHostOverride,
   isBuiltInDeniedHost,
-  isJobBoardHost,
+  isKnownJobHost,
   isSafeEditableInputType,
   normalizeBrowserChannel,
   parseList
@@ -58,11 +57,11 @@ let formFillCount = 0;
 let fieldWriteCount = 0;
 let lastExternalAttachError = '';
 function parseBrowserWorkerToken() {
-  return String(process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || '').trim();
+  return String(process.env.BROWSER_MCP_BROWSER_WORKER_TOKEN || '').trim();
 }
 
 function getSharedBrowserRoot() {
-  return path.resolve(String(process.env.NETWORK_MCP_SHARED_BROWSER_ROOT || path.join(process.cwd(), '..', 'mcp', 'browser')).trim());
+  return path.resolve(String(process.env.BROWSER_MCP_SHARED_BROWSER_ROOT || path.join(process.cwd(), '..', 'mcp', 'browser')).trim());
 }
 
 function getDefaultUserDataDir() {
@@ -127,47 +126,47 @@ async function getDevToolsStatus(policy = getPolicy()) {
 }
 
 function getPolicy() {
-  const headless = String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() === 'true';
-  const browserChannel = normalizeBrowserChannel(process.env.NETWORK_MCP_BROWSER_CHANNEL);
+  const headless = String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() === 'true';
+  const browserChannel = normalizeBrowserChannel(process.env.BROWSER_MCP_BROWSER_CHANNEL);
   const externalVisibleBrowser = process.platform === 'win32' && !headless && String(
-    process.env.NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER ??
-      process.env.NETWORK_MCP_EXTERNAL_VISIBLE_CHROME ??
+    process.env.BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER ??
+      process.env.BROWSER_MCP_EXTERNAL_VISIBLE_CHROME ??
       'true'
   ).toLowerCase() === 'true';
 
   return {
     headless,
-    requireApprovalForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
-    requireApprovalForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
-    requireApprovalForUpload: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_FOR_UPLOAD || 'true').toLowerCase() !== 'false',
-    requireApprovalReceiptForFill: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_FILL || 'true').toLowerCase() !== 'false',
-    requireApprovalReceiptForSubmit: String(process.env.NETWORK_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
-    approvalReceiptRoot: path.resolve(String(process.env.NETWORK_MCP_APPROVAL_RECEIPT_ROOT || path.join(process.cwd(), 'var', 'browser', 'approval-receipts')).trim()),
-    approvalReceiptTtlMs: Number(process.env.NETWORK_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
-    uploadRoot: path.resolve(String(process.env.NETWORK_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
-    maxUploadBytes: Number(process.env.NETWORK_MCP_MAX_UPLOAD_BYTES || 26214400),
-    submitEnabled: String(process.env.NETWORK_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
-    maxSessionSeconds: Number(process.env.NETWORK_MCP_MAX_SESSION_SECONDS || 7200),
-    maxPageVisits: Number(process.env.NETWORK_MCP_MAX_PAGE_VISITS || 100),
-    maxFormFills: Number(process.env.NETWORK_MCP_MAX_FORM_FILLS || 20),
-    maxFieldWrites: Number(process.env.NETWORK_MCP_MAX_FIELD_WRITES || 80),
-    allowedHosts: parseList(process.env.NETWORK_MCP_ALLOWED_HOSTS),
-    deniedHosts: parseList(process.env.NETWORK_MCP_DENIED_HOSTS),
+    requireApprovalForFill: String(process.env.BROWSER_MCP_REQUIRE_APPROVAL_FOR_FILL || 'true').toLowerCase() !== 'false',
+    requireApprovalForSubmit: String(process.env.BROWSER_MCP_REQUIRE_APPROVAL_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
+    requireApprovalForUpload: String(process.env.BROWSER_MCP_REQUIRE_APPROVAL_FOR_UPLOAD || 'true').toLowerCase() !== 'false',
+    requireApprovalReceiptForFill: String(process.env.BROWSER_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_FILL || 'true').toLowerCase() !== 'false',
+    requireApprovalReceiptForSubmit: String(process.env.BROWSER_MCP_REQUIRE_APPROVAL_RECEIPT_FOR_SUBMIT || 'true').toLowerCase() !== 'false',
+    approvalReceiptRoot: path.resolve(String(process.env.BROWSER_MCP_APPROVAL_RECEIPT_ROOT || path.join(process.cwd(), 'var', 'browser', 'approval-receipts')).trim()),
+    approvalReceiptTtlMs: Number(process.env.BROWSER_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
+    uploadRoot: path.resolve(String(process.env.BROWSER_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
+    maxUploadBytes: Number(process.env.BROWSER_MCP_MAX_UPLOAD_BYTES || 26214400),
+    submitEnabled: String(process.env.BROWSER_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
+    maxSessionSeconds: Number(process.env.BROWSER_MCP_MAX_SESSION_SECONDS || 7200),
+    maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
+    maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
+    maxFieldWrites: Number(process.env.BROWSER_MCP_MAX_FIELD_WRITES || 80),
+    allowedHosts: parseList(process.env.BROWSER_MCP_ALLOWED_HOSTS),
+    deniedHosts: parseList(process.env.BROWSER_MCP_DENIED_HOSTS),
     browserChannel,
     sharedBrowserRoot: getSharedBrowserRoot(),
-    userDataDir: String(process.env.NETWORK_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
+    userDataDir: String(process.env.BROWSER_MCP_USER_DATA_DIR || getDefaultUserDataDir()).trim(),
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
-    remoteDebuggingPort: Number(process.env.NETWORK_MCP_REMOTE_DEBUGGING_PORT || 9223),
-    externalAttachTimeoutMs: Number(process.env.NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
+    remoteDebuggingPort: Number(process.env.BROWSER_MCP_REMOTE_DEBUGGING_PORT || 9223),
+    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
   };
 }
 
 function getStartupUrl() {
-  const workerPort = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
+  const workerPort = Number(process.env.PORT || process.env.BROWSER_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
   return String(
-    process.env.NETWORK_MCP_START_URL ||
-      process.env.NETWORK_MCP_VISIBLE_CHROME_URL ||
+    process.env.BROWSER_MCP_START_URL ||
+      process.env.BROWSER_MCP_VISIBLE_CHROME_URL ||
       `http://127.0.0.1:${workerPort}/healthz`
   ).trim();
 }
@@ -257,7 +256,7 @@ async function getBrowserStatus() {
   );
   return {
     ok: true,
-    service: 'network-mcp-browser-worker',
+    service: 'browser-mcp-browser-worker',
     configuredVisible: !policy.headless,
     detectedVisibleWindow,
     browserVisible: detectedVisibleWindow,
@@ -274,7 +273,7 @@ async function getFullHealthStatus() {
   const activePage = page && !page.isClosed() ? page : null;
   return {
     ok: Boolean(browserStatus.ok) && (devTools.enabled ? devTools.ok : true),
-    service: 'network-mcp-browser-worker',
+    service: 'browser-mcp-browser-worker',
     worker: { ok: true, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), port },
     browser: browserStatus,
     devTools,
@@ -300,7 +299,7 @@ async function getSharedBrowserRuntimeStatus() {
   const attached = Boolean(devTools.ok && browser && browser.pages().length > 0);
   return {
     ok: Boolean(registry?.ok || attached),
-    service: 'network-mcp-browser-worker',
+    service: 'browser-mcp-browser-worker',
     runtimeFile,
     registry: registry || null,
     registryError: registry ? null : registryError,
@@ -320,8 +319,8 @@ function buildConnectorSettingsUrl(connectorId = '') {
 }
 
 function planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs } = {}) {
-  const name = String(connectorName || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_NAME || 'network-mcp');
-  const id = String(connectorId || process.env.NETWORK_MCP_CHATGPT_CONNECTOR_ID || '');
+  const name = String(connectorName || process.env.BROWSER_MCP_CHATGPT_CONNECTOR_NAME || 'browser-mcp');
+  const id = String(connectorId || process.env.BROWSER_MCP_CHATGPT_CONNECTOR_ID || '');
   const boundedTimeoutMs = Number.isInteger(timeoutMs) ? Math.min(Math.max(timeoutMs, 5000), 120000) : 90000;
   return {
     ok: true,
@@ -463,26 +462,32 @@ function normalizeJobUrl(rawUrl) {
   return targetUrl;
 }
 
-function validateJobBoardUrl(rawUrl, policy) {
+function normalizeJobProfileUrl(rawUrl, policy) {
   const targetUrl = normalizeJobUrl(rawUrl);
-  const host = targetUrl.hostname.toLowerCase();
-
   validateTargetUrl(targetUrl.toString(), policy);
-
-  if (!Array.from(JOB_BOARD_HOSTS).some(pattern => hostMatches(host, pattern))) {
-    throw new Error(`Host is not an approved job board: ${host}`);
-  }
-
   return targetUrl;
 }
 
-function describePageType(targetUrl) {
+function describeJobProfile(targetUrl) {
   const host = targetUrl.hostname.toLowerCase();
   if (hostMatches(host, 'job-boards.greenhouse.io') || hostMatches(host, 'boards.greenhouse.io')) {
-    return 'greenhouse-job';
+    return { profile: 'job', provider: 'greenhouse', knownProvider: true };
+  }
+  if (hostMatches(host, 'jobs.lever.co')) {
+    return { profile: 'job', provider: 'lever', knownProvider: true };
+  }
+  if (hostMatches(host, 'ashbyhq.com')) {
+    return { profile: 'job', provider: 'ashby', knownProvider: true };
+  }
+  if (hostMatches(host, 'myworkdayjobs.com')) {
+    return { profile: 'job', provider: 'workday', knownProvider: true };
   }
 
-  return 'job-board';
+  return {
+    profile: 'job',
+    provider: isKnownJobHost(host) ? 'known-generic' : 'generic',
+    knownProvider: isKnownJobHost(host),
+  };
 }
 
 async function ensureNotChallenge(target) {
@@ -1757,13 +1762,13 @@ app.get('/healthz', (_req, res) => {
   const policy = getPolicy();
   res.json({
     ok: true,
-    service: 'network-mcp',
-    configuredVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
-    browserVisible: String(process.env.NETWORK_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
+    service: 'browser-mcp',
+    configuredVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
+    browserVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
     browserChannel: policy.browserChannel,
     browserMode: getBrowserMode(policy),
     persistentProfile: true,
-    userDataDirConfigured: Boolean(String(process.env.NETWORK_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim()),
+    userDataDirConfigured: Boolean(String(process.env.BROWSER_MCP_USER_DATA_DIR || path.join('var', 'browser', 'profile')).trim()),
     currentUrl: page && !page.isClosed() ? page.url() : null
   });
 });
@@ -1878,7 +1883,7 @@ app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
     }
     res.json({
       ok: true,
-      service: 'network-mcp-browser-worker',
+      service: 'browser-mcp-browser-worker',
       action: 'browser_cdp_verify_chatgpt_home',
       requested: { index: requestedIndex, id: requestedId, maxVerify, timeoutMs },
       candidateCount: candidates.length,
@@ -1944,8 +1949,8 @@ app.post('/open-fresh', async (req, res) => {
     const force = req.body?.force === true;
     const reason = String(req.body?.reason || '').slice(0, 200);
     const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
-    const isJobBoardUrl = isJobBoardHost(rawTargetUrl.hostname.toLowerCase());
-    const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
+    const knownJobHost = isKnownJobHost(rawTargetUrl.hostname.toLowerCase());
+    const targetUrl = knownJobHost ? normalizeJobProfileUrl(requestedUrl, policy) : rawTargetUrl;
 
     const restart = await restartBrowserSession({ force, reopen: false, reason: reason || 'open_fresh' });
     const target = await ensurePage();
@@ -1961,9 +1966,9 @@ app.post('/open-fresh', async (req, res) => {
       restart
     };
 
-    if (isJobBoardUrl) {
+    if (knownJobHost) {
       response.normalizedUrl = targetUrl.toString();
-      response.pageType = describePageType(targetUrl);
+      response.profile = describeJobProfile(targetUrl);
     }
 
     res.json(response);
@@ -1978,8 +1983,8 @@ app.post('/open', async (req, res) => {
     const target = await ensurePage();
     const requestedUrl = String(req.body?.url || '').trim();
     const rawTargetUrl = validateTargetUrl(requestedUrl, policy);
-    const isJobBoardUrl = isJobBoardHost(rawTargetUrl.hostname.toLowerCase());
-    const targetUrl = isJobBoardUrl ? validateJobBoardUrl(requestedUrl, policy) : rawTargetUrl;
+    const knownJobHost = isKnownJobHost(rawTargetUrl.hostname.toLowerCase());
+    const targetUrl = knownJobHost ? normalizeJobProfileUrl(requestedUrl, policy) : rawTargetUrl;
 
     if (pageVisitCount >= policy.maxPageVisits) {
       throw new Error(`Page visit limit reached (${policy.maxPageVisits}). Restart the worker.`);
@@ -1991,9 +1996,9 @@ app.post('/open', async (req, res) => {
     await ensureNotChallenge(target);
     const response = { ok: true, url: target.url() };
 
-    if (isJobBoardUrl) {
+    if (knownJobHost) {
       response.normalizedUrl = targetUrl.toString();
-      response.pageType = describePageType(targetUrl);
+      response.profile = describeJobProfile(targetUrl);
     }
 
     res.json(response);
@@ -2007,7 +2012,7 @@ app.post('/open-job', async (req, res) => {
     const policy = getPolicy();
     const target = await ensurePage();
     const requestedUrl = String(req.body?.url || '').trim();
-    const normalizedUrl = validateJobBoardUrl(requestedUrl, policy);
+    const normalizedUrl = normalizeJobProfileUrl(requestedUrl, policy);
 
     if (pageVisitCount >= policy.maxPageVisits) {
       throw new Error(`Page visit limit reached (${policy.maxPageVisits}). Restart the worker.`);
@@ -2021,7 +2026,7 @@ app.post('/open-job', async (req, res) => {
       ok: true,
       url: target.url(),
       normalizedUrl: normalizedUrl.toString(),
-      pageType: describePageType(normalizedUrl)
+      profile: describeJobProfile(normalizedUrl)
     });
   } catch (error) {
     sendNetworkError(res, error, 'NETWORK_OPEN_JOB_FAILED');
@@ -2159,7 +2164,9 @@ app.post('/fill-after-approval', async (req, res) => {
     const target = await ensurePage();
     await ensureNotChallenge(target);
     const before = await capturePageArtifact(target, { screenshot: false });
-    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before, {
+      allowPageRevisionDriftWhenFormStable: true,
+    });
     const fields = before.fields;
     const operationSet = normalizeFillApprovalOperations(requestedFields);
     const operationsHash = approvalPayloadHash(hashStableJson, operationSet);
@@ -2171,7 +2178,8 @@ app.post('/fill-after-approval', async (req, res) => {
           targetId: before.targetId,
           pageRevision: before.pageRevision,
           formRevision: before.formRevision,
-          payloadHash: operationsHash
+          payloadHash: operationsHash,
+          allowPageRevisionDriftWhenFormStable: true
         })
       : null;
 
@@ -2596,7 +2604,7 @@ function sanitizeProcessInfo(item) {
   };
 }
 
-const port = Number(process.env.PORT || process.env.NETWORK_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
+const port = Number(process.env.PORT || process.env.BROWSER_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
 app.listen(port, '127.0.0.1', () => {
   console.log(`Network browser worker listening on http://127.0.0.1:${port}`);
 });

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { classifyFinalActionCandidate } from "../playwright-worker/src/final-action-classifier.js";
+import { isKnownJobHost } from "../playwright-worker/src/browser-policy.js";
 
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
+
+assert.equal(isKnownJobHost("careers.walmart.com"), true, "Walmart Careers should be recognized as a known job provider");
+assert.equal(isKnownJobHost("careers.example.com"), false, "Unknown career hosts should remain generic rather than requiring registry admission");
 
 for (const token of [
   "import { createHash } from 'node:crypto';",

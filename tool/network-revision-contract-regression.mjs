@@ -26,6 +26,19 @@ assert.equal(
   true,
 );
 
+const pageOnlyDrift = {
+  ...base,
+  pageRevision: "dynamic-page-drift",
+};
+assert.equal(
+  assertExpectedRevisions({
+    targetId: base.targetId,
+    pageRevision: base.pageRevision,
+    formRevision: base.formRevision,
+  }, pageOnlyDrift, { allowPageRevisionDriftWhenFormStable: true }),
+  true,
+);
+
 for (const [expected, status] of [
   [{ targetId: "target-2" }, "NETWORK_TARGET_STALE"],
   [{ pageRevision: "stale-page" }, "NETWORK_PAGE_REVISION_STALE"],
