@@ -7,8 +7,8 @@ function Invoke-WorkerRequest {
     $port = Get-WorkerPort
     $uri = "http://127.0.0.1:$port$Path"
     $headers = @{}
-    if ($env:NETWORK_MCP_BROWSER_WORKER_TOKEN) {
-        $headers['Authorization'] = "Bearer $($env:NETWORK_MCP_BROWSER_WORKER_TOKEN)"
+    if ($env:BROWSER_MCP_BROWSER_WORKER_TOKEN) {
+        $headers['Authorization'] = "Bearer $($env:BROWSER_MCP_BROWSER_WORKER_TOKEN)"
     }
 
     $response = Invoke-WebRequest -Method Post -Uri $uri -ContentType 'application/json' -Headers $headers -Body $Body -SkipHttpErrorCheck -TimeoutSec 30

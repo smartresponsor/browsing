@@ -1,18 +1,18 @@
 import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createNetworkToolBundle } from './network-tool-bundle.js';
+import { createNetworkToolBundle } from './browser-tool-bundle.js';
 
-const host = process.env.NETWORK_MCP_SERVER_HOST || '127.0.0.1';
-const port = Number(process.env.NETWORK_MCP_SERVER_PORT || 8792);
-const endpoint = process.env.NETWORK_MCP_SERVER_ENDPOINT || '/mcp';
-const workerUrl = process.env.NETWORK_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
-const upstreamToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN || '';
-const upstreamPreviousToken = process.env.NETWORK_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
+const host = process.env.BROWSER_MCP_SERVER_HOST || '127.0.0.1';
+const port = Number(process.env.BROWSER_MCP_SERVER_PORT || 8792);
+const endpoint = process.env.BROWSER_MCP_SERVER_ENDPOINT || '/mcp';
+const workerUrl = process.env.BROWSER_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
+const upstreamToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN || '';
+const upstreamPreviousToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
 
 const networkToolBundle = createNetworkToolBundle({
   workerUrl,
-  browserWorkerToken: process.env.NETWORK_MCP_BROWSER_WORKER_TOKEN || ''
+  browserWorkerToken: process.env.BROWSER_MCP_BROWSER_WORKER_TOKEN || ''
 });
 
 const server = createServer(async (req, res) => {
@@ -28,7 +28,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       ok: true,
-      service: 'network-mcp',
+      service: 'browser-mcp',
       endpoint
     }));
     return;
@@ -99,7 +99,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`network-mcp listening on http://${host}:${port}${endpoint}`);
+  console.log(`browser-mcp listening on http://${host}:${port}${endpoint}`);
 });
 
 process.on('SIGINT', () => {
@@ -108,7 +108,7 @@ process.on('SIGINT', () => {
 
 function buildServer() {
   const mcpServer = new McpServer({
-    name: 'network-mcp',
+    name: 'browser-mcp',
     version: '0.1.0-rc2'
   });
 

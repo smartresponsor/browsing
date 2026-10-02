@@ -12,7 +12,7 @@ function Install-McpStartupTask {
     $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 
-    Register-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Keep the local Network MCP server running under Windows Task Scheduler.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Keep the local Browser MCP server running under Windows Task Scheduler.' -Force | Out-Null
     return (Show-McpStartupTask)
 }
 
@@ -20,7 +20,7 @@ function Start-McpStartupTask {
     Import-Module ScheduledTasks -ErrorAction Stop
     $task = Get-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath -ErrorAction SilentlyContinue
     if (-not $task) {
-        throw 'Network MCP startup task is not installed. Run install-mcp-startup-task first.'
+        throw 'Browser MCP startup task is not installed. Run install-mcp-startup-task first.'
     }
 
     $state = Get-McpState
@@ -28,7 +28,7 @@ function Start-McpStartupTask {
         Stop-McpServer | Out-Null
         Start-Sleep -Milliseconds 500
     } elseif ($state.port_conflict) {
-        throw "Cannot start persistent Network MCP because port $($state.port) is owned by an unmanaged process."
+        throw "Cannot start persistent Browser MCP because port $($state.port) is owned by an unmanaged process."
     }
 
     Start-ScheduledTask -TaskName $McpStartupTaskName -TaskPath $StartupTaskPath
@@ -40,7 +40,7 @@ function Start-McpStartupTask {
         if ($state.running) {
             $smoke = Invoke-McpSmoke | ConvertFrom-Json
             if (-not $smoke.ok) {
-                throw 'Persistent Network MCP started but MCP smoke failed.'
+                throw 'Persistent Browser MCP started but MCP smoke failed.'
             }
 
             return [pscustomobject]@{
@@ -53,7 +53,7 @@ function Start-McpStartupTask {
     } while ((Get-Date) -lt $deadline)
 
     $taskState = Show-McpStartupTask | ConvertFrom-Json
-    throw "Persistent Network MCP did not become ready in time. Task state: $($taskState.state)"
+    throw "Persistent Browser MCP did not become ready in time. Task state: $($taskState.state)"
 }
 
 function Stop-McpStartupTask {

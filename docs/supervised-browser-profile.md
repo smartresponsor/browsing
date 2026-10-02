@@ -15,17 +15,17 @@ This is not a bypass mechanism. CAPTCHA, two-factor authentication, security cha
 ## Environment variables
 
 ```text
-NETWORK_MCP_USER_DATA_DIR=var/browser/profile
-NETWORK_MCP_BROWSER_CHANNEL=msedge
-NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true
-NETWORK_MCP_EXTERNAL_VISIBLE_CHROME=true
-NETWORK_MCP_HEADLESS=false
+BROWSER_MCP_USER_DATA_DIR=var/browser/profile
+BROWSER_MCP_BROWSER_CHANNEL=msedge
+BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER=true
+BROWSER_MCP_EXTERNAL_VISIBLE_CHROME=true
+BROWSER_MCP_HEADLESS=false
 ```
 
 Supported Playwright-managed channels are `chromium`, `chrome`, and `msedge`.
 Use `msedge` for installed Microsoft Edge, `chrome` for installed Google Chrome fallback, or `chromium` for the bundled Playwright browser fallback.
 If `chrome` or `msedge` is unavailable, the worker retries with bundled Chromium using the same profile directory.
-The shared external browser/CDP launcher is controlled by `NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER=true`; `NETWORK_MCP_EXTERNAL_VISIBLE_CHROME` remains a legacy alias.
+The shared external browser/CDP launcher is controlled by `BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER=true`; `BROWSER_MCP_EXTERNAL_VISIBLE_CHROME` remains a legacy alias.
 
 ## Manual warm-up
 

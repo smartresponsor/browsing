@@ -20,8 +20,8 @@ function Start-McpServer {
 
     $node = Get-NodeCommand
     $mcpScript = Join-Path $McpRoot 'src\server.js'
-    $restorePort = $env:NETWORK_MCP_SERVER_PORT
-    $env:NETWORK_MCP_SERVER_PORT = [string](Get-McpPort)
+    $restorePort = $env:BROWSER_MCP_SERVER_PORT
+    $env:BROWSER_MCP_SERVER_PORT = [string](Get-McpPort)
 
     try {
         $process = Start-Process `
@@ -34,9 +34,9 @@ function Start-McpServer {
             -RedirectStandardError $McpErrFile
     } finally {
         if ($null -eq $restorePort) {
-            Remove-Item -Path Env:NETWORK_MCP_SERVER_PORT -ErrorAction SilentlyContinue
+            Remove-Item -Path Env:BROWSER_MCP_SERVER_PORT -ErrorAction SilentlyContinue
         } else {
-            $env:NETWORK_MCP_SERVER_PORT = $restorePort
+            $env:BROWSER_MCP_SERVER_PORT = $restorePort
         }
     }
 

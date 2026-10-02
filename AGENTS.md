@@ -1,6 +1,6 @@
-# network-mcp Agent Rules
+# browser-mcp Agent Rules
 
-This repository is the implementation of the local `network-mcp` connector. Treat it as infrastructure code: keep changes small, reviewable, and policy-driven.
+This repository is the implementation of the local `browser-mcp` connector. Treat it as infrastructure code: keep changes small, reviewable, and policy-driven.
 
 ## Patch discipline
 
@@ -30,8 +30,8 @@ This repository is the implementation of the local `network-mcp` connector. Trea
 
 ## Project boundary
 
-- Treat `network-mcp` as its own connector project.
-- Do not mix `network-mcp` runtime fixes with `console-mcp` runtime fixes unless the user explicitly asks for a cross-connector change.
+- Treat `browser-mcp` as its own connector project.
+- Do not mix `browser-mcp` runtime fixes with `console-mcp` runtime fixes unless the user explicitly asks for a cross-connector change.
 
 ## Architecture guardrails
 
@@ -40,9 +40,9 @@ This repository is the implementation of the local `network-mcp` connector. Trea
   - Local MCP server: MCP schema owner and tool registry.
   - Local browser worker: supervised visible browser automation on loopback.
 - Do not move browser automation, form filling, cookies, persistent browser profiles, or approval-gated actions into the Cloudflare Worker.
-- Do not expose the browser worker directly without `NETWORK_MCP_BROWSER_WORKER_TOKEN` or an equivalent tunnel-side control.
+- Do not expose the browser worker directly without `BROWSER_MCP_BROWSER_WORKER_TOKEN` or an equivalent tunnel-side control.
 - Do not make final submit automatic. Submit remains disabled by default and requires an explicit future policy change.
 - Do not bypass approval gates for fill or submit flows.
 - Startup is allowed to open only a safe local readiness page by default: `http://127.0.0.1:8791/healthz`.
 - External Chrome/CDP mode is opt-in. The default Windows startup path is Playwright-managed visible Chromium unless the environment explicitly overrides it.
-- If a browser profile lock is present after reboot, kill only managed browser processes using the configured `NETWORK_MCP_USER_DATA_DIR`; do not kill arbitrary user Chrome/Edge sessions.
+- If a browser profile lock is present after reboot, kill only managed browser processes using the configured `BROWSER_MCP_USER_DATA_DIR`; do not kill arbitrary user Chrome/Edge sessions.

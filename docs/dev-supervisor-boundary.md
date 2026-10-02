@@ -1,6 +1,6 @@
-# Network MCP dev supervisor boundary
+# Browser MCP dev supervisor boundary
 
-`tool/dev-network.ps1` is still the active local supervisor. Keep it runnable until a green split path exists.
+`tool/dev-browser.ps1` is still the active local supervisor. Keep it runnable until a green split path exists.
 
 ## Reusable candidates
 
@@ -17,7 +17,7 @@ These mechanics can later move to a neutral supervisor library:
 
 ## Network-owned behavior
 
-These parts should remain Network MCP behavior:
+These parts should remain Browser MCP behavior:
 
 - Playwright worker lifecycle;
 - visible browser defaults;
@@ -26,7 +26,7 @@ These parts should remain Network MCP behavior:
 - Network tunnel naming conventions;
 - Network smoke checks;
 - worker route probes;
-- `NETWORK_MCP_*` configuration names.
+- `BROWSER_MCP_*` configuration names.
 
 ## Safe split order
 

@@ -14,8 +14,8 @@ function Get-PlaywrightWorkerPort {
     [string]$SourcePath
   )
 
-  if ($env:NETWORK_MCP_WORKER_PORT) {
-    return [int]$env:NETWORK_MCP_WORKER_PORT
+  if ($env:BROWSER_MCP_WORKER_PORT) {
+    return [int]$env:BROWSER_MCP_WORKER_PORT
   }
 
   $source = Get-Content -LiteralPath $SourcePath -Raw

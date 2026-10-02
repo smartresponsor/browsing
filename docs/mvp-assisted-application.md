@@ -1,17 +1,17 @@
 # MVP Assisted Application
 
-This document defines the safe MVP for ChatGPT-driven opportunity assistance in `network-mcp`.
+This document defines the safe MVP for ChatGPT-driven opportunity assistance in `browser-mcp`.
 
 ## Product intent
 
-`network-mcp` is not a crawler and not a mass-apply system. It is a controlled browser assistant that helps a user work from one opportunity URL toward a selected form.
+`browser-mcp` is not a crawler and not a mass-apply system. It is a controlled browser assistant that helps a user work from one opportunity URL toward a selected form.
 
 The user stays in ChatGPT UI and drives the flow.
 
 ## MVP flow
 
 1. User gives one URL in ChatGPT.
-2. `network-mcp` opens it through the local visible Playwright/browser worker.
+2. `browser-mcp` opens it through the local visible Playwright/browser worker.
 3. The worker discovers likely career, jobs, or apply links only within a limited scope.
 4. ChatGPT presents options to the user.
 5. User selects a page or form.
@@ -25,20 +25,20 @@ The user stays in ChatGPT UI and drives the flow.
 ## Safe defaults
 
 ```env
-NETWORK_MCP_MODE=local-assist
-NETWORK_MCP_HEADLESS=false
-NETWORK_MCP_REQUIRE_APPROVAL_FOR_FILL=true
-NETWORK_MCP_REQUIRE_APPROVAL_FOR_SUBMIT=true
-NETWORK_MCP_SUBMIT_DEFAULT=false
-NETWORK_MCP_ENABLE_SUBMIT=false
-NETWORK_MCP_MAX_SESSION_SECONDS=900
-NETWORK_MCP_MAX_PAGE_VISITS=20
-NETWORK_MCP_MAX_FORM_FILLS=1
-NETWORK_MCP_MAX_FIELD_WRITES=80
-NETWORK_MCP_ALLOWED_HOSTS=
-NETWORK_MCP_DENIED_HOSTS=
-NETWORK_MCP_PUBLIC_ORIGIN=
-NETWORK_MCP_WORKER_PORT=8791
+BROWSER_MCP_MODE=local-assist
+BROWSER_MCP_HEADLESS=false
+BROWSER_MCP_REQUIRE_APPROVAL_FOR_FILL=true
+BROWSER_MCP_REQUIRE_APPROVAL_FOR_SUBMIT=true
+BROWSER_MCP_SUBMIT_DEFAULT=false
+BROWSER_MCP_ENABLE_SUBMIT=false
+BROWSER_MCP_MAX_SESSION_SECONDS=900
+BROWSER_MCP_MAX_PAGE_VISITS=20
+BROWSER_MCP_MAX_FORM_FILLS=1
+BROWSER_MCP_MAX_FIELD_WRITES=80
+BROWSER_MCP_ALLOWED_HOSTS=
+BROWSER_MCP_DENIED_HOSTS=
+BROWSER_MCP_PUBLIC_ORIGIN=
+BROWSER_MCP_WORKER_PORT=8791
 ```
 
 ## Guardrails
@@ -51,7 +51,7 @@ NETWORK_MCP_WORKER_PORT=8791
 - Enforce max field writes.
 - Require approval for fill actions.
 - Require separate approval for submit actions.
-- Disable submit unless `NETWORK_MCP_ENABLE_SUBMIT=true`.
+- Disable submit unless `BROWSER_MCP_ENABLE_SUBMIT=true`.
 
 ## Browser safety policy
 

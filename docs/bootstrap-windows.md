@@ -1,6 +1,6 @@
 # Bootstrap Windows
 
-This is the bootstrap path for `network-mcp` on Windows.
+This is the bootstrap path for `browser-mcp` on Windows.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This is the bootstrap path for `network-mcp` on Windows.
 ## Install
 
 ```powershell
-cd D:\PhpstormProjects\www\mcp\network-mcp
+cd D:\PhpstormProjects\www\mcp\browser-mcp
 npm install
 npm --prefix .\mcp-server install
 npm --prefix .\playwright-worker install
@@ -23,10 +23,10 @@ npm --prefix .\playwright-worker run install:browsers
 ## Check the environment
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 doctor
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 status
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 check-cloudflared
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 check-wrangler
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 doctor
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 status
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 check-cloudflared
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 check-wrangler
 ```
 
 ## Local env
@@ -34,55 +34,55 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 check-wrang
 Copy `ops/env/local.env.example` into a local shell profile or `.env` file outside Git.
 
 The repo intentionally keeps real tokens out of version control.
-If port `8791` is already in use in your workspace, set `NETWORK_MCP_WORKER_PORT` to a free port before starting the supervisor.
+If port `8791` is already in use in your workspace, set `BROWSER_MCP_WORKER_PORT` to a free port before starting the supervisor.
 
 ## Start
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 start
 ```
 
 This starts the visible browser worker and the Cloudflare tunnel helper.
 
 ## Stable Cloudflare named tunnel
 
-Use a named tunnel for the durable Network MCP path. Quick `trycloudflare.com` URLs are transition-only and should be removed after cutover.
+Use a named tunnel for the durable Browser MCP path. Quick `trycloudflare.com` URLs are transition-only and should be removed after cutover.
 
 Create the local config from `ops/cloudflare/cloudflared.named.example.yml`, keep the real credential JSON outside Git, then set:
 
 ```powershell
-$env:NETWORK_MCP_TUNNEL_NAME = 'network-mcp-worker'
-$env:NETWORK_MCP_TUNNEL_HOSTNAME = 'network.smartresponsor.com'
-$env:NETWORK_MCP_TUNNEL_CONFIG = 'C:\Users\Admin\.cloudflared\network-mcp-worker.yml'
-$env:NETWORK_MCP_WORKER_URL = 'https://network.smartresponsor.com'
+$env:BROWSER_MCP_TUNNEL_NAME = 'browser-mcp-worker'
+$env:BROWSER_MCP_TUNNEL_HOSTNAME = 'network.smartresponsor.com'
+$env:BROWSER_MCP_TUNNEL_CONFIG = 'C:\Users\Admin\.cloudflared\browser-mcp-worker.yml'
+$env:BROWSER_MCP_WORKER_URL = 'https://network.smartresponsor.com'
 ```
 
 Run the stable tunnel locally:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 start-named-tunnel
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 named-tunnel-status
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 start-named-tunnel
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 named-tunnel-status
 ```
 
 Install the stable tunnel as a Windows service:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 install-named-tunnel-service
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 install-named-tunnel-service
 ```
 
 ## Smoke
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 smoke-local
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 smoke-public
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 smoke-local
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 smoke-public
 ```
 
-`smoke-public` requires `NETWORK_MCP_PUBLIC_ORIGIN` to be configured.
+`smoke-public` requires `BROWSER_MCP_PUBLIC_ORIGIN` to be configured.
 
 ## Deploy
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 deploy-worker
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 deploy-worker
 ```
 
 Use the existing `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` environment variables. Do not store them in Git.

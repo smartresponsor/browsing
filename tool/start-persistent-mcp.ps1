@@ -11,20 +11,20 @@ $mcpWorkspaceRoot = Split-Path -Parent $root
 $sharedSecretRuntime = Join-Path $mcpWorkspaceRoot 'AwsSecretContract\tool\secret-runtime.ps1'
 
 if (Test-Path -LiteralPath $sharedSecretRuntime -PathType Leaf) {
-    . $sharedSecretRuntime -Command export-env -Consumer network-mcp -IncludePrevious
+    . $sharedSecretRuntime -Command export-env -Consumer browser-mcp -IncludePrevious
 }
 
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
-$port = if ($env:NETWORK_MCP_SERVER_PORT) { [int]$env:NETWORK_MCP_SERVER_PORT } else { 8792 }
-$env:NETWORK_MCP_SERVER_PORT = [string]$port
+$port = if ($env:BROWSER_MCP_SERVER_PORT) { [int]$env:BROWSER_MCP_SERVER_PORT } else { 8792 }
+$env:BROWSER_MCP_SERVER_PORT = [string]$port
 $mcpScript = Join-Path $mcpRoot 'src\server.js'
 $node = Get-Command node.exe -ErrorAction Stop
 
 $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($listener) {
-    throw "Persistent Network MCP launcher refused to start because port $port is already listening (PID $($listener.OwningProcess))."
+    throw "Persistent Browser MCP launcher refused to start because port $port is already listening (PID $($listener.OwningProcess))."
 }
 
 Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue

@@ -44,7 +44,7 @@ function Get-McpState {
     [pscustomobject]@{
         name = 'mcp-server'
         port = (Get-McpPort)
-        endpoint = if ($env:NETWORK_MCP_SERVER_ENDPOINT) { $env:NETWORK_MCP_SERVER_ENDPOINT } else { '/mcp' }
+        endpoint = if ($env:BROWSER_MCP_SERVER_ENDPOINT) { $env:BROWSER_MCP_SERVER_ENDPOINT } else { '/mcp' }
         pid_file = $McpPidFile
         pid = if ($process) { $process.Id } else { $null }
         running = [bool]$process

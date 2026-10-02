@@ -1,16 +1,16 @@
 interface Env {
-  NETWORK_MCP_TOKEN?: string;
-  NETWORK_MCP_WORKER_URL?: string;
+  BROWSER_MCP_TOKEN?: string;
+  BROWSER_MCP_WORKER_URL?: string;
   CAREER_WORKER_URL?: string;
-  NETWORK_MCP_BROWSER_WORKER_TOKEN?: string;
-  NETWORK_MCP_SERVER_URL?: string;
-  NETWORK_MCP_UPSTREAM_TOKEN?: string;
-  NETWORK_MCP_TOKEN_PREVIOUS?: string;
-  NETWORK_MCP_UPSTREAM_TOKEN_PREVIOUS?: string;
-  NETWORK_MCP_BROWSER_WORKER_TOKEN_PREVIOUS?: string;
-  NETWORK_MCP_AUTH0_ISSUER?: string;
-  NETWORK_MCP_OIDC_CLIENT_ID?: string;
-  NETWORK_MCP_ALLOWED_EMAIL?: string;
+  BROWSER_MCP_BROWSER_WORKER_TOKEN?: string;
+  BROWSER_MCP_SERVER_URL?: string;
+  BROWSER_MCP_UPSTREAM_TOKEN?: string;
+  BROWSER_MCP_TOKEN_PREVIOUS?: string;
+  BROWSER_MCP_UPSTREAM_TOKEN_PREVIOUS?: string;
+  BROWSER_MCP_BROWSER_WORKER_TOKEN_PREVIOUS?: string;
+  BROWSER_MCP_AUTH0_ISSUER?: string;
+  BROWSER_MCP_OIDC_CLIENT_ID?: string;
+  BROWSER_MCP_ALLOWED_EMAIL?: string;
 }
 
 const MCP_PROTOCOL_VERSION = '2025-11-25';
@@ -106,7 +106,7 @@ const MCP_TOOLS: McpTool[] = [
   },
   {
     name: 'network.surface_plan',
-    description: 'Build a read-only publication update plan for network-mcp.',
+    description: 'Build a read-only publication update plan for browser-mcp.',
     route: '/connector-sync-plan',
     inputSchema: {
       type: 'object',
@@ -120,7 +120,7 @@ const MCP_TOOLS: McpTool[] = [
   },
   {
     name: 'network.surface_execute',
-    description: 'Run the approved publication update for network-mcp.',
+    description: 'Run the approved publication update for browser-mcp.',
     route: '/connector-sync-execute',
     inputSchema: {
       type: 'object',
@@ -324,15 +324,15 @@ function getRequiredEnvValue(env: Env, key: keyof Env): string | null {
 }
 
 function getAuth0Issuer(env: Env): string | null {
-  return getRequiredEnvValue(env, 'NETWORK_MCP_AUTH0_ISSUER');
+  return getRequiredEnvValue(env, 'BROWSER_MCP_AUTH0_ISSUER');
 }
 
 function getOidcClientId(env: Env): string | null {
-  return getRequiredEnvValue(env, 'NETWORK_MCP_OIDC_CLIENT_ID');
+  return getRequiredEnvValue(env, 'BROWSER_MCP_OIDC_CLIENT_ID');
 }
 
 function getAllowedEmail(env: Env): string | null {
-  return getRequiredEnvValue(env, 'NETWORK_MCP_ALLOWED_EMAIL');
+  return getRequiredEnvValue(env, 'BROWSER_MCP_ALLOWED_EMAIL');
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -381,7 +381,7 @@ function getMcpDebugInfo(env: Env) {
 
   return {
     ok: true,
-    service: 'network-mcp',
+    service: 'browser-mcp',
     protocolVersion: MCP_PROTOCOL_VERSION,
     auth: {
       legacyBearer: true,
@@ -390,7 +390,7 @@ function getMcpDebugInfo(env: Env) {
       oidcClientIdConfigured,
       allowedEmailConfigured
     },
-    schemaOwner: 'upstream-mcp-server', networkMcpServerUrlConfigured: Boolean(getMcpServerUrl(env)), upstreamTokenConfigured: Boolean(getRequiredEnvValue(env, 'NETWORK_MCP_UPSTREAM_TOKEN')), networkWorkerUrlConfigured: Boolean(env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL)
+    schemaOwner: 'upstream-mcp-server', networkMcpServerUrlConfigured: Boolean(getMcpServerUrl(env)), upstreamTokenConfigured: Boolean(getRequiredEnvValue(env, 'BROWSER_MCP_UPSTREAM_TOKEN')), networkWorkerUrlConfigured: Boolean(env.BROWSER_MCP_WORKER_URL || env.CAREER_WORKER_URL)
   };
 }
 
@@ -398,7 +398,7 @@ async function proxyAuth0(request: Request, env: Env, targetPath: string): Promi
   const incomingUrl = new URL(request.url);
   const issuer = getAuth0Issuer(env);
   if (!issuer) {
-    return json(500, { ok: false, error: 'NETWORK_MCP_AUTH0_ISSUER is not configured' });
+    return json(500, { ok: false, error: 'BROWSER_MCP_AUTH0_ISSUER is not configured' });
   }
 
   const targetUrl = new URL(`${issuer}${targetPath}`);
@@ -422,9 +422,9 @@ async function proxyAuth0(request: Request, env: Env, targetPath: string): Promi
 }
 
 async function authorizeMcpRequest(request: Request, env: Env): Promise<Response | null> {
-  const configuredToken = env.NETWORK_MCP_TOKEN;
+  const configuredToken = env.BROWSER_MCP_TOKEN;
   if (!configuredToken) {
-    return json(500, { ok: false, error: 'NETWORK_MCP_TOKEN is not configured' });
+    return json(500, { ok: false, error: 'BROWSER_MCP_TOKEN is not configured' });
   }
 
   const auth = request.headers.get('authorization') || '';
@@ -434,18 +434,18 @@ async function authorizeMcpRequest(request: Request, env: Env): Promise<Response
     return json(401, { ok: false, error: 'Unauthorized' });
   }
 
-  if (matchesAnyToken(presentedToken, [configuredToken, env.NETWORK_MCP_TOKEN_PREVIOUS])) {
+  if (matchesAnyToken(presentedToken, [configuredToken, env.BROWSER_MCP_TOKEN_PREVIOUS])) {
     return null;
   }
 
   const issuer = getAuth0Issuer(env);
   if (!issuer) {
-    return json(500, { ok: false, error: 'NETWORK_MCP_AUTH0_ISSUER is not configured' });
+    return json(500, { ok: false, error: 'BROWSER_MCP_AUTH0_ISSUER is not configured' });
   }
 
   const allowedEmail = getAllowedEmail(env);
   if (!allowedEmail) {
-    return json(500, { ok: false, error: 'NETWORK_MCP_ALLOWED_EMAIL is not configured' });
+    return json(500, { ok: false, error: 'BROWSER_MCP_ALLOWED_EMAIL is not configured' });
   }
 
   let userinfoResponse: Response;
@@ -479,13 +479,13 @@ async function authorizeMcpRequest(request: Request, env: Env): Promise<Response
 }
 
 function getMcpServerUrl(env: Env): string | null {
-  return getRequiredEnvValue(env, 'NETWORK_MCP_SERVER_URL');
+  return getRequiredEnvValue(env, 'BROWSER_MCP_SERVER_URL');
 }
 
 async function proxyMcpRequest(request: Request, env: Env): Promise<Response> {
   const upstreamUrl = getMcpServerUrl(env);
   if (!upstreamUrl) {
-    return json(500, { ok: false, error: 'NETWORK_MCP_SERVER_URL is not configured' });
+    return json(500, { ok: false, error: 'BROWSER_MCP_SERVER_URL is not configured' });
   }
 
   const target = new URL(upstreamUrl);
@@ -495,7 +495,7 @@ async function proxyMcpRequest(request: Request, env: Env): Promise<Response> {
   const headers = new Headers(request.headers);
   headers.delete('host');
 
-  const upstreamToken = getRequiredEnvValue(env, 'NETWORK_MCP_UPSTREAM_TOKEN');
+  const upstreamToken = getRequiredEnvValue(env, 'BROWSER_MCP_UPSTREAM_TOKEN');
   if (upstreamToken) {
     headers.set('authorization', `Bearer ${upstreamToken}`);
   } else {
@@ -520,17 +520,17 @@ function matchesAnyToken(presentedToken: string, candidates: Array<string | unde
 }
 
 async function callCareerWorkerTool(env: Env, route: string, payload: unknown): Promise<{ ok: boolean; body: string }> {
-  const workerUrl = env.NETWORK_MCP_WORKER_URL || env.CAREER_WORKER_URL;
+  const workerUrl = env.BROWSER_MCP_WORKER_URL || env.CAREER_WORKER_URL;
   if (!workerUrl) {
-    return { ok: false, body: 'NETWORK_MCP_WORKER_URL is not configured' };
+    return { ok: false, body: 'BROWSER_MCP_WORKER_URL is not configured' };
   }
 
   try {
     const headers: Record<string, string> = {
       'content-type': 'application/json'
     };
-    if (env.NETWORK_MCP_BROWSER_WORKER_TOKEN) {
-      headers.authorization = `Bearer ${env.NETWORK_MCP_BROWSER_WORKER_TOKEN}`;
+    if (env.BROWSER_MCP_BROWSER_WORKER_TOKEN) {
+      headers.authorization = `Bearer ${env.BROWSER_MCP_BROWSER_WORKER_TOKEN}`;
     }
 
     const response = await fetch(`${workerUrl}${route}`, {
@@ -615,7 +615,7 @@ async function handleMcpRequest(request: Request, env: Env): Promise<Response> {
         tools: { listChanged: true }
       },
       serverInfo: {
-        name: 'network-mcp',
+        name: 'browser-mcp',
         version: '1.0.1'
       },
       instructions: 'Supervised career apply gateway.'
@@ -658,13 +658,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/healthz') {
-      return json(200, { ok: true, service: 'network-mcp' });
+      return json(200, { ok: true, service: 'browser-mcp' });
     }
 
     if (url.pathname === '/.well-known/openid-configuration' || url.pathname === '/.well-known/oauth-authorization-server') {
       const oidcConfig = getPublicOidcConfig(env);
       if (!oidcConfig) {
-        return json(500, { ok: false, error: 'NETWORK_MCP_AUTH0_ISSUER is not configured' });
+        return json(500, { ok: false, error: 'BROWSER_MCP_AUTH0_ISSUER is not configured' });
       }
 
       return new Response(JSON.stringify(oidcConfig), {
@@ -677,10 +677,10 @@ export default {
       const issuer = getAuth0Issuer(env);
       const clientId = getOidcClientId(env);
       if (!issuer) {
-        return json(500, { ok: false, error: 'NETWORK_MCP_AUTH0_ISSUER is not configured' });
+        return json(500, { ok: false, error: 'BROWSER_MCP_AUTH0_ISSUER is not configured' });
       }
       if (!clientId) {
-        return json(500, { ok: false, error: 'NETWORK_MCP_OIDC_CLIENT_ID is not configured' });
+        return json(500, { ok: false, error: 'BROWSER_MCP_OIDC_CLIENT_ID is not configured' });
       }
 
       const authUrl = new URL(`${issuer}/authorize`);
@@ -717,19 +717,19 @@ export default {
     }
 
     if (url.pathname === '/') {
-      const configuredToken = env.NETWORK_MCP_TOKEN;
+      const configuredToken = env.BROWSER_MCP_TOKEN;
       if (!configuredToken) {
-        return json(500, { ok: false, error: 'NETWORK_MCP_TOKEN is not configured' });
+        return json(500, { ok: false, error: 'BROWSER_MCP_TOKEN is not configured' });
       }
 
       const auth = request.headers.get('authorization') || '';
       const presentedToken = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
 
-      if (!presentedToken || !matchesAnyToken(presentedToken, [configuredToken, env.NETWORK_MCP_TOKEN_PREVIOUS])) {
+      if (!presentedToken || !matchesAnyToken(presentedToken, [configuredToken, env.BROWSER_MCP_TOKEN_PREVIOUS])) {
         return json(401, { ok: false, error: 'Unauthorized' });
       }
 
-      return json(200, { ok: true, service: 'network-mcp' });
+      return json(200, { ok: true, service: 'browser-mcp' });
     }
 
     return json(404, { ok: false, error: 'Not found' });

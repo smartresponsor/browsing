@@ -1,8 +1,8 @@
 function Resolve-CloudflaredExe {
     $candidates = @()
 
-    if ($env:NETWORK_MCP_CLOUDFLARED_BIN) {
-        $candidates += $env:NETWORK_MCP_CLOUDFLARED_BIN.Trim()
+    if ($env:BROWSER_MCP_CLOUDFLARED_BIN) {
+        $candidates += $env:BROWSER_MCP_CLOUDFLARED_BIN.Trim()
     }
 
     $candidates += 'C:\Tools\cloudflared\cloudflared.exe'
@@ -18,7 +18,7 @@ function Resolve-CloudflaredExe {
         }
     }
 
-    throw 'cloudflared.exe was not found. Set NETWORK_MCP_CLOUDFLARED_BIN, install it at C:\Tools\cloudflared\cloudflared.exe, or add it to PATH.'
+    throw 'cloudflared.exe was not found. Set BROWSER_MCP_CLOUDFLARED_BIN, install it at C:\Tools\cloudflared\cloudflared.exe, or add it to PATH.'
 }
 
 function Resolve-WranglerExe {

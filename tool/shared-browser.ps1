@@ -7,8 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
-$SharedRoot = if ($env:NETWORK_MCP_SHARED_BROWSER_ROOT) { $env:NETWORK_MCP_SHARED_BROWSER_ROOT } else { Join-Path (Split-Path -Parent $Root) 'browser' }
-$Profile = if ($env:NETWORK_MCP_USER_DATA_DIR) { $env:NETWORK_MCP_USER_DATA_DIR } else { Join-Path $SharedRoot 'profile' }
+$SharedRoot = if ($env:BROWSER_MCP_SHARED_BROWSER_ROOT) { $env:BROWSER_MCP_SHARED_BROWSER_ROOT } else { Join-Path (Split-Path -Parent $Root) 'browser' }
+$Profile = if ($env:BROWSER_MCP_USER_DATA_DIR) { $env:BROWSER_MCP_USER_DATA_DIR } else { Join-Path $SharedRoot 'profile' }
 $RunDir = Join-Path $SharedRoot 'run'
 $LogDir = Join-Path $SharedRoot 'log'
 $RuntimeFile = Join-Path $RunDir 'browser-runtime.json'
@@ -22,8 +22,8 @@ function Ensure-SharedBrowserDirectory {
 }
 
 function Resolve-BrowserExecutable {
-    if ($env:NETWORK_MCP_BROWSER_EXECUTABLE -and (Test-Path -LiteralPath $env:NETWORK_MCP_BROWSER_EXECUTABLE)) {
-        return $env:NETWORK_MCP_BROWSER_EXECUTABLE
+    if ($env:BROWSER_MCP_BROWSER_EXECUTABLE -and (Test-Path -LiteralPath $env:BROWSER_MCP_BROWSER_EXECUTABLE)) {
+        return $env:BROWSER_MCP_BROWSER_EXECUTABLE
     }
 
     $candidates = @(

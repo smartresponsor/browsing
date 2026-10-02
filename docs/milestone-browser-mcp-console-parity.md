@@ -1,12 +1,12 @@
-# Milestone: Network MCP maturity uplift and Console MCP parity
+# Milestone: Browser MCP maturity uplift and Console MCP parity
 
 Status: active  
-Repository: `D:\PhpstormProjects\www\mcp\network-mcp`  
+Repository: `D:\PhpstormProjects\www\mcp\browser-mcp`  
 Baseline date: 2026-09-26
 
 ## Goal
 
-Raise Network MCP from a supervised browser/form MVP into a durable, inspectable, recoverable browser capability platform that can reliably execute long-lived real-world form workflows while remaining subordinate to the Console-owned browser runtime.
+Raise Browser MCP from a supervised browser/form MVP into a durable, inspectable, recoverable browser capability platform that can reliably execute long-lived real-world form workflows while remaining subordinate to the Console-owned browser runtime.
 
 The target is not literal tool-count parity with Console MCP. The target is parity in engineering discipline:
 
@@ -28,12 +28,12 @@ The target is not literal tool-count parity with Console MCP. The target is pari
 The live Console bridge reports:
 
 - browser runtime owner: `console-mcp`;
-- Network capability owner: `network-mcp`;
+- Network capability owner: `browser-mcp`;
 - browser launch by Network: disabled at the bridge boundary;
 - Network uses Console-owned DevTools ports;
 - active DevTools port: 9223;
 - Network capability contract source:
-  `D:\PhpstormProjects\www\mcp\network-mcp\mcp-server\src\capability-contract.js`.
+  `D:\PhpstormProjects\www\mcp\browser-mcp\mcp-server\src\capability-contract.js`.
 
 This is the correct long-term ownership direction and should be preserved.
 
@@ -61,11 +61,11 @@ Important product capabilities already exist:
 
 ### Canonical-repository convergence
 
-The canonical MCP workspace is `D:\PhpstormProjects\www\mcp`, and the authoritative Network repository is `D:\PhpstormProjects\www\mcp\network-mcp`.
+The canonical MCP workspace is `D:\PhpstormProjects\www\mcp`, and the authoritative Network repository is `D:\PhpstormProjects\www\mcp\browser-mcp`.
 
-A legacy mirror remained at `D:\PhpstormProjects\www\network-mcp` and accumulated unique browser/CDP work after the original mirror-first migration. That history has now been merged back into the canonical repository. The legacy root copy is evacuation-only and must not receive further development.
+A legacy mirror remained at `D:\PhpstormProjects\www\browser-mcp` and accumulated unique browser/CDP work after the original mirror-first migration. That history has now been merged back into the canonical repository. The legacy root copy is evacuation-only and must not receive further development.
 
-## Ownership matrix: Console MCP vs Network MCP
+## Ownership matrix: Console MCP vs Browser MCP
 
 This boundary is architectural, not optional.
 
@@ -76,17 +76,17 @@ This boundary is architectural, not optional.
 | Async start/status/output/stop | Console MCP | Network must not duplicate this substrate. |
 | Capacity/semaphore/leases | Console MCP | Includes heavy execution and per-task execution ownership. |
 | Retry/cancel/timeout policy | Console MCP | Generic orchestration responsibility. |
-| Target identity | Network MCP | Exact CDP target identity used by browser semantics. |
-| Page/form revisions | Network MCP | Optimistic concurrency and stale-state rejection. |
-| Semantic controls/form model | Network MCP | Domain-specific browser/form interpretation. |
-| Field mutation/postconditions | Network MCP | Type-specific browser semantics with evidence. |
-| Review/approval domain receipts | Network MCP | Bound to exact target/revisions/operations. |
-| Human-boundary classification | Network MCP | CAPTCHA/login/2FA/unsupported-control domain status; Console orchestrates pause/resume. |
+| Target identity | Browser MCP | Exact CDP target identity used by browser semantics. |
+| Page/form revisions | Browser MCP | Optimistic concurrency and stale-state rejection. |
+| Semantic controls/form model | Browser MCP | Domain-specific browser/form interpretation. |
+| Field mutation/postconditions | Browser MCP | Type-specific browser semantics with evidence. |
+| Review/approval domain receipts | Browser MCP | Bound to exact target/revisions/operations. |
+| Human-boundary classification | Browser MCP | CAPTCHA/login/2FA/unsupported-control domain status; Console orchestrates pause/resume. |
 | Long workflow ordering | Console MCP | Calls Network domain transitions and checkpoints their receipts. |
-| Domain step semantics | Network MCP | inspect/propose/apply/validate/review/submit/confirmation semantics. |
+| Domain step semantics | Browser MCP | inspect/propose/apply/validate/review/submit/confirmation semantics. |
 | Generic event/output transport | Console MCP | Network emits bounded structured results; Console owns durable transport. |
 
-Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/network/form domain state, keep it in Network MCP.
+Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/network/form domain state, keep it in Browser MCP.
 
 ## Major gaps relative to Console MCP maturity
 
@@ -94,7 +94,7 @@ Rule: when a capability could be generic across repositories/consumers, prefer C
 
 Console MCP already owns the generic execution substrate: task/run identities, bounded async execution, leases, checkpointing, capacity control, output/status retrieval, cancellation, and recovery.
 
-Network MCP must not grow a second generic run engine. Its responsibility is domain state and browser/form semantics only.
+Browser MCP must not grow a second generic run engine. Its responsibility is domain state and browser/form semantics only.
 
 Network still has process-global mutable state such as:
 
@@ -106,7 +106,7 @@ Network still has process-global mutable state such as:
 The required correction is therefore split ownership:
 
 - Console MCP owns execution/run identity and process/task leases;
-- Network MCP owns target identity, page/form revisions, semantic form state, review/approval state, and human-boundary state;
+- Browser MCP owns target identity, page/form revisions, semantic form state, review/approval state, and human-boundary state;
 - Console passes correlation/execution identity into Network calls where useful;
 - Network returns domain evidence and stable statuses, not its own competing orchestration lifecycle.
 
@@ -495,8 +495,8 @@ Docs must be regenerated/reconciled from the capability contract and current own
 
 Repository authority is explicit:
 
-- canonical: `D:\PhpstormProjects\www\mcp\network-mcp`;
-- legacy evacuation source: `D:\PhpstormProjects\www\network-mcp`.
+- canonical: `D:\PhpstormProjects\www\mcp\browser-mcp`;
+- legacy evacuation source: `D:\PhpstormProjects\www\browser-mcp`.
 
 Required completion work:
 
@@ -512,10 +512,10 @@ Required completion work:
 
 Priority: P0
 
-- Keep `D:\PhpstormProjects\www\mcp\network-mcp` as the only authoritative Network repository.
+- Keep `D:\PhpstormProjects\www\mcp\browser-mcp` as the only authoritative Network repository.
 - Preserve the already-merged unique history from the former root mirror.
 - Update Console bridge/runtime path references from the root mirror to the canonical repository.
-- Mark `D:\PhpstormProjects\www\network-mcp` as legacy/evacuated and stop all development there.
+- Mark `D:\PhpstormProjects\www\browser-mcp` as legacy/evacuated and stop all development there.
 - Update architecture docs to state:
   - Console owns browser runtime;
   - Network owns browser semantics/capabilities;
@@ -525,7 +525,7 @@ Priority: P0
 Exit criteria:
 
 - only one authoritative Network repository;
-- bridge and docs agree on the canonical `mcp/network-mcp` path;
+- bridge and docs agree on the canonical `mcp/browser-mcp` path;
 - root mirror is no longer used by runtime or development;
 - no unique code is lost.
 
@@ -533,7 +533,7 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status. Core domain tool schemas are now defined once in `core-domain-tool-definitions.js`; the standalone Network MCP compatibility server registers from that reusable source instead of owning a second handwritten schema surface, preparing the same definitions for Console-prefixed registration.
+Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status. Core domain tool schemas are now defined once in `core-domain-tool-definitions.js`; the standalone Browser MCP compatibility server registers from that reusable source instead of owning a second handwritten schema surface, preparing the same definitions for Console-prefixed registration.
 
 Create a typed machine-readable Network capability contract containing:
 
@@ -566,7 +566,7 @@ Implementation status: target/revision foundation advanced. Page/review captures
 Ownership rule:
 
 - Console MCP owns generic `taskId` / `runId`, async lifecycle, leases, cancellation, capacity, and retry;
-- Network MCP owns `targetId`, page/form revision identity, semantic step/domain state, approval/review state, and human-boundary state.
+- Browser MCP owns `targetId`, page/form revision identity, semantic step/domain state, approval/review state, and human-boundary state.
 
 Network may accept Console correlation identifiers, but it must not mint or persist a competing generic execution `runId`.
 
@@ -786,7 +786,7 @@ Add:
 
 Exit criteria:
 
-- a failed application can be diagnosed from Network MCP evidence without opening raw runtime logs.
+- a failed application can be diagnosed from Browser MCP evidence without opening raw runtime logs.
 
 ### Phase 11 — Real-world adapter heuristics without hard-coding product logic
 
@@ -970,7 +970,7 @@ Instead of growing a flat tool list indefinitely, organize Network capabilities 
 
 ## Success definition
 
-This milestone is complete when Network MCP can take a real multi-step external form from URL to verified pre-submit review with:
+This milestone is complete when Browser MCP can take a real multi-step external form from URL to verified pre-submit review with:
 
 - one durable Console-owned execution/correlation identity plus Network-owned semantic step receipts;
 - deterministic target/form identities;

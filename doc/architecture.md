@@ -1,6 +1,6 @@
 # Career Apply Architecture
 
-Use this as a bounded context inside `network-mcp`, not as a LinkedIn scraper.
+Use this as a bounded context inside `browser-mcp`, not as a LinkedIn scraper.
 
 ## Safe operating model
 

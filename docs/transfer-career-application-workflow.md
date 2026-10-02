@@ -2,14 +2,14 @@
 
 Date: 2026-06-28
 Owner: Oleksandr Tishchenko
-Repository: `D:\PhpstormProjects\www\mcp\network-mcp`
+Repository: `D:\PhpstormProjects\www\mcp\browser-mcp`
 Primary tracker: `docs/career-application-tracker.md`
 
 This memo is a clean handoff for the supervised career-application workflow. It intentionally excludes the separate MCP/OAuth/tunnel repair sub-track. The next session should use this document to resume application work, verify tool availability, open target links, inspect forms, prepare answers, and proceed only with explicit user approval for any fill or submit action.
 
 ## Operating rule for the next session
 
-Do not restart the MCP repair discussion unless the user asks. First try the available `network-mcp` tools against the application links below.
+Do not restart the MCP repair discussion unless the user asks. First try the available `browser-mcp` tools against the application links below.
 
 Preferred first tool test:
 

@@ -7,6 +7,6 @@
   "phone": "CHANGE_ME",
   "linkedinUrl": "CHANGE_ME",
   "githubUrl": "CHANGE_ME",
-  "resumePath": "D:\\PhpstormProjects\\www\\network-mcp\\profile\\resume.pdf",
+  "resumePath": "D:\\PhpstormProjects\\www\\browser-mcp\\profile\\resume.pdf",
   "skills": ["Symfony", "PHP", "JavaScript", "Python", "Cloudflare", "MCP", "AI automation"]
 }

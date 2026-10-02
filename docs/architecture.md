@@ -1,6 +1,6 @@
 # Architecture
 
-`network-mcp` is the supervised browser/network capability consumer in the MCP workspace.
+`browser-mcp` is the supervised browser/network capability consumer in the MCP workspace.
 
 Its canonical role is to provide browser/form semantics on top of Console-owned execution infrastructure.
 
@@ -14,7 +14,7 @@ Console MCP owns:
 - async execution lifecycle, cancellation, timeout, capacity, and leases;
 - shared DevTools/CDP availability and browser resource hygiene.
 
-Network MCP owns:
+Browser MCP owns:
 
 - browser/network domain semantics;
 - target identity and page/form revisions;
@@ -25,7 +25,7 @@ Network MCP owns:
 - human-boundary classification;
 - domain-specific navigation and confirmation evidence.
 
-Network MCP must not introduce a competing generic orchestration engine or generic async run lifecycle.
+Browser MCP must not introduce a competing generic orchestration engine or generic async run lifecycle.
 
 ## Runtime components
 
@@ -63,7 +63,7 @@ The Network domain flow is intentionally supervised:
 ## Architectural guardrails
 
 - Console MCP is the execution/orchestration owner.
-- Network MCP is the capability/domain-state owner.
+- Browser MCP is the capability/domain-state owner.
 - Do not create Network-owned generic `runId`, process leases, async start/status/output/stop, or retry/cancel engines.
 - Do not launch a second browser when Console-owned CDP runtime is available.
 - Bind mutations to explicit target/page/form revisions and fail closed on stale state.
@@ -81,7 +81,7 @@ The Network domain flow is intentionally supervised:
 
 ## Auth and transport
 
-- The browser worker must remain local-only or be protected with `NETWORK_MCP_BROWSER_WORKER_TOKEN`.
+- The browser worker must remain local-only or be protected with `BROWSER_MCP_BROWSER_WORKER_TOKEN`.
 - Public/tunnel surfaces are compatibility/deployment concerns and must not move browser ownership out of Console.
 - Secret values come from runtime secret injection and must not be committed.
 

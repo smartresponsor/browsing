@@ -70,26 +70,26 @@ $TunnelErrFile = Join-Path $LogDir 'cloudflared.err.log'
 $NamedTunnelPidFile = Join-Path $RunDir 'cloudflared-named.pid'
 $NamedTunnelLogFile = Join-Path $LogDir 'cloudflared-named.log'
 $NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
-$StartupTaskName = 'network-mcp-dev'
-$McpStartupTaskName = 'network-mcp-server'
+$StartupTaskName = 'browser-mcp-dev'
+$McpStartupTaskName = 'browser-mcp-server'
 $StartupTaskPath = '\'
 $RuntimeStateFile = Join-Path $RunDir 'network-runtime.json'
 $WatchdogStateFile = Join-Path $RunDir 'network-watchdog-state.json'
 $WatchdogLogFile = Join-Path $LogDir 'network-watchdog.ndjson'
-$DefaultMcpPublicOrigin = 'https://network-mcp.taa0662621456.workers.dev'
+$DefaultMcpPublicOrigin = ''
 $LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
 $DefaultSharedBrowserRoot = Join-Path (Split-Path -Parent $Root) 'browser'
 $DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
 $DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
 $DefaultSharedBrowserLogDir = Join-Path $DefaultSharedBrowserRoot 'log'
 $SharedBrowserRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-runtime.json'
-$NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'network-mcp-browser-client.json'
+$NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-mcp-browser-client.json'
 $SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 $McpWorkspaceRoot = Split-Path -Parent $Root
 $SharedSecretRuntime = Join-Path $McpWorkspaceRoot 'AwsSecretContract\tool\secret-runtime.ps1'
 $RequestedSupervisorCommand = $Command
 if (Test-Path -LiteralPath $SharedSecretRuntime -PathType Leaf) {
-    . $SharedSecretRuntime -Command export-env -Consumer network-mcp -IncludePrevious
+    . $SharedSecretRuntime -Command export-env -Consumer browser-mcp -IncludePrevious
 }
 $Root = $NetworkRoot
 $Command = $RequestedSupervisorCommand
@@ -108,8 +108,8 @@ $Command = $RequestedSupervisorCommand
 . (Join-Path $PSScriptRoot 'dev-network.d\60-stack-lifecycle.ps1')
 . (Join-Path $PSScriptRoot 'dev-network.d\65-worker-request.ps1')
 
-if (-not (Get-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
-    Set-Item -Path Env:NETWORK_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
+if (-not (Get-Item -Path Env:BROWSER_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
+    Set-Item -Path Env:BROWSER_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
 }
 
 function Get-FreeTcpPort {
@@ -127,7 +127,7 @@ function Start-SmokeFormServer {
     $formHtml = @'
 <!doctype html>
 <html>
-  <head><meta charset="utf-8"><title>Network MCP Smoke</title></head>
+  <head><meta charset="utf-8"><title>Browser MCP Smoke</title></head>
   <body>
     <form>
       <label for="full_name">Name</label>
@@ -311,7 +311,7 @@ function Invoke-McpSmoke {
         } | ConvertTo-Json -Depth 4
     }
 
-    $endpoint = if ($env:NETWORK_MCP_SERVER_ENDPOINT) { $env:NETWORK_MCP_SERVER_ENDPOINT } else { '/mcp' }
+    $endpoint = if ($env:BROWSER_MCP_SERVER_ENDPOINT) { $env:BROWSER_MCP_SERVER_ENDPOINT } else { '/mcp' }
     $uri = "http://127.0.0.1:$($state.port)$endpoint"
 
     $initializeBody = @{
@@ -322,7 +322,7 @@ function Invoke-McpSmoke {
             protocolVersion = '2025-11-25'
             capabilities = @{}
             clientInfo = @{
-                name = 'network-mcp-dev-network'
+                name = 'browser-mcp-dev-network'
                 version = '0.1.0'
             }
         }
@@ -362,15 +362,15 @@ function Invoke-McpSmoke {
 }
 
 function Invoke-PublicSmoke {
-    if ([string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)) {
+    if ([string]::IsNullOrWhiteSpace($env:BROWSER_MCP_PUBLIC_ORIGIN)) {
         return [pscustomobject]@{
             ok = $false
             skipped = $true
-            reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.'
+            reason = 'BROWSER_MCP_PUBLIC_ORIGIN is not configured.'
         } | ConvertTo-Json -Depth 4
     }
 
-    $origin = $env:NETWORK_MCP_PUBLIC_ORIGIN.TrimEnd('/')
+    $origin = $env:BROWSER_MCP_PUBLIC_ORIGIN.TrimEnd('/')
     $response = Invoke-WebRequest -Method Get -Uri "$origin/healthz" -SkipHttpErrorCheck -TimeoutSec 30
     $body = $null
     try {
@@ -379,7 +379,9 @@ function Invoke-PublicSmoke {
         $body = $response.Content
     }
 
-    $expectedHealth = $body.ok -eq $true -and $body.service -eq 'network-mcp'
+    $bodyHasOk = $body -and $body.PSObject.Properties.Name -contains 'ok'
+    $bodyHasService = $body -and $body.PSObject.Properties.Name -contains 'service'
+    $expectedHealth = [bool]($bodyHasOk -and $bodyHasService -and $body.ok -eq $true -and $body.service -eq 'browser-mcp')
 
     return [pscustomobject]@{
         ok = [int]$response.StatusCode -eq 200 -and $expectedHealth
@@ -459,7 +461,7 @@ function Resolve-RuntimeVerdict {
     $checks['browserVisibility'] = ConvertTo-HealthCheckResult -Name 'browser-visibility' -Ok $browserVisibilityOk -Reason $browserVisibilityReason -Detail ([pscustomobject]@{ configured_visible = $browserConfiguredVisible; detected_visible = $browserDetectedVisible; external_cdp_attached = $externalCdpAttached; shared_browser_owner_ready = $sharedBrowserOwnerReady; page_count = $browserRuntime.pageCount; current_url = $browserRuntime.currentUrl; shared_browser_owner = $sharedBrowserOwner; browser = $BrowserStatus })
     $checks['mcpSmoke'] = ConvertTo-HealthCheckResult -Name 'mcp-smoke' -Ok ([bool]($McpSmoke.ok)) -Reason $(if (-not $McpState.running) { 'MCP_SMOKE_SKIPPED_SERVER_DOWN' } elseif (-not $McpSmoke.ok) { 'MCP_SMOKE_FAILED' } else { $null }) -Detail $McpSmoke
 
-    $publicConfigured = -not [string]::IsNullOrWhiteSpace($env:NETWORK_MCP_PUBLIC_ORIGIN)
+    $publicConfigured = -not [string]::IsNullOrWhiteSpace($env:BROWSER_MCP_PUBLIC_ORIGIN)
     $checks['public'] = ConvertTo-HealthCheckResult -Name 'public' -Ok ([bool]((-not $publicConfigured) -or $PublicSmoke.ok)) -Reason $(if ($publicConfigured -and -not $PublicSmoke.ok) { 'PUBLIC_SMOKE_FAILED' } else { $null }) -Detail $PublicSmoke
 
     $namedTunnelRequired = -not [string]::IsNullOrWhiteSpace((Get-NamedTunnelHostname))
@@ -507,7 +509,7 @@ function Get-RuntimeDoctorSnapshot {
     $browserCdpCleanupPlan = if ($workerState.running) { Invoke-WorkerBrowserCdpCleanupPlan | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
     $browserCdpCleanupBlocked = if ($workerState.running) { Invoke-WorkerBrowserCdpCleanupBlocked | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'playwright-worker is not running.' } }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
-    $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
+    $publicSmoke = if ($env:BROWSER_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'BROWSER_MCP_PUBLIC_ORIGIN is not configured.' } }
     $namedTunnelState = Get-NamedTunnelState
     $verdict = Resolve-RuntimeVerdict -WorkerState $workerState -McpState $mcpState -BrowserStatus $browserStatus -BrowserCdpTargets $browserCdpTargets -BrowserCdpHomeVerification $browserCdpHomeVerification -BrowserCdpCleanupPlan $browserCdpCleanupPlan -BrowserCdpCleanupBlocked $browserCdpCleanupBlocked -McpSmoke $mcpSmoke -PublicSmoke $publicSmoke -NamedTunnelState $namedTunnelState -Policy $policy
 
@@ -519,11 +521,11 @@ function Get-RuntimeDoctorSnapshot {
         timestamp = (Get-Date).ToUniversalTime().ToString('o')
         repo_root = $Root
         browser_runtime = [pscustomobject]@{
-            root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
-            profile = $env:NETWORK_MCP_USER_DATA_DIR
-            mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_BROWSER
-            legacy_mode = $env:NETWORK_MCP_EXTERNAL_VISIBLE_CHROME
-            port = $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT
+            root = $env:BROWSER_MCP_SHARED_BROWSER_ROOT
+            profile = $env:BROWSER_MCP_USER_DATA_DIR
+            mode = $env:BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER
+            legacy_mode = $env:BROWSER_MCP_EXTERNAL_VISIBLE_CHROME
+            port = $env:BROWSER_MCP_REMOTE_DEBUGGING_PORT
         }
         runtime_file = $RuntimeStateFile
         watchdog_state_file = $WatchdogStateFile
@@ -561,7 +563,7 @@ function Save-SharedBrowserRuntimeSnapshot {
     $visibilityCheck = $Snapshot.checks.browserVisibility.detail
     $cdpVersion = $null
     try {
-        $cdpVersion = Invoke-RestMethod -Method Get -Uri ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT + '/json/version') -TimeoutSec 3
+        $cdpVersion = Invoke-RestMethod -Method Get -Uri ('http://127.0.0.1:' + $env:BROWSER_MCP_REMOTE_DEBUGGING_PORT + '/json/version') -TimeoutSec 3
     } catch {
         $cdpVersion = $null
     }
@@ -570,14 +572,14 @@ function Save-SharedBrowserRuntimeSnapshot {
     $registry = [pscustomobject]@{
         ok = [bool]($visibilityCheck.external_cdp_attached)
         state = if ($visibilityCheck.external_cdp_attached) { 'ATTACHED' } else { 'DETACHED' }
-        owner = 'network-mcp-browser-client'
+        owner = 'browser-mcp-browser-client'
         preferred_product = 'msedge'
         fallback_product = 'chrome'
         actual_product = $actualProduct
         actual_user_agent = $actualUserAgent
-        cdp_endpoint = ('http://127.0.0.1:' + $env:NETWORK_MCP_REMOTE_DEBUGGING_PORT)
-        root = $env:NETWORK_MCP_SHARED_BROWSER_ROOT
-        profile = $env:NETWORK_MCP_USER_DATA_DIR
+        cdp_endpoint = ('http://127.0.0.1:' + $env:BROWSER_MCP_REMOTE_DEBUGGING_PORT)
+        root = $env:BROWSER_MCP_SHARED_BROWSER_ROOT
+        profile = $env:BROWSER_MCP_USER_DATA_DIR
         page_count = $browserRuntime.pageCount
         current_url = $browserRuntime.currentUrl
         context_open = $browserRuntime.contextOpen
@@ -710,7 +712,7 @@ function Show-Status {
     $tunnelState = Get-TunnelState
     $localSmoke = [pscustomobject]@{ ok = $false; skipped = $true; reason = 'Run dev:smoke-local explicitly for browser form smoke.' }
     $mcpSmoke = if ($mcpState.running) { Invoke-McpSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'mcp-server is not running.' } }
-    $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'NETWORK_MCP_PUBLIC_ORIGIN is not configured.' } }
+    $publicSmoke = if ($env:BROWSER_MCP_PUBLIC_ORIGIN) { Invoke-PublicSmoke | ConvertFrom-Json } else { [pscustomobject]@{ ok = $false; skipped = $true; reason = 'BROWSER_MCP_PUBLIC_ORIGIN is not configured.' } }
     $browserStatus = Invoke-WorkerBrowserStatus
     $policy = Get-PolicyState
 
@@ -748,7 +750,7 @@ function Show-Doctor {
     $mcpState = Get-McpState
     $tunnelState = Get-TunnelState
     $mcpSmoke = if ($mcpState.running) { (Invoke-McpSmoke | ConvertFrom-Json).ok } else { $false }
-    $publicSmoke = if ($env:NETWORK_MCP_PUBLIC_ORIGIN) { (Invoke-PublicSmoke | ConvertFrom-Json).ok } else { $false }
+    $publicSmoke = if ($env:BROWSER_MCP_PUBLIC_ORIGIN) { (Invoke-PublicSmoke | ConvertFrom-Json).ok } else { $false }
     $browserStatus = Invoke-WorkerBrowserStatus
     $policy = Get-PolicyState
 
@@ -774,7 +776,7 @@ function Show-Doctor {
         "mcp_port: $($mcpState.port)"
         "mcp_running: $($mcpState.running)"
         "tunnel_running: $($tunnelState.running)"
-        "public_origin_configured: $([bool]$env:NETWORK_MCP_PUBLIC_ORIGIN)"
+        "public_origin_configured: $([bool]$env:BROWSER_MCP_PUBLIC_ORIGIN)"
         "local_smoke_ok: skipped"
         "browser_visible: $(if ($browserStatus.body) { $browserStatus.body.browserVisible } else { $false })"
         "browser_detected_visible_window: $(if ($browserStatus.body) { $browserStatus.body.detectedVisibleWindow } else { $false })"
@@ -843,12 +845,12 @@ function Install-StartupTask {
     Import-Module ScheduledTasks -ErrorAction Stop
     $cmd = Get-Command cmd.exe -ErrorAction Stop
     $launcherPath = Join-Path $Root 'tool\start-visible-worker.cmd'
-    $action = New-ScheduledTaskAction -Execute $cmd.Source -Argument "/c start `"network-mcp visible worker`" `"$launcherPath`"" -WorkingDirectory $Root
+    $action = New-ScheduledTaskAction -Execute $cmd.Source -Argument "/c start `"browser-mcp visible worker`" `"$launcherPath`"" -WorkingDirectory $Root
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
 
-    Register-ScheduledTask -TaskName $StartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start the network-mcp visible Playwright worker at logon.' -Force | Out-Null
+    Register-ScheduledTask -TaskName $StartupTaskName -TaskPath $StartupTaskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Start the browser-mcp visible Playwright worker at logon.' -Force | Out-Null
     return (Show-StartupTask)
 }
 

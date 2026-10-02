@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
-  "name": "network-mcp",
+  "name": "browser-mcp",
   "main": "./src/index.ts",
   "account_id": "ea89ff31882730b6044b8e0a1df0eb2b",
-  // NETWORK_MCP_WORKER_URL must point to the stable public Tunnel URL for the local playwright-worker.
+  // BROWSER_MCP_WORKER_URL must point to the stable public Tunnel URL for the local playwright-worker.
   // Do not point it at the MCP /mcp resource URL; this downstream service must expose /open, /inspect, /click, and /extract-form.
-  // If the browser worker is token-protected, set NETWORK_MCP_BROWSER_WORKER_TOKEN as a wrangler secret or environment variable before deploying this Worker.
+  // If the browser worker is token-protected, set BROWSER_MCP_BROWSER_WORKER_TOKEN as a wrangler secret or environment variable before deploying this Worker.
   "compatibility_date": "2026-06-20",
   "workers_dev": true,
   "vars": {},

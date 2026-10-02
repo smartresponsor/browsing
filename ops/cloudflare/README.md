@@ -19,21 +19,21 @@ When multiple Cloudflare accounts are available, make sure `CLOUDFLARE_ACCOUNT_I
 Resolve and deploy through the supervisor:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 check-wrangler
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-network.ps1 deploy-worker
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 check-wrangler
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\tool\dev-browser.ps1 deploy-worker
 ```
 
 Do not commit secrets or Cloudflare credentials.
 
 If you need to add secrets to the Worker, use Cloudflare secret handling, not Git.
-`NETWORK_MCP_TOKEN` and `NETWORK_MCP_BROWSER_WORKER_TOKEN` must be configured as secrets or environment bindings, not committed.
-`NETWORK_MCP_AUTH0_ISSUER`, `NETWORK_MCP_OIDC_CLIENT_ID`, and `NETWORK_MCP_ALLOWED_EMAIL` are deployment configuration and should be set per environment.
+`BROWSER_MCP_TOKEN` and `BROWSER_MCP_BROWSER_WORKER_TOKEN` must be configured as secrets or environment bindings, not committed.
+`BROWSER_MCP_AUTH0_ISSUER`, `BROWSER_MCP_OIDC_CLIENT_ID`, and `BROWSER_MCP_ALLOWED_EMAIL` are deployment configuration and should be set per environment.
 
 ## Tunnel support
 
 For a local browser worker tunnel, `cloudflared.exe` is resolved in this order:
 
-1. `NETWORK_MCP_CLOUDFLARED_BIN`
+1. `BROWSER_MCP_CLOUDFLARED_BIN`
 2. `C:\Tools\cloudflared\cloudflared.exe`
 3. `cloudflared.exe` on `PATH`
 4. fail closed
@@ -41,7 +41,7 @@ For a local browser worker tunnel, `cloudflared.exe` is resolved in this order:
 Do not rely on `%TEMP%\cloudflared.exe`.
 
 If you switch to a named tunnel, keep the YAML template in Git and keep the credential JSON outside Git.
-If the browser worker is exposed through the tunnel, set `NETWORK_MCP_BROWSER_WORKER_TOKEN` and forward it from the caller.
+If the browser worker is exposed through the tunnel, set `BROWSER_MCP_BROWSER_WORKER_TOKEN` and forward it from the caller.
 
 See `ops/cloudflare/cloudflared.example.yml` for the template shape.
 Use `ops/cloudflare/cloudflared.named.example.yml` for the stable named tunnel cutover path.
