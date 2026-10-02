@@ -5,7 +5,7 @@ const definitions = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-
 const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 
 for (const token of [
-  "canonicalName: 'network.browser_bind'",
+  "canonicalName: 'browser.bind'",
   "capabilityName: 'network.browser_bind'",
   "targetId: z.string().min(1).optional()",
 ]) {

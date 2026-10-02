@@ -7,7 +7,8 @@ import {
   networkCapabilityAliases,
   networkCapabilityContract,
 } from "../mcp-server/src/capability-contract.js";
-import { createNetworkToolBundle } from "../mcp-server/src/network-tool-bundle.js";
+import { createNetworkToolBundle } from "../mcp-server/src/browser-tool-bundle.js";
+import { createNetworkCoreDomainToolDefinitions } from "../mcp-server/src/core-domain-tool-definitions.js";
 import { NetworkToolRegistry } from "../mcp-server/src/tool-registry.js";
 
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
@@ -23,8 +24,8 @@ assert.equal(networkCapabilityContract.schemaVersion, 2, "Network contract schem
 assert.equal(networkCapabilityContract.boundary.browserOwner, "console-mcp", "Console MCP must remain the browser runtime owner");
 assert.equal(networkCapabilityContract.boundary.executionOwner, "console-mcp", "Console MCP must own generic execution identity and lifecycle");
 assert.equal(networkCapabilityContract.boundary.orchestrationOwner, "console-mcp", "Console MCP must own generic orchestration");
-assert.equal(networkCapabilityContract.boundary.capabilityOwner, "network-mcp", "Network MCP must remain the capability owner");
-assert.equal(networkCapabilityContract.boundary.domainStateOwner, "network-mcp", "Network MCP must own browser/form domain state");
+assert.equal(networkCapabilityContract.boundary.capabilityOwner, "browser-mcp", "Browser MCP must remain the capability owner");
+assert.equal(networkCapabilityContract.boundary.domainStateOwner, "browser-mcp", "Browser MCP must own browser/form domain state");
 assert.equal(networkCapabilityContract.boundary.genericAsyncLifecycleOwnedByNetwork, false, "Network must not own a duplicate generic async lifecycle");
 assert.equal(networkCapabilityContract.boundary.genericExecutionLeaseOwnedByNetwork, false, "Network must not own duplicate generic execution leases");
 assert.equal(networkCapabilityContract.boundary.competingBrowserLaunchAllowed, false, "Network must not launch a competing browser in Console-owned mode");
@@ -91,9 +92,24 @@ for (const toolName of [
 }
 
 const registry = new NetworkToolRegistry("http://127.0.0.1:8791");
+const coreDomainPublicNames = createNetworkCoreDomainToolDefinitions().flatMap((tool) => [tool.canonicalName, ...tool.aliases]);
 const expectedPublicNames = new Set([
   ...publicContractTools.map((tool) => tool.name),
-  ...Object.keys(networkCapabilityAliases),
+  'browser.status',
+  'browser.restart',
+  'browser.kill',
+  'browser.health',
+  'browser.shared.status',
+  'browser.cdp.targets',
+  'browser.chatgpt.home.verify',
+  'browser.chatgpt.home.cleanup.plan',
+  'browser.chatgpt.home.cleanup',
+  'browser.surface.plan',
+  'browser.surface.execute',
+  'network.browser.status',
+  'network.browser.restart',
+  'network.browser.kill',
+  ...coreDomainPublicNames,
 ]);
 assert.deepEqual(
   new Set(registry.listTools()),
@@ -122,12 +138,15 @@ assert.deepEqual(
   "MCP bundle registration must equal the authoritative public contract surface",
 );
 
-for (const [alias, canonical] of Object.entries(networkCapabilityAliases)) {
-  const aliasRegistration = registered.find((item) => item.name === alias);
-  const canonicalRegistration = registered.find((item) => item.name === canonical);
-  assert.ok(aliasRegistration && canonicalRegistration, `missing alias registration: ${alias} -> ${canonical}`);
-  assert.equal(aliasRegistration.config, canonicalRegistration.config, `alias must reuse canonical MCP schema config: ${alias}`);
-  assert.equal(aliasRegistration.handler, canonicalRegistration.handler, `alias must reuse canonical MCP handler: ${alias}`);
+for (const tool of createNetworkCoreDomainToolDefinitions()) {
+  const canonicalRegistration = registered.find((item) => item.name === tool.canonicalName);
+  assert.ok(canonicalRegistration, `missing canonical Browser MCP registration: ${tool.canonicalName}`);
+  for (const alias of tool.aliases) {
+    const aliasRegistration = registered.find((item) => item.name === alias);
+    assert.ok(aliasRegistration, `missing supported legacy alias: ${alias} -> ${tool.canonicalName}`);
+    assert.equal(aliasRegistration.config, canonicalRegistration.config, `legacy alias must reuse canonical MCP schema config: ${alias}`);
+    assert.equal(aliasRegistration.handler, canonicalRegistration.handler, `legacy alias must reuse canonical MCP handler: ${alias}`);
+  }
 }
 
 console.log(

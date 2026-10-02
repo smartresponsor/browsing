@@ -7,7 +7,7 @@ const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", imp
 const contract = fs.readFileSync(new URL("../mcp-server/src/capability-contract.js", import.meta.url), "utf8");
 
 for (const token of [
-  "canonicalName: 'network.click'",
+  "canonicalName: 'browser.click'",
   "capabilityName: 'network.click'",
   "expectedTargetId: z.string().optional()",
   "expectedPageRevision: z.string().optional()",

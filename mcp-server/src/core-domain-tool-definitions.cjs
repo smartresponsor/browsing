@@ -9,7 +9,7 @@ const networkExecutionCorrelationSchema = z.object({
 function createNetworkCoreDomainToolDefinitions() {
   return Object.freeze([
     definition({
-      canonicalName: 'network.browser_targets',
+      canonicalName: 'browser.targets',
       consoleName: 'read_.web.browser.targets',
       route: '/browser-targets',
       capabilityName: 'network.browser_targets',
@@ -18,12 +18,12 @@ function createNetworkCoreDomainToolDefinitions() {
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'network.browser_bind',
+      canonicalName: 'browser.bind',
       consoleName: 'write.web.browser.bind',
       route: '/browser-bind',
       capabilityName: 'network.browser_bind',
       access: 'write',
-      description: 'Bind Network domain semantics to a specific Console-owned browser target by exact target identity or compatibility locator.',
+      description: 'Bind Browser MCP semantics to a specific Console-owned browser target by exact target identity or compatibility locator.',
       inputSchema: z.object({
         targetId: z.string().min(1).optional(),
         index: z.number().int().nonnegative().optional(),
@@ -32,30 +32,30 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.open',
+      canonicalName: 'browser.open',
       consoleName: 'write.web.target.open',
       route: '/open',
       capabilityName: 'network.open',
       access: 'write',
-      description: 'Navigate the Network-bound Console-owned browser target to an HTTP(S) URL.',
+      description: 'Navigate the bound Console-owned supervised browser target to any policy-allowed HTTP(S) URL.',
       inputSchema: z.object({
         url: z.string().url(),
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.job.open',
+      canonicalName: 'browser.job.open',
       consoleName: 'write.web.job.open',
       route: '/open-job',
       legacyName: 'network.open_job',
       capabilityName: 'network.open_job',
       access: 'write',
-      description: 'Open a normalized job URL through Network domain semantics.',
+      description: 'Open a policy-allowed job/career URL using the optional job profile; unknown public hosts remain supported through generic browser semantics.',
       inputSchema: z.object({
         url: z.string().url(),
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.chatgpt.snapshot',
+      canonicalName: 'browser.chatgpt.snapshot',
       consoleName: 'read_.web.chatgpt.snapshot',
       route: '/chatgpt-snapshot',
       legacyName: 'network.chatgpt_snapshot',
@@ -65,7 +65,7 @@ function createNetworkCoreDomainToolDefinitions() {
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'network.page_capture',
+      canonicalName: 'browser.page.capture',
       consoleName: 'read_.web.page.capture',
       route: '/page-capture',
       capabilityName: 'network.page_capture',
@@ -76,7 +76,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.wait_for_ready',
+      canonicalName: 'browser.page.wait',
       consoleName: 'read_.web.page.wait',
       route: '/wait-for-ready',
       capabilityName: 'network.wait_for_ready',
@@ -90,7 +90,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.inspect',
+      canonicalName: 'browser.form.inspect',
       consoleName: 'read_.web.form.inspect',
       route: '/inspect',
       capabilityName: 'network.inspect',
@@ -99,7 +99,7 @@ function createNetworkCoreDomainToolDefinitions() {
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'network.click',
+      canonicalName: 'browser.click',
       consoleName: 'write.web.page.click',
       route: '/click',
       capabilityName: 'network.click',
@@ -116,7 +116,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.form.extract',
+      canonicalName: 'browser.form.extract',
       consoleName: 'read_.web.form.extract',
       route: '/extract-form',
       legacyName: 'network.extract_form',
@@ -126,7 +126,7 @@ function createNetworkCoreDomainToolDefinitions() {
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'network.form.proposal.preview',
+      canonicalName: 'browser.form.proposal.preview',
       consoleName: 'write.web.form.proposal.preview',
       route: '/propose',
       legacyName: 'network.propose',
@@ -138,7 +138,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.form.fill',
+      canonicalName: 'browser.form.fill',
       consoleName: 'write.web.form.fill',
       route: '/fill-after-approval',
       legacyName: 'network.fill_after_approval',
@@ -157,7 +157,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.form.upload',
+      canonicalName: 'browser.form.upload',
       consoleName: 'write.web.form.upload',
       route: '/upload-artifact',
       legacyName: 'network.upload_artifact',
@@ -178,7 +178,7 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'network.form.review.snapshot',
+      canonicalName: 'browser.form.review.snapshot',
       consoleName: 'write.web.form.review.snapshot',
       route: '/review-before-submit',
       legacyName: 'network.review_before_submit',
@@ -188,7 +188,7 @@ function createNetworkCoreDomainToolDefinitions() {
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'network.submit_after_approval',
+      canonicalName: 'browser.form.submit',
       consoleName: 'write.web.form.submit',
       route: '/submit-after-approval',
       capabilityName: 'network.submit_after_approval',
@@ -219,18 +219,19 @@ function registerNetworkCoreDomainToolDefinitions(mcpServer, registry) {
     };
     const handler = async (input) => toolResult(await registry.callTool(tool.capabilityName, tool.toPayload(input)));
     mcpServer.registerTool(tool.canonicalName, config, handler);
-    if (tool.legacyName) {
-      mcpServer.registerTool(tool.legacyName, config, handler);
+    for (const alias of tool.aliases) {
+      mcpServer.registerTool(alias, config, handler);
     }
   }
 }
 
 function definition({ canonicalName, consoleName, route, legacyName = null, capabilityName, access, description, inputSchema, toPayload = identity }) {
+  const aliases = [...new Set([capabilityName, legacyName].filter(Boolean))];
   return Object.freeze({
     canonicalName,
     consoleName,
     route,
-    legacyName,
+    aliases: Object.freeze(aliases),
     capabilityName,
     access,
     description,

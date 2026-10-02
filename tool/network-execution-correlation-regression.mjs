@@ -11,7 +11,7 @@ for (const token of [
   "invocationId: z.string().min(1).max(200).optional()",
   "correlation: networkExecutionCorrelationSchema.optional()",
 ]) {
-  assert.equal(definitions.includes(token), true, `Network MCP correlation definition invariant missing: ${token}`);
+  assert.equal(definitions.includes(token), true, `Browser MCP correlation definition invariant missing: ${token}`);
 }
 
 for (const token of [

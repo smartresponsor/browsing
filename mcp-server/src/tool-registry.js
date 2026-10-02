@@ -3,12 +3,18 @@ import {
   listNetworkCapabilityToolNames,
   networkCapabilityAliases
 } from './capability-contract.js';
+import { createNetworkCoreDomainToolDefinitions } from './core-domain-tool-definitions.js';
 
 const workerCapabilityNames = Object.freeze(listNetworkCapabilityToolNames());
-const publicToolNames = Object.freeze([
+const coreDomainPublicNames = createNetworkCoreDomainToolDefinitions().flatMap((tool) => [tool.canonicalName, ...tool.aliases]);
+const publicToolNames = Object.freeze([...new Set([
   ...listNetworkCapabilityToolNames({ publicOnly: true }),
-  ...Object.keys(networkCapabilityAliases)
-]);
+  ...Object.keys(networkCapabilityAliases).filter((name) => name.startsWith('browser.')),
+  'network.browser.status',
+  'network.browser.restart',
+  'network.browser.kill',
+  ...coreDomainPublicNames
+])]);
 
 export class NetworkToolRegistry {
   constructor(workerUrl, browserWorkerToken = '') {
@@ -72,14 +78,14 @@ export class NetworkToolRegistry {
         path,
         error: normalizeError(error)
       },
-      recommendedAction: 'Start the Network browser worker before using Network MCP browser tools.'
+      recommendedAction: 'Start the Network browser worker before using Browser MCP browser tools.'
     };
   }
 
   async callTool(toolName, payload) {
     const route = getNetworkCapabilityRoute(toolName);
     if (!route) {
-      throw new Error(`Unknown network tool: ${toolName}`);
+      throw new Error(`Unknown Browser MCP tool: ${toolName}`);
     }
 
     return this.callWorker(route, payload);

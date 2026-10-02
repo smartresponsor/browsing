@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { NetworkToolRegistry } from "../mcp-server/src/tool-registry.js";
-import { createNetworkToolBundle } from "../mcp-server/src/network-tool-bundle.js";
+import { createNetworkToolBundle } from "../mcp-server/src/browser-tool-bundle.js";
 
 const registry = new NetworkToolRegistry("http://127.0.0.1:8791");
 const publicTools = registry.listTools();
@@ -10,13 +10,6 @@ const expectedCanonicalAliases = [
   "network.browser.status",
   "network.browser.restart",
   "network.browser.kill",
-  "network.job.open",
-  "network.form.fill",
-  "network.form.upload",
-  "network.chatgpt.snapshot",
-  "network.form.extract",
-  "network.form.review.snapshot",
-  "network.form.proposal.preview",
 ];
 
 const expectedMergedCapabilities = [
@@ -36,8 +29,11 @@ const expectedMergedCapabilities = [
   "network.submit_after_approval",
 ];
 
-assert.equal(publicTools.length, 36, "public Network MCP surface should preserve merged runtime capabilities plus canonical aliases");
 assert.equal(workerCapabilities.length, 28, "worker capability contract should preserve all merged worker routes");
+assert.equal(publicTools.length > workerCapabilities.length, true, "public Browser MCP surface should expose canonical browser.* names in addition to transitional network aliases");
+for (const name of ["browser.targets", "browser.bind", "browser.open", "browser.page.capture", "browser.page.wait", "browser.click", "browser.form.inspect", "browser.form.fill", "browser.form.upload", "browser.form.submit", "browser.job.open"]) {
+  assert.equal(publicTools.includes(name), true, `public Browser MCP surface must include canonical tool: ${name}`);
+}
 assert.equal(publicTools.includes("network.open_fresh"), false, "network.open_fresh must not be reported as a public MCP tool");
 assert.equal(publicTools.includes("network.connector_sync_execute"), false, "network.connector_sync_execute must remain an internal worker capability");
 assert.equal(workerCapabilities.includes("network.open_fresh"), true, "network.open_fresh must remain an internal worker capability");
@@ -50,7 +46,7 @@ for (const name of expectedMergedCapabilities) {
   assert.equal(publicTools.includes(name), true, `public surface must preserve merged capability: ${name}`);
 }
 for (const name of publicTools) {
-  if (expectedCanonicalAliases.includes(name)) {
+  if (expectedCanonicalAliases.includes(name) || name.startsWith("browser.")) {
     continue;
   }
   assert.equal(workerCapabilities.includes(name), true, `worker capability surface must retain public worker tool: ${name}`);
@@ -73,13 +69,13 @@ for (const [canonical, legacy] of [
   ["network.browser.status", "network.browser_status"],
   ["network.browser.restart", "network.browser_restart"],
   ["network.browser.kill", "network.browser_kill"],
-  ["network.job.open", "network.open_job"],
-  ["network.form.fill", "network.fill_after_approval"],
-  ["network.form.upload", "network.upload_artifact"],
-  ["network.chatgpt.snapshot", "network.chatgpt_snapshot"],
-  ["network.form.extract", "network.extract_form"],
-  ["network.form.review.snapshot", "network.review_before_submit"],
-  ["network.form.proposal.preview", "network.propose"],
+  ["browser.job.open", "network.open_job"],
+  ["browser.form.fill", "network.fill_after_approval"],
+  ["browser.form.upload", "network.upload_artifact"],
+  ["browser.chatgpt.snapshot", "network.chatgpt_snapshot"],
+  ["browser.form.extract", "network.extract_form"],
+  ["browser.form.review.snapshot", "network.review_before_submit"],
+  ["browser.form.proposal.preview", "network.propose"],
 ]) {
   const canonicalRegistration = registered.find((item) => item.name === canonical);
   const legacyRegistration = registered.find((item) => item.name === legacy);
