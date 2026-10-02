@@ -2,7 +2,7 @@
 
 ## Scope
 
-Supervised live acceptance against Walmart Careers using the Console-owned browser runtime and Network MCP domain capabilities.
+Supervised live acceptance against Walmart Careers using the Console-owned browser runtime and Browser MCP domain capabilities.
 
 No final application submission was performed.
 

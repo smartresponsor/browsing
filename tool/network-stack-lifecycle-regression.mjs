@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const source = fs.readFileSync(new URL("../tool/dev-network.d/60-stack-lifecycle.ps1", import.meta.url), "utf8");
-const supervisor = fs.readFileSync(new URL("../tool/dev-network.ps1", import.meta.url), "utf8");
+const supervisor = fs.readFileSync(new URL("../tool/dev-browser.ps1", import.meta.url), "utf8");
 
 for (const token of [
   "function Convert-StackComponentResult",

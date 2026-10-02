@@ -5,7 +5,7 @@ const worker = fs.readFileSync(new URL("../playwright-worker/src/worker.js", imp
 const envExample = fs.readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 
 for (const token of [
-  "NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000",
+  "BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000",
   "connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000)",
   "policy.externalAttachTimeoutMs) ? policy.externalAttachTimeoutMs : 15000",
 ]) {
@@ -13,7 +13,7 @@ for (const token of [
 }
 
 assert.equal(
-  envExample.includes("NETWORK_MCP_EXTERNAL_ATTACH_TIMEOUT_MS=15000"),
+  envExample.includes("BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS=15000"),
   true,
   "Documented shared-browser attach timeout must match the worker default",
 );

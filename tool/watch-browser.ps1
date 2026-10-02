@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$DevNetwork = Join-Path $PSScriptRoot 'dev-network.ps1'
+$DevNetwork = Join-Path $PSScriptRoot 'dev-browser.ps1'
 $LogDir = Join-Path $Root 'var\log'
 $RunDir = Join-Path $Root 'var\run'
 $WatchdogLoopLogFile = Join-Path $LogDir 'network-watchdog-loop.ndjson'
