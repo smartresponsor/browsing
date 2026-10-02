@@ -39,3 +39,4 @@ cloudflare-worker/.wrangler/
 config/secret/secret.map.local.json
 config/secret/*.local.json
 config/secret/cache/
+.console-mcp/
