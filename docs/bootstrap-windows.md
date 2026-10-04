@@ -13,7 +13,7 @@ This is the bootstrap path for `browser-mcp` on Windows.
 ## Install
 
 ```powershell
-cd D:\PhpstormProjects\www\mcp\browser-mcp
+cd D:\PhpstormProjects\www\mcp\Browsing
 npm install
 npm --prefix .\mcp-server install
 npm --prefix .\playwright-worker install

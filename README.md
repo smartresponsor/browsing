@@ -1,6 +1,6 @@
-# browser-mcp
+# Browsing
 
-`browser-mcp` is the supervised browser/network capability consumer in the canonical MCP workspace.
+`Browsing` is the repository for the supervised browser/network capability consumer in the canonical MCP workspace. The runtime/service compatibility identifier remains `browser-mcp`.
 
 It provides browser/form domain semantics while Console MCP remains the ChatGPT-facing connector and generic execution/runtime owner.
 
@@ -77,7 +77,7 @@ It defines Console/Network ownership, risk classes, approvals, binding, replay p
 Windows:
 
 ```powershell
-cd D:\PhpstormProjects\www\mcp\browser-mcp
+cd D:\PhpstormProjects\www\mcp\Browsing
 npm run typecheck
 npm run test
 ```

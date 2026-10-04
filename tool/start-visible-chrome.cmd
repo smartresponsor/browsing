@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "ROOT=D:\PhpstormProjects\www\mcp\browser-mcp"
+set "ROOT=D:\PhpstormProjects\www\mcp\Browsing"
 set "PORT=9223"
 set "PROFILE=%ROOT%\var\browser\profile"
 set "URL=http://127.0.0.1:8791/healthz"

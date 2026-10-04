@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   DEFAULT_WORKER_PORT,
@@ -61,7 +62,8 @@ function parseBrowserWorkerToken() {
 }
 
 function getSharedBrowserRoot() {
-  return path.resolve(String(process.env.BROWSER_MCP_SHARED_BROWSER_ROOT || path.join(process.cwd(), '..', 'mcp', 'browser')).trim());
+  const defaultSharedBrowserRoot = fileURLToPath(new URL('../../../browser/', import.meta.url));
+  return path.resolve(String(process.env.BROWSER_MCP_SHARED_BROWSER_ROOT || defaultSharedBrowserRoot).trim());
 }
 
 function getDefaultUserDataDir() {

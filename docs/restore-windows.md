@@ -12,8 +12,8 @@ This is the minimal restore path for `browser-mcp`.
 ## 2. Clone the repo
 
 ```powershell
-git clone <repo-url> D:\PhpstormProjects\www\mcp\browser-mcp
-cd D:\PhpstormProjects\www\mcp\browser-mcp
+git clone <repo-url> D:\PhpstormProjects\www\mcp\Browsing
+cd D:\PhpstormProjects\www\mcp\Browsing
 ```
 
 ## 3. Install dependencies
