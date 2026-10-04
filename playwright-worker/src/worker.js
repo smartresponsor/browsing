@@ -128,7 +128,7 @@ async function getDevToolsStatus(policy = getPolicy()) {
 function getPolicy() {
   const headless = String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() === 'true';
   const browserChannel = normalizeBrowserChannel(process.env.BROWSER_MCP_BROWSER_CHANNEL);
-  const externalVisibleBrowser = process.platform === 'win32' && !headless && String(
+  const externalVisibleBrowser = !headless && String(
     process.env.BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER ??
       process.env.BROWSER_MCP_EXTERNAL_VISIBLE_CHROME ??
       'true'

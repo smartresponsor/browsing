@@ -74,11 +74,26 @@ It defines Console/Network ownership, risk classes, approvals, binding, replay p
 
 ## Local validation
 
+Windows:
+
 ```powershell
 cd D:\PhpstormProjects\www\mcp\browser-mcp
 npm run typecheck
 npm run test
 ```
+
+Ubuntu/Linux after a normal clone:
+
+```bash
+npm ci
+npm --prefix mcp-server ci
+npm --prefix playwright-worker ci
+npm --prefix playwright-worker run install:browsers
+npm run typecheck
+npm run test
+```
+
+For the canonical supervised runtime, point `BROWSER_MCP_REMOTE_DEBUGGING_PORT` at the Console-owned CDP endpoint (normally `9223`) and keep `BROWSER_MCP_EXTERNAL_VISIBLE_BROWSER=true`. The CDP attach path is supported on Windows and Linux. Windows-only `dev:*` supervisor scripts remain compatibility/operations helpers rather than a runtime requirement.
 
 Operational lifecycle commands remain available for compatibility/local validation, but normal browser ownership belongs to Console MCP.
 
