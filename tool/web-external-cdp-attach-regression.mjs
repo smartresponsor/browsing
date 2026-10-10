@@ -18,5 +18,5 @@ assert.equal(
   "Documented shared-browser attach timeout must match the worker default",
 );
 
-console.log("Network external CDP attach timeout regression passed.");
+console.log("Web external CDP attach timeout regression passed.");
 

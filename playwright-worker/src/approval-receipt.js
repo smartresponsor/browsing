@@ -59,7 +59,7 @@ export async function consumeApprovalReceipt({
     record = JSON.parse(await readFile(filePath, 'utf8'));
   } catch (_error) {
     throw receiptError(
-      'NETWORK_APPROVAL_RECEIPT_NOT_FOUND',
+      'WEB_APPROVAL_RECEIPT_NOT_FOUND',
       'Approval receipt was not found. Request a fresh proposal or review receipt.',
       { approvalReceiptId: receiptId },
     );
@@ -86,7 +86,7 @@ export async function consumeApprovalReceipt({
     }) + '\n', 'utf8');
   } catch (_error) {
     throw receiptError(
-      'NETWORK_APPROVAL_RECEIPT_REPLAYED',
+      'WEB_APPROVAL_RECEIPT_REPLAYED',
       'Approval receipt has already been consumed or consumption is already in progress.',
       { approvalReceiptId: receiptId },
     );
@@ -123,21 +123,21 @@ export function normalizeFillApprovalOperations(fields) {
 
 function validateRecord(record, expected) {
   if (!record || typeof record !== 'object' || record.schemaVersion !== 1) {
-    throw receiptError('NETWORK_APPROVAL_RECEIPT_INVALID', 'Approval receipt record is invalid.');
+    throw receiptError('WEB_APPROVAL_RECEIPT_INVALID', 'Approval receipt record is invalid.');
   }
   if (record.id !== expected.id) {
-    throw receiptError('NETWORK_APPROVAL_RECEIPT_INVALID', 'Approval receipt identity does not match its record.');
+    throw receiptError('WEB_APPROVAL_RECEIPT_INVALID', 'Approval receipt identity does not match its record.');
   }
   if (record.consumedAt) {
     throw receiptError(
-      'NETWORK_APPROVAL_RECEIPT_REPLAYED',
+      'WEB_APPROVAL_RECEIPT_REPLAYED',
       'Approval receipt was already consumed.',
       { approvalReceiptId: expected.id, consumedAt: record.consumedAt },
     );
   }
   if (Date.parse(record.expiresAt) <= Date.now()) {
     throw receiptError(
-      'NETWORK_APPROVAL_RECEIPT_EXPIRED',
+      'WEB_APPROVAL_RECEIPT_EXPIRED',
       'Approval receipt expired. Request a fresh proposal or review receipt.',
       { approvalReceiptId: expected.id, expiresAt: record.expiresAt },
     );
@@ -155,7 +155,7 @@ function validateRecord(record, expected) {
   for (const [key, value] of checks) {
     if (record[key] !== value) {
       throw receiptError(
-        'NETWORK_APPROVAL_STALE',
+        'WEB_APPROVAL_STALE',
         `Approval receipt no longer matches current ${key}.`,
         { approvalReceiptId: expected.id, mismatch: key },
       );
@@ -167,7 +167,7 @@ function normalizeReceiptId(value) {
   const id = String(value || '').trim();
   if (!RECEIPT_ID_PATTERN.test(id)) {
     throw receiptError(
-      'NETWORK_APPROVAL_RECEIPT_REQUIRED',
+      'WEB_APPROVAL_RECEIPT_REQUIRED',
       'A valid approvalReceiptId is required. Request a fresh proposal or review receipt.',
     );
   }
@@ -191,7 +191,7 @@ function publicReceipt(record) {
 function requireString(value, name) {
   const normalized = String(value || '').trim();
   if (!normalized) {
-    throw receiptError('NETWORK_APPROVAL_RECEIPT_INVALID', `${name} is required for approval receipt binding.`);
+    throw receiptError('WEB_APPROVAL_RECEIPT_INVALID', `${name} is required for approval receipt binding.`);
   }
   return normalized;
 }
@@ -199,7 +199,7 @@ function requireString(value, name) {
 function requireHash(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(normalized)) {
-    throw receiptError('NETWORK_APPROVAL_RECEIPT_INVALID', 'Approval payload hash must be a SHA-256 hex string.');
+    throw receiptError('WEB_APPROVAL_RECEIPT_INVALID', 'Approval payload hash must be a SHA-256 hex string.');
   }
   return normalized;
 }
@@ -211,7 +211,7 @@ function normalizeOptionalString(value) {
 
 function receiptError(status, message, evidence = {}) {
   const error = new Error(message);
-  error.networkStatus = status;
+  error.webStatus = status;
   error.evidence = evidence;
   return error;
 }

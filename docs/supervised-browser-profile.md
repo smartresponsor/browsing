@@ -1,6 +1,6 @@
 # Supervised Browser Profile
 
-The network worker uses a persistent Playwright browser profile for legitimate session continuity during supervised browser work.
+The web worker uses a persistent Playwright browser profile for legitimate session continuity during supervised browser work.
 
 This is not a bypass mechanism. CAPTCHA, two-factor authentication, security challenges, and final submit decisions remain manual.
 

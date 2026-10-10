@@ -7,11 +7,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$DevNetwork = Join-Path $PSScriptRoot 'dev-browser.ps1'
+$DevWeb = Join-Path $PSScriptRoot 'dev-browser.ps1'
 $LogDir = Join-Path $Root 'var\log'
 $RunDir = Join-Path $Root 'var\run'
-$WatchdogLoopLogFile = Join-Path $LogDir 'network-watchdog-loop.ndjson'
-$WatchdogLoopStateFile = Join-Path $RunDir 'network-watchdog-loop-state.json'
+$WatchdogLoopLogFile = Join-Path $LogDir 'web-watchdog-loop.ndjson'
+$WatchdogLoopStateFile = Join-Path $RunDir 'web-watchdog-loop-state.json'
 
 function Ensure-WatchdogDirectories {
     foreach ($path in @($LogDir, $RunDir)) {
@@ -30,7 +30,7 @@ function Write-WatchdogLoopEvent {
 function Invoke-WatchdogTick {
     $startedAt = Get-Date
     try {
-        $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $DevNetwork watch-tick
+        $raw = & pwsh -NoProfile -ExecutionPolicy Bypass -File $DevWeb watch-tick
         $parsed = $null
         try {
             $parsed = $raw | ConvertFrom-Json

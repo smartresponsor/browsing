@@ -52,7 +52,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $PSScriptRoot
-$NetworkRoot = $Root
+$WebRoot = $Root
 $WorkerRoot = Join-Path $Root 'playwright-worker'
 $McpRoot = Join-Path $Root 'mcp-server'
 $CloudflareWorkerRoot = Join-Path $Root 'cloudflare-worker'
@@ -73,17 +73,17 @@ $NamedTunnelErrFile = Join-Path $LogDir 'cloudflared-named.err.log'
 $StartupTaskName = 'browser-mcp-dev'
 $McpStartupTaskName = 'browser-mcp-server'
 $StartupTaskPath = '\'
-$RuntimeStateFile = Join-Path $RunDir 'network-runtime.json'
-$WatchdogStateFile = Join-Path $RunDir 'network-watchdog-state.json'
-$WatchdogLogFile = Join-Path $LogDir 'network-watchdog.ndjson'
+$RuntimeStateFile = Join-Path $RunDir 'web-runtime.json'
+$WatchdogStateFile = Join-Path $RunDir 'web-watchdog-state.json'
+$WatchdogLogFile = Join-Path $LogDir 'web-watchdog.ndjson'
 $DefaultMcpPublicOrigin = ''
-$LegacySmartresponsorOrigin = 'https://network.smartresponsor.com'
+$LegacySmartresponsorOrigin = 'https://web.smartresponsor.com'
 $DefaultSharedBrowserRoot = Join-Path (Split-Path -Parent $Root) 'browser'
 $DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
 $DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
 $DefaultSharedBrowserLogDir = Join-Path $DefaultSharedBrowserRoot 'log'
 $SharedBrowserRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-runtime.json'
-$NetworkBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-mcp-browser-client.json'
+$WebBrowserClientRuntimeFile = Join-Path $DefaultSharedBrowserRunDir 'browser-mcp-browser-client.json'
 $SharedBrowserOwnerScript = Join-Path $Root 'tool\shared-browser.ps1'
 $McpWorkspaceRoot = Split-Path -Parent $Root
 $SharedSecretRuntime = Join-Path $McpWorkspaceRoot 'AwsSecretContract\tool\secret-runtime.ps1'
@@ -91,22 +91,22 @@ $RequestedSupervisorCommand = $Command
 if (Test-Path -LiteralPath $SharedSecretRuntime -PathType Leaf) {
     . $SharedSecretRuntime -Command export-env -Consumer browser-mcp -IncludePrevious
 }
-$Root = $NetworkRoot
+$Root = $WebRoot
 $Command = $RequestedSupervisorCommand
 
-. (Join-Path $PSScriptRoot 'dev-network.d\20-process-support.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\25-runtime-config.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\27-command-resolution.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\28-shared-browser-support.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\30-runtime-state.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\35-policy-state.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\40-worker-lifecycle.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\45-mcp-lifecycle.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\47-mcp-persistent-task.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\50-quick-tunnel-lifecycle.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\55-named-tunnel-lifecycle.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\60-stack-lifecycle.ps1')
-. (Join-Path $PSScriptRoot 'dev-network.d\65-worker-request.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\20-process-support.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\25-runtime-config.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\27-command-resolution.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\28-shared-browser-support.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\30-runtime-state.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\35-policy-state.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\40-worker-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\45-mcp-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\47-mcp-persistent-task.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\50-quick-tunnel-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\55-named-tunnel-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\60-stack-lifecycle.ps1')
+. (Join-Path $PSScriptRoot 'dev-web.d\65-worker-request.ps1')
 
 if (-not (Get-Item -Path Env:BROWSER_MCP_PUBLIC_ORIGIN -ErrorAction SilentlyContinue)) {
     Set-Item -Path Env:BROWSER_MCP_PUBLIC_ORIGIN -Value (Get-PublicOrigin)
@@ -322,7 +322,7 @@ function Invoke-McpSmoke {
             protocolVersion = '2025-11-25'
             capabilities = @{}
             clientInfo = @{
-                name = 'browser-mcp-dev-network'
+                name = 'browser-mcp-dev-web'
                 version = '0.1.0'
             }
         }
@@ -347,7 +347,7 @@ function Invoke-McpSmoke {
     $toolsBodyParsed = $null
     try { $initializeBodyParsed = $initialize.Content | ConvertFrom-Json } catch { $initializeBodyParsed = $initialize.Content }
     try { $toolsBodyParsed = $tools.Content | ConvertFrom-Json } catch { $toolsBodyParsed = $tools.Content }
-    $requiredTools = @('network.open', 'network.browser_cdp_targets', 'network.browser_cdp_verify_chatgpt_home', 'network.browser_cdp_cleanup_plan_chatgpt_home', 'network.browser_cdp_cleanup_chatgpt_home', 'network.surface_plan', 'network.surface_execute')
+    $requiredTools = @('web.open', 'web.browser_cdp_targets', 'web.browser_cdp_verify_chatgpt_home', 'web.browser_cdp_cleanup_plan_chatgpt_home', 'web.browser_cdp_cleanup_chatgpt_home', 'web.surface_plan', 'web.surface_execute')
     $missingTools = @($requiredTools | Where-Object { -not $tools.Content.Contains($_) })
     $toolsResponseHasRequiredTools = $missingTools.Count -eq 0
 
@@ -588,7 +588,7 @@ function Save-SharedBrowserRuntimeSnapshot {
         external_cdp_attached = $visibilityCheck.external_cdp_attached
         updated_at = (Get-Date).ToUniversalTime().ToString('o')
     }
-    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $NetworkBrowserClientRuntimeFile -Encoding utf8
+    $registry | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $WebBrowserClientRuntimeFile -Encoding utf8
 }
 
 function Save-RuntimeSnapshot {

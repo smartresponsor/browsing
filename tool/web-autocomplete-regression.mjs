@@ -29,5 +29,5 @@ assert.equal(
   "Autocomplete mutation must not introduce fuzzy matching.",
 );
 
-console.log("Network autocomplete regression passed.");
+console.log("Web autocomplete regression passed.");
 

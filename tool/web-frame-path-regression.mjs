@@ -41,7 +41,7 @@ for (const token of [
   "framePath,",
   "async function locatorForFieldSnapshot(target, field)",
   "const frame = resolveFrameByPath(target, framePath)",
-  "'NETWORK_FRAME_STALE'",
+  "'WEB_FRAME_STALE'",
   "await locatorForFieldSnapshot(target, field)",
   "const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame()",
   "optionFrame.getByRole('option', { name: desired, exact: true })",
@@ -49,5 +49,5 @@ for (const token of [
   assert.equal(worker.includes(token), true, `Iframe semantic-model invariant missing: ${token}`);
 }
 
-console.log("Network iframe frame-path regression passed.");
+console.log("Web iframe frame-path regression passed.");
 

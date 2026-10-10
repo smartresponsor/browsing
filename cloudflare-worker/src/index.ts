@@ -31,7 +31,7 @@ type McpTool = {
 
 const MCP_TOOLS: McpTool[] = [
   {
-    name: 'network.health_full',
+    name: 'web.health_full',
     description: 'Run deep supervised browser diagnostics including worker, browser, target, profile, and DevTools reachability.',
     route: '/health-full',
     inputSchema: {
@@ -41,7 +41,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.shared_browser_status',
+    name: 'web.shared_browser_status',
     description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
     route: '/shared-browser-status',
     inputSchema: {
@@ -51,7 +51,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_cdp_targets',
+    name: 'web.browser_cdp_targets',
     description: 'List raw shared browser CDP targets without attaching through Playwright or opening pages.',
     route: '/browser-cdp-targets',
     inputSchema: {
@@ -61,7 +61,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_cdp_verify_chatgpt_home',
+    name: 'web.browser_cdp_verify_chatgpt_home',
     description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
     route: '/browser-cdp-verify-chatgpt-home',
     inputSchema: {
@@ -76,7 +76,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_cdp_cleanup_plan_chatgpt_home',
+    name: 'web.browser_cdp_cleanup_plan_chatgpt_home',
     description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets.',
     route: '/browser-cdp-cleanup-plan-chatgpt-home',
     inputSchema: {
@@ -90,7 +90,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_cdp_cleanup_chatgpt_home',
+    name: 'web.browser_cdp_cleanup_chatgpt_home',
     description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmCleanup, then verify conversation tabs were preserved.',
     route: '/browser-cdp-cleanup-chatgpt-home',
     inputSchema: {
@@ -105,7 +105,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.surface_plan',
+    name: 'web.surface_plan',
     description: 'Build a read-only publication update plan for browser-mcp.',
     route: '/connector-sync-plan',
     inputSchema: {
@@ -119,7 +119,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.surface_execute',
+    name: 'web.surface_execute',
     description: 'Run the approved publication update for browser-mcp.',
     route: '/connector-sync-execute',
     inputSchema: {
@@ -134,7 +134,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_targets',
+    name: 'web.browser_targets',
     description: 'List supervised browser pages with stable indexes, URLs, titles, and active-page identity.',
     route: '/browser-targets',
     inputSchema: {
@@ -144,7 +144,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.browser_bind',
+    name: 'web.browser_bind',
     description: 'Bind the supervised worker to a specific browser page by index, exact URL, or URL fragment.',
     route: '/browser-bind',
     inputSchema: {
@@ -158,7 +158,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.open',
+    name: 'web.open',
     description: 'Open a target URL in the supervised browser worker.',
     route: '/open',
     inputSchema: {
@@ -171,7 +171,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.open_job',
+    name: 'web.open_job',
     description: 'Open a normalized job URL in the supervised browser worker.',
     route: '/open-job',
     inputSchema: {
@@ -184,7 +184,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.click',
+    name: 'web.click',
     description: 'Click a non-final visible button or link in the supervised browser worker.',
     route: '/click',
     inputSchema: {
@@ -198,7 +198,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.page_capture',
+    name: 'web.page_capture',
     description: 'Capture the current page URL, title, visible text hash, form hash, submit candidates, and optional screenshot review artifact.',
     route: '/page-capture',
     inputSchema: {
@@ -210,8 +210,8 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.wait_for_ready',
-    description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, network idle, or mutation quietness.',
+    name: 'web.wait_for_ready',
+    description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, web idle, or mutation quietness.',
     route: '/wait-for-ready',
     inputSchema: {
       type: 'object',
@@ -225,7 +225,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.inspect',
+    name: 'web.inspect',
     description: 'Inspect visible form fields in the current page.',
     route: '/inspect',
     inputSchema: {
@@ -235,7 +235,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.extract_form',
+    name: 'web.extract_form',
     description: 'Extract the current form field snapshot.',
     route: '/extract-form',
     inputSchema: {
@@ -245,7 +245,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.propose',
+    name: 'web.propose',
     description: 'Produce supervised answer proposals before filling.',
     route: '/propose',
     inputSchema: {
@@ -264,7 +264,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.fill_after_approval',
+    name: 'web.fill_after_approval',
     description: 'Fill approved fields only after explicit approval.',
     route: '/fill-after-approval',
     inputSchema: {
@@ -285,7 +285,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.review_before_submit',
+    name: 'web.review_before_submit',
     description: 'Capture a manual review artifact before any final submit.',
     route: '/review-before-submit',
     inputSchema: {
@@ -295,7 +295,7 @@ const MCP_TOOLS: McpTool[] = [
     }
   },
   {
-    name: 'network.submit_after_approval',
+    name: 'web.submit_after_approval',
     description: 'Perform a final submit/destructive click only after explicit approval and optional review snapshot hash validation.',
     route: '/submit-after-approval',
     inputSchema: {
@@ -390,7 +390,7 @@ function getMcpDebugInfo(env: Env) {
       oidcClientIdConfigured,
       allowedEmailConfigured
     },
-    schemaOwner: 'upstream-mcp-server', networkMcpServerUrlConfigured: Boolean(getMcpServerUrl(env)), upstreamTokenConfigured: Boolean(getRequiredEnvValue(env, 'BROWSER_MCP_UPSTREAM_TOKEN')), networkWorkerUrlConfigured: Boolean(env.BROWSER_MCP_WORKER_URL || env.CAREER_WORKER_URL)
+    schemaOwner: 'upstream-mcp-server', webMcpServerUrlConfigured: Boolean(getMcpServerUrl(env)), upstreamTokenConfigured: Boolean(getRequiredEnvValue(env, 'BROWSER_MCP_UPSTREAM_TOKEN')), webWorkerUrlConfigured: Boolean(env.BROWSER_MCP_WORKER_URL || env.CAREER_WORKER_URL)
   };
 }
 

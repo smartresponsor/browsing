@@ -57,21 +57,21 @@ export function classifyHumanBoundary({
   if ((hasPasswordField && (loginText || loginUrl)) || (loginUrl && hasCredentialIdentifierField)) {
     return {
       type: 'login_required',
-      requestedAction: 'Complete login manually in the bound browser target. Network will not read or enter credentials.'
+      requestedAction: 'Complete login manually in the bound browser target. Web will not read or enter credentials.'
     };
   }
 
   if (String(alertDialogText || '').trim()) {
     return {
       type: 'unexpected_modal',
-      requestedAction: 'Review and resolve the blocking alert dialog manually before Network continues.'
+      requestedAction: 'Review and resolve the blocking alert dialog manually before Web continues.'
     };
   }
 
   if (unsupportedControl && typeof unsupportedControl === 'object') {
     return {
       type: 'unsupported_control',
-      requestedAction: 'Complete or resolve the unsupported control manually, then re-inspect the form before Network resumes.'
+      requestedAction: 'Complete or resolve the unsupported control manually, then re-inspect the form before Web resumes.'
     };
   }
 

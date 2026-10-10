@@ -11,15 +11,15 @@ import {
 
 assert.throws(
   () => normalizeArtifactRef("C:\\Users\\example\\resume.pdf"),
-  (error) => error?.networkStatus === "NETWORK_UPLOAD_ARTIFACT_REF_INVALID",
+  (error) => error?.webStatus === "WEB_UPLOAD_ARTIFACT_REF_INVALID",
 );
 assert.throws(
   () => normalizeArtifactRef("../resume.pdf"),
-  (error) => error?.networkStatus === "NETWORK_UPLOAD_ARTIFACT_REF_INVALID",
+  (error) => error?.webStatus === "WEB_UPLOAD_ARTIFACT_REF_INVALID",
 );
 assert.equal(normalizeArtifactRef("candidate/resume.pdf"), path.join("candidate", "resume.pdf"));
 
-const root = await mkdtemp(path.join(os.tmpdir(), "network-upload-"));
+const root = await mkdtemp(path.join(os.tmpdir(), "web-upload-"));
 try {
   await mkdir(path.join(root, "candidate"), { recursive: true });
   const payload = Buffer.from("safe upload fixture\n", "utf8");
@@ -46,7 +46,7 @@ try {
       uploadRoot: root,
       expectedSha256: "0".repeat(64),
     }),
-    (error) => error?.networkStatus === "NETWORK_UPLOAD_ARTIFACT_HASH_MISMATCH",
+    (error) => error?.webStatus === "WEB_UPLOAD_ARTIFACT_HASH_MISMATCH",
   );
 
   const blockedPath = path.join(root, "candidate", "script.exe");
@@ -56,7 +56,7 @@ try {
       artifactRef: "candidate/script.exe",
       uploadRoot: root,
     }),
-    (error) => error?.networkStatus === "NETWORK_UPLOAD_ARTIFACT_TYPE_BLOCKED",
+    (error) => error?.webStatus === "WEB_UPLOAD_ARTIFACT_TYPE_BLOCKED",
   );
 
   const largePath = path.join(root, "candidate", "large.pdf");
@@ -67,11 +67,11 @@ try {
       uploadRoot: root,
       maxBytes: 1024,
     }),
-    (error) => error?.networkStatus === "NETWORK_UPLOAD_ARTIFACT_TOO_LARGE",
+    (error) => error?.webStatus === "WEB_UPLOAD_ARTIFACT_TOO_LARGE",
   );
 } finally {
   await rm(root, { recursive: true, force: true });
 }
 
-console.log("Network guarded upload artifact regression passed.");
+console.log("Web guarded upload artifact regression passed.");
 

@@ -1,6 +1,6 @@
 # Architecture
 
-`browser-mcp` is the supervised browser/network capability consumer in the MCP workspace.
+`browser-mcp` is the supervised browser/web capability consumer in the MCP workspace.
 
 Its canonical role is to provide browser/form semantics on top of Console-owned execution infrastructure.
 
@@ -16,7 +16,7 @@ Console MCP owns:
 
 Browser MCP owns:
 
-- browser/network domain semantics;
+- browser/web domain semantics;
 - target identity and page/form revisions;
 - semantic form extraction;
 - type-specific field mutations and postcondition verification;
@@ -31,7 +31,7 @@ Browser MCP must not introduce a competing generic orchestration engine or gener
 
 The repository still contains three runtime components:
 
-- `playwright-worker/src/worker.js` — local Network browser capability worker on port `8791`;
+- `playwright-worker/src/worker.js` — local Web browser capability worker on port `8791`;
 - `mcp-server/src/server.js` — compatibility/local-validation MCP surface on port `8792`;
 - `cloudflare-worker/src/index.ts` — legacy/public gateway and proxy surface.
 
@@ -41,13 +41,13 @@ The local `mcp-server` is not the canonical ChatGPT-facing connector. The canoni
 
 The canonical browser runtime is Console-owned.
 
-Network attaches to the shared supervised browser over CDP and must not launch a competing browser in normal Console-owned mode.
+Web attaches to the shared supervised browser over CDP and must not launch a competing browser in normal Console-owned mode.
 
 Fallback standalone browser behavior may remain only for bounded local development/compatibility testing and must not redefine runtime ownership.
 
 ## Supervised domain flow
 
-The Network domain flow is intentionally supervised:
+The Web domain flow is intentionally supervised:
 
 1. inspect/bind an explicit target;
 2. capture page/form revisions;
@@ -64,7 +64,7 @@ The Network domain flow is intentionally supervised:
 
 - Console MCP is the execution/orchestration owner.
 - Browser MCP is the capability/domain-state owner.
-- Do not create Network-owned generic `runId`, process leases, async start/status/output/stop, or retry/cancel engines.
+- Do not create Web-owned generic `runId`, process leases, async start/status/output/stop, or retry/cancel engines.
 - Do not launch a second browser when Console-owned CDP runtime is available.
 - Bind mutations to explicit target/page/form revisions and fail closed on stale state.
 - Keep credentials manual and never log password values.
@@ -89,4 +89,4 @@ The Network domain flow is intentionally supervised:
 
 - `npm run typecheck` validates worker/server syntax.
 - `npm run test` validates capability symmetry, revision semantics, semantic form behavior, guarded uploads, registry symmetry, and persistent-runtime compatibility.
-- Console `schema:validate` independently verifies the Network/Console ownership contract.
+- Console `schema:validate` independently verifies the Web/Console ownership contract.

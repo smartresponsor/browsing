@@ -23,5 +23,5 @@ for (const token of [
   assert.equal(worker.includes(token), true, `Radio-group invariant missing: ${token}`);
 }
 
-console.log("Network radio-group regression passed.");
+console.log("Web radio-group regression passed.");
 

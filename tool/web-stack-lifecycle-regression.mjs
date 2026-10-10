@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const source = fs.readFileSync(new URL("../tool/dev-network.d/60-stack-lifecycle.ps1", import.meta.url), "utf8");
+const source = fs.readFileSync(new URL("../tool/dev-web.d/60-stack-lifecycle.ps1", import.meta.url), "utf8");
 const supervisor = fs.readFileSync(new URL("../tool/dev-browser.ps1", import.meta.url), "utf8");
 
 for (const token of [
@@ -31,5 +31,5 @@ for (const token of [
   assert.equal(supervisor.includes(token), true, `Worker-only restart invariant missing: ${token}`);
 }
 
-console.log("Network stack lifecycle normalization regression passed.");
+console.log("Web stack lifecycle normalization regression passed.");
 

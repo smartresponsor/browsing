@@ -22,11 +22,11 @@ Use this as a bounded context inside `browser-mcp`, not as a LinkedIn scraper.
 
 ## Supervised tools
 
-- `network.open`
-- `network.inspect`
-- `network.extract_form`
-- `network.propose`
-- `network.fill_after_approval`
-- `network.review_before_submit`
+- `web.open`
+- `web.inspect`
+- `web.extract_form`
+- `web.propose`
+- `web.fill_after_approval`
+- `web.review_before_submit`
 
 Final submit is intentionally not implemented in this layer.
