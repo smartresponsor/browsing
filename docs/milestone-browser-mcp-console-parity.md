@@ -28,18 +28,18 @@ The target is not literal tool-count parity with Console MCP. The target is pari
 The live Console bridge reports:
 
 - browser runtime owner: `console-mcp`;
-- Network capability owner: `browser-mcp`;
-- browser launch by Network: disabled at the bridge boundary;
-- Network uses Console-owned DevTools ports;
+- Web capability owner: `browser-mcp`;
+- browser launch by Web: disabled at the bridge boundary;
+- Web uses Console-owned DevTools ports;
 - active DevTools port: 9223;
-- Network capability contract source:
+- Web capability contract source:
   `D:\PhpstormProjects\www\mcp\browser-mcp\mcp-server\src\capability-contract.js`.
 
 This is the correct long-term ownership direction and should be preserved.
 
 ### Current capability surface
 
-The current Network capability contract exposes 27 tools: 15 read and 12 write.
+The current Web capability contract exposes 27 tools: 15 read and 12 write.
 
 Important product capabilities already exist:
 
@@ -61,7 +61,7 @@ Important product capabilities already exist:
 
 ### Canonical-repository convergence
 
-The canonical MCP workspace is `D:\PhpstormProjects\www\mcp`, and the authoritative Network repository is `D:\PhpstormProjects\www\mcp\browser-mcp`.
+The canonical MCP workspace is `D:\PhpstormProjects\www\mcp`, and the authoritative Web repository is `D:\PhpstormProjects\www\mcp\browser-mcp`.
 
 A legacy mirror remained at `D:\PhpstormProjects\www\browser-mcp` and accumulated unique browser/CDP work after the original mirror-first migration. That history has now been merged back into the canonical repository. The legacy root copy is evacuation-only and must not receive further development.
 
@@ -73,7 +73,7 @@ This boundary is architectural, not optional.
 | --- | --- | --- |
 | Browser process/runtime lifecycle | Console MCP | Launch/restart/stop, CDP availability, resource hygiene. |
 | Generic task/run identity | Console MCP | Durable taskId/runId and execution correlation. |
-| Async start/status/output/stop | Console MCP | Network must not duplicate this substrate. |
+| Async start/status/output/stop | Console MCP | Web must not duplicate this substrate. |
 | Capacity/semaphore/leases | Console MCP | Includes heavy execution and per-task execution ownership. |
 | Retry/cancel/timeout policy | Console MCP | Generic orchestration responsibility. |
 | Target identity | Browser MCP | Exact CDP target identity used by browser semantics. |
@@ -82,11 +82,11 @@ This boundary is architectural, not optional.
 | Field mutation/postconditions | Browser MCP | Type-specific browser semantics with evidence. |
 | Review/approval domain receipts | Browser MCP | Bound to exact target/revisions/operations. |
 | Human-boundary classification | Browser MCP | CAPTCHA/login/2FA/unsupported-control domain status; Console orchestrates pause/resume. |
-| Long workflow ordering | Console MCP | Calls Network domain transitions and checkpoints their receipts. |
+| Long workflow ordering | Console MCP | Calls Web domain transitions and checkpoints their receipts. |
 | Domain step semantics | Browser MCP | inspect/propose/apply/validate/review/submit/confirmation semantics. |
-| Generic event/output transport | Console MCP | Network emits bounded structured results; Console owns durable transport. |
+| Generic event/output transport | Console MCP | Web emits bounded structured results; Console owns durable transport. |
 
-Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/network/form domain state, keep it in Browser MCP.
+Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/web/form domain state, keep it in Browser MCP.
 
 ## Major gaps relative to Console MCP maturity
 
@@ -96,7 +96,7 @@ Console MCP already owns the generic execution substrate: task/run identities, b
 
 Browser MCP must not grow a second generic run engine. Its responsibility is domain state and browser/form semantics only.
 
-Network still has process-global mutable state such as:
+Web still has process-global mutable state such as:
 
 - current `page`;
 - browser/context handle;
@@ -107,13 +107,13 @@ The required correction is therefore split ownership:
 
 - Console MCP owns execution/run identity and process/task leases;
 - Browser MCP owns target identity, page/form revisions, semantic form state, review/approval state, and human-boundary state;
-- Console passes correlation/execution identity into Network calls where useful;
-- Network returns domain evidence and stable statuses, not its own competing orchestration lifecycle.
+- Console passes correlation/execution identity into Web calls where useful;
+- Web returns domain evidence and stable statuses, not its own competing orchestration lifecycle.
 
 Consequences if this boundary is ignored:
 
 - duplicated run engines drift;
-- retries and leases can disagree across Console and Network;
+- retries and leases can disagree across Console and Web;
 - browser ownership becomes ambiguous;
 - failures become harder to recover because two runtimes believe they own the same work.
 
@@ -150,22 +150,22 @@ Worker routes frequently return ad-hoc HTTP 409 plus free-form `error` strings.
 
 Console MCP increasingly returns stable machine-readable statuses and explicit policy evidence.
 
-Network needs canonical status families such as:
+Web needs canonical status families such as:
 
-- `NETWORK_TARGET_NOT_BOUND`;
-- `NETWORK_TARGET_STALE`;
-- `NETWORK_FORM_REVISION_STALE`;
-- `NETWORK_FIELD_NOT_FOUND`;
-- `NETWORK_FIELD_AMBIGUOUS`;
-- `NETWORK_CONTROL_UNSUPPORTED`;
-- `NETWORK_VALIDATION_FAILED`;
-- `NETWORK_CHALLENGE_DETECTED`;
-- `NETWORK_APPROVAL_REQUIRED`;
-- `NETWORK_APPROVAL_STALE`;
-- `NETWORK_NAVIGATION_CHANGED`;
-- `NETWORK_UPLOAD_REQUIRED`;
-- `NETWORK_HUMAN_ACTION_REQUIRED`;
-- `NETWORK_SUBMIT_POSTCONDITION_UNVERIFIED`.
+- `WEB_TARGET_NOT_BOUND`;
+- `WEB_TARGET_STALE`;
+- `WEB_FORM_REVISION_STALE`;
+- `WEB_FIELD_NOT_FOUND`;
+- `WEB_FIELD_AMBIGUOUS`;
+- `WEB_CONTROL_UNSUPPORTED`;
+- `WEB_VALIDATION_FAILED`;
+- `WEB_CHALLENGE_DETECTED`;
+- `WEB_APPROVAL_REQUIRED`;
+- `WEB_APPROVAL_STALE`;
+- `WEB_NAVIGATION_CHANGED`;
+- `WEB_UPLOAD_REQUIRED`;
+- `WEB_HUMAN_ACTION_REQUIRED`;
+- `WEB_SUBMIT_POSTCONDITION_UNVERIFIED`.
 
 Every mutation should return a stable status, target identity, before/after evidence, and recommended next action.
 
@@ -247,9 +247,9 @@ Real application forms are state machines:
 9. submit;
 10. confirmation.
 
-Network should model this as domain state, not as a second orchestration engine.
+Web should model this as domain state, not as a second orchestration engine.
 
-Network-owned state may include:
+Web-owned state may include:
 
 - domain workflow key supplied/correlated by Console;
 - target binding identity;
@@ -267,7 +267,7 @@ Generic task/run scheduling, retry policy, process ownership, leases, cancellati
 
 ### 8. Long-running execution must delegate to Console MCP
 
-Some browser operations can legitimately outlive one synchronous Network call:
+Some browser operations can legitimately outlive one synchronous Web call:
 
 - waiting for dynamic navigation;
 - large file upload;
@@ -275,14 +275,14 @@ Some browser operations can legitimately outlive one synchronous Network call:
 - long login/manual-human boundaries;
 - post-submit confirmation polling.
 
-Do not create Network-owned generic start/status/output/stop primitives for these.
+Do not create Web-owned generic start/status/output/stop primitives for these.
 
 Instead:
 
 - Console MCP owns the durable run and its `runId`;
 - Console MCP owns timeout, cancellation, lease, capacity, and retry policy;
-- Network exposes bounded domain operations plus resumable domain receipts/statuses;
-- long operations are composed/orchestrated by Console around those bounded Network capabilities.
+- Web exposes bounded domain operations plus resumable domain receipts/statuses;
+- long operations are composed/orchestrated by Console around those bounded Web capabilities.
 
 ### 9. Human-boundary handling is only exception-based
 
@@ -335,7 +335,7 @@ This should be a separate write capability, not overloaded into generic fill.
 
 ### 12. Download/artifact handling is under-specified
 
-Network should support controlled downloads and generated browser artifacts with:
+Web should support controlled downloads and generated browser artifacts with:
 
 - deterministic artifact IDs;
 - filename sanitization;
@@ -378,7 +378,7 @@ Do not silently continue on whichever global page variable happens to be active.
 
 Console MCP verifies repository mutations with postconditions/gates.
 
-Network needs equivalent browser postconditions.
+Web needs equivalent browser postconditions.
 
 Examples:
 
@@ -469,7 +469,7 @@ Required fixture families:
 
 ### 20. Capability/implementation symmetry is not gated
 
-Add a canon-style symmetry gate for Network:
+Add a canon-style symmetry gate for Web:
 
 - capability contract tool exists;
 - MCP schema exists;
@@ -477,7 +477,7 @@ Add a canon-style symmetry gate for Network:
 - risk/approval metadata matches;
 - no undocumented worker mutation route;
 - deprecated/legacy routes are explicit;
-- Console bridge exposure matches the authoritative Network contract.
+- Console bridge exposure matches the authoritative Web contract.
 
 This is directly analogous to the API/OpenAPI/runtime symmetry direction used elsewhere in the platform.
 
@@ -486,7 +486,7 @@ This is directly analogous to the API/OpenAPI/runtime symmetry direction used el
 Current docs still say variants of:
 
 - final submit is not implemented;
-- old tool names such as `network.inspect_form` / `network.submit_form`;
+- old tool names such as `web.inspect_form` / `web.submit_form`;
 - default browser ownership assumptions that no longer fully describe Console-owned runtime.
 
 Docs must be regenerated/reconciled from the capability contract and current ownership model.
@@ -500,7 +500,7 @@ Repository authority is explicit:
 
 Required completion work:
 
-- keep all future Network development in the canonical repository;
+- keep all future Web development in the canonical repository;
 - update Console bridge/runtime references to the canonical capability-contract path;
 - mark the root copy as legacy/evacuated;
 - remove it from active workspace use after runtime validation;
@@ -512,19 +512,19 @@ Required completion work:
 
 Priority: P0
 
-- Keep `D:\PhpstormProjects\www\mcp\browser-mcp` as the only authoritative Network repository.
+- Keep `D:\PhpstormProjects\www\mcp\browser-mcp` as the only authoritative Web repository.
 - Preserve the already-merged unique history from the former root mirror.
 - Update Console bridge/runtime path references from the root mirror to the canonical repository.
 - Mark `D:\PhpstormProjects\www\browser-mcp` as legacy/evacuated and stop all development there.
 - Update architecture docs to state:
   - Console owns browser runtime;
-  - Network owns browser semantics/capabilities;
-  - standalone Network connector is not required for ChatGPT-facing use.
+  - Web owns browser semantics/capabilities;
+  - standalone Web connector is not required for ChatGPT-facing use.
 - Capture the converged capability snapshot and test baseline.
 
 Exit criteria:
 
-- only one authoritative Network repository;
+- only one authoritative Web repository;
 - bridge and docs agree on the canonical `mcp/browser-mcp` path;
 - root mirror is no longer used by runtime or development;
 - no unique code is lost.
@@ -533,9 +533,9 @@ Exit criteria:
 
 Priority: P0
 
-Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status. Core domain tool schemas are now defined once in `core-domain-tool-definitions.js`; the standalone Browser MCP compatibility server registers from that reusable source instead of owning a second handwritten schema surface, preparing the same definitions for Console-prefixed registration.
+Implementation status: first synergy slice complete. Contract schema v2 now carries ownership, risk class, approval policy, binding, replay, timeout, artifact, visibility, schema identity, and postcondition metadata. Default tests enforce contract ↔ worker route ↔ MCP registration symmetry, and Console MCP consumes the v2 policy surface with explicit READY/DEGRADED synergy status. Core domain tool schemas are now defined once in `web-domain-tool-definitions.js`; the standalone Browser MCP compatibility server registers from that reusable source instead of owning a second handwritten schema surface, preparing the same definitions for Console-prefixed registration.
 
-Create a typed machine-readable Network capability contract containing:
+Create a typed machine-readable Web capability contract containing:
 
 - stable tool ID/name;
 - semantic version;
@@ -557,18 +557,18 @@ Exit criteria:
 - contract ↔ MCP schema ↔ worker route symmetry test is green;
 - legacy aliases are explicit and removable.
 
-### Phase 2 — Durable Network domain identity over Console execution
+### Phase 2 — Durable Web domain identity over Console execution
 
 Priority: P0
 
-Implementation status: target/revision foundation advanced. Page/review captures produce durable CDP `targetId`, `pageRevision`, and `formRevision`; target inventory now exposes exact `targetId`, `network.browser_bind` prefers exact target identity over compatibility index/URL locators and stale IDs fail `NETWORK_TARGET_STALE`; approved mutations reject stale target/page/form state with stable Network statuses.
+Implementation status: target/revision foundation advanced. Page/review captures produce durable CDP `targetId`, `pageRevision`, and `formRevision`; target inventory now exposes exact `targetId`, `web.browser_bind` prefers exact target identity over compatibility index/URL locators and stale IDs fail `WEB_TARGET_STALE`; approved mutations reject stale target/page/form state with stable Web statuses.
 
 Ownership rule:
 
 - Console MCP owns generic `taskId` / `runId`, async lifecycle, leases, cancellation, capacity, and retry;
 - Browser MCP owns `targetId`, page/form revision identity, semantic step/domain state, approval/review state, and human-boundary state.
 
-Network may accept Console correlation identifiers, but it must not mint or persist a competing generic execution `runId`.
+Web may accept Console correlation identifiers, but it must not mint or persist a competing generic execution `runId`.
 
 Add/retain domain records for:
 
@@ -579,20 +579,20 @@ Add/retain domain records for:
 - semantic step/status;
 - pending review/approval/human-boundary state.
 
-If durable Network domain persistence is needed, persist only these domain receipts atomically under ignored runtime state. Generic process/task leases remain Console-owned.
+If durable Web domain persistence is needed, persist only these domain receipts atomically under ignored runtime state. Generic process/task leases remain Console-owned.
 
 Exit criteria:
 
 - stale target/form identities fail closed;
-- Console can correlate each Network mutation with its own durable run identity;
-- Network restart does not require reconstructing generic execution state;
-- no Network-owned generic execution lease exists.
+- Console can correlate each Web mutation with its own durable run identity;
+- Web restart does not require reconstructing generic execution state;
+- no Web-owned generic execution lease exists.
 
 ### Phase 3 — Semantic Form Model v2
 
 Priority: P0
 
-Implementation status: semantic extraction now covers top-level and nested iframe controls. Network classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Each control now carries deterministic `framePath`, `frameUrl`, `frameName`, and frame-local identity; mutations resolve that exact frame path and fail closed with `NETWORK_FRAME_STALE` when it no longer exists. Combobox option lookup also stays inside the same resolved frame instead of leaking back to the top-level page. Type-specific checkbox/radio/combobox/contenteditable/upload mutations remain postcondition-verified; native `<select multiple>` now has explicit array-valued mutation semantics with exact selected-set postconditions, and ARIA `role="switch"` controls now expose boolean state plus verified `switch-on` / `switch-off` mutation semantics. Autocomplete/typeahead coverage now includes native datalist controls with bounded exact value/label matching and ARIA autocomplete controls with exact accessible option matching inside the bound frame. Open shadow roots now have explicit `shadowPath` / depth identity folded into `controlId`, and mutations fail closed with `NETWORK_SHADOW_PATH_STALE` if that host path changes. Closed shadow roots remain intentionally outside automatic semantic traversal. Radio controls now expose root-scoped group metadata and support exact group option selection by value/label with accessible-name verification while preserving legacy boolean selection. Remaining semantic-model gaps are primarily custom/chip-style compound controls and site-specific edge cases.
+Implementation status: semantic extraction now covers top-level and nested iframe controls. Web classifies native text/email/phone/number/date-time/select/checkbox/radio/file controls plus contenteditable and ARIA combobox controls, emits stable semantic `controlId`, options/checked/validation/sensitivity metadata and supported operations, and resolves `controlId` before legacy index for compatible mutations. Each control now carries deterministic `framePath`, `frameUrl`, `frameName`, and frame-local identity; mutations resolve that exact frame path and fail closed with `WEB_FRAME_STALE` when it no longer exists. Combobox option lookup also stays inside the same resolved frame instead of leaking back to the top-level page. Type-specific checkbox/radio/combobox/contenteditable/upload mutations remain postcondition-verified; native `<select multiple>` now has explicit array-valued mutation semantics with exact selected-set postconditions, and ARIA `role="switch"` controls now expose boolean state plus verified `switch-on` / `switch-off` mutation semantics. Autocomplete/typeahead coverage now includes native datalist controls with bounded exact value/label matching and ARIA autocomplete controls with exact accessible option matching inside the bound frame. Open shadow roots now have explicit `shadowPath` / depth identity folded into `controlId`, and mutations fail closed with `WEB_SHADOW_PATH_STALE` if that host path changes. Closed shadow roots remain intentionally outside automatic semantic traversal. Radio controls now expose root-scoped group metadata and support exact group option selection by value/label with accessible-name verification while preserving legacy boolean selection. Remaining semantic-model gaps are primarily custom/chip-style compound controls and site-specific edge cases.
 
 Replace flat field snapshots with semantic controls.
 
@@ -635,9 +635,9 @@ Exit criteria:
 
 Priority: P0
 
-Submit postcondition status: final submit no longer reports unconditional success after a click. Network classifies explicit confirmation evidence as `NETWORK_SUBMIT_VERIFIED`, visible validation failure as `NETWORK_SUBMIT_VALIDATION_FAILED`, and all ambiguous outcomes as `NETWORK_SUBMIT_POSTCONDITION_UNVERIFIED` with `retrySafe:false` and an explicit no-auto-resubmit recommendation.
+Submit postcondition status: final submit no longer reports unconditional success after a click. Web classifies explicit confirmation evidence as `WEB_SUBMIT_VERIFIED`, visible validation failure as `WEB_SUBMIT_VALIDATION_FAILED`, and all ambiguous outcomes as `WEB_SUBMIT_POSTCONDITION_UNVERIFIED` with `retrySafe:false` and an explicit no-auto-resubmit recommendation.
 
-Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload is implemented separately as `network.form.upload`; it remains intentionally outside generic fill. `network.click` is now also revision-bound and Console-correlated, and reports verified versus explicitly unverified UI transitions with before/after revision evidence.
+Implementation status: verified mutation semantics now cover text/select/checkbox/radio/contenteditable plus fail-closed ARIA combobox selection by exact accessible option name. Every supported mutation returns per-control evidence and enforces a postcondition with stable statuses. Semantic `controlId` is preferred over legacy index. Guarded file upload is implemented separately as `web.form.upload`; it remains intentionally outside generic fill. `web.click` is now also revision-bound and Console-correlated, and reports verified versus explicitly unverified UI transitions with before/after revision evidence.
 
 Create type-specific mutations:
 
@@ -668,7 +668,7 @@ Exit criteria:
 
 Priority: P1
 
-Define deterministic Network domain transitions:
+Define deterministic Web domain transitions:
 
 - inspect;
 - propose;
@@ -682,20 +682,20 @@ Define deterministic Network domain transitions:
 - verify confirmation;
 - domain complete/failed.
 
-Network returns semantic step receipts and resumable domain evidence. Console MCP decides when to invoke the next transition, how to retry it, when to cancel it, and which durable run owns it.
+Web returns semantic step receipts and resumable domain evidence. Console MCP decides when to invoke the next transition, how to retry it, when to cancel it, and which durable run owns it.
 
 Persist only domain step history/pending domain actions when persistence is required.
 
 Exit criteria:
 
-- a multi-page fixture can be interrupted and resumed from Network domain receipts;
-- no Network-owned orchestration loop or generic runner is introduced.
+- a multi-page fixture can be interrupted and resumed from Web domain receipts;
+- no Web-owned orchestration loop or generic runner is introduced.
 
 ### Phase 6 — Approval receipts v2
 
 Priority: P1
 
-Implementation status: core fill/submit receipt flow complete. `network.propose` mints a durable opaque one-time fill receipt bound to exact target/page/form revisions plus a stable hash of the proposed operation set; approved fill consumes it before the first field mutation. `network.review_before_submit` mints a submit receipt bound to the exact review revision/hash; final submit consumes it before clicking. Receipt state is persisted under ignored Network domain state with TTL, stale-binding rejection, and replay-safe consume locks. Human-readable `APPLY` / `SUBMIT` approval remains in place as an additional explicit user gate. Console continues to own execution/run identity and orchestration.
+Implementation status: core fill/submit receipt flow complete. `web.propose` mints a durable opaque one-time fill receipt bound to exact target/page/form revisions plus a stable hash of the proposed operation set; approved fill consumes it before the first field mutation. `web.review_before_submit` mints a submit receipt bound to the exact review revision/hash; final submit consumes it before clicking. Receipt state is persisted under ignored Web domain state with TTL, stale-binding rejection, and replay-safe consume locks. Human-readable `APPLY` / `SUBMIT` approval remains in place as an additional explicit user gate. Console continues to own execution/run identity and orchestration.
 
 Replace bare approval strings as the primary trust primitive.
 
@@ -718,7 +718,7 @@ Exit criteria:
 
 Priority: P1
 
-Implementation status: typed human-boundary coverage now includes CAPTCHA, 2FA, security challenge, credential-safe login-required, conservative cookie/privacy consent, strong-signal `alertdialog` unexpected-modal detection, and reachable unsupported-control boundaries for modeled custom ARIA controls. All produce `NETWORK_HUMAN_ACTION_REQUIRED` with requested manual action and a safe resume condition; page/form/navigation/review routes propagate the structured status through the common Network error envelope, while Console MCP remains responsible for pause/resume orchestration. Generic visible dialogs are intentionally not treated as human boundaries without a strong blocking signal.
+Implementation status: typed human-boundary coverage now includes CAPTCHA, 2FA, security challenge, credential-safe login-required, conservative cookie/privacy consent, strong-signal `alertdialog` unexpected-modal detection, and reachable unsupported-control boundaries for modeled custom ARIA controls. All produce `WEB_HUMAN_ACTION_REQUIRED` with requested manual action and a safe resume condition; page/form/navigation/review routes propagate the structured status through the common Web error envelope, while Console MCP remains responsible for pause/resume orchestration. Generic visible dialogs are intentionally not treated as human boundaries without a strong blocking signal.
 
 Model CAPTCHA, 2FA, login, consent, unexpected modal, unsupported control, and security challenges as explicit resumable states.
 
@@ -731,7 +731,7 @@ Exit criteria:
 
 Priority: P1
 
-Implementation status: guarded upload slice complete. Network exposes approval-gated `network.form.upload` / `network.upload_artifact`, accepts only relative artifact references inside a dedicated upload root, rejects absolute/traversal paths, validates realpath/extension/size/SHA-256, binds upload to target/page/form revisions and an exact file control, and verifies the resulting browser `FileList` by filename and size. Generic artifact materialization into the upload root remains a Console-owned infrastructure concern.
+Implementation status: guarded upload slice complete. Web exposes approval-gated `web.form.upload` / `web.upload_artifact`, accepts only relative artifact references inside a dedicated upload root, rejects absolute/traversal paths, validates realpath/extension/size/SHA-256, binds upload to target/page/form revisions and an exact file control, and verifies the resulting browser `FileList` by filename and size. Generic artifact materialization into the upload root remains a Console-owned infrastructure concern.
 
 Implement guarded:
 
@@ -752,22 +752,22 @@ Exit criteria:
 
 Priority: P1
 
-Do not introduce Network equivalents of generic start/status/output/stop.
+Do not introduce Web equivalents of generic start/status/output/stop.
 
-Integrate long-running Network work with Console MCP's existing durable async execution substrate:
+Integrate long-running Web work with Console MCP's existing durable async execution substrate:
 
 - Console owns start/status/output/stop;
 - Console owns `runId`, timeout and cancellation;
 - Console owns capacity and leases;
-- Network exposes bounded resumable operations and stable domain receipts;
-- Network responses carry correlation metadata sufficient for Console to checkpoint and resume.
+- Web exposes bounded resumable operations and stable domain receipts;
+- Web responses carry correlation metadata sufficient for Console to checkpoint and resume.
 
 Use this composition for long waits, downloads/uploads, complex transitions, and submit verification.
 
 Exit criteria:
 
 - long browser work can survive caller interruption through Console-owned durable execution;
-- Network has no duplicate generic async runtime.
+- Web has no duplicate generic async runtime.
 
 ### Phase 10 — Structured observability
 
@@ -844,12 +844,12 @@ Priority: P1
 
 Build on the Console-owned browser improvements.
 
-Network must:
+Web must:
 
 - never launch a competing browser when using Console mode;
 - bind only explicit targets;
 - never close unrelated user/Console tabs;
-- close Network-owned transient popup/auxiliary targets when safe;
+- close Web-owned transient popup/auxiliary targets when safe;
 - release target/workflow leases;
 - garbage-collect abandoned runtime state;
 - preserve durable workflow evidence separately from browser target lifetime.
@@ -868,7 +868,7 @@ Reconcile/remove stale documents and legacy names.
 
 Document:
 
-- Console/Network boundary;
+- Console/Web boundary;
 - workflow lifecycle;
 - approval model;
 - artifact model;
@@ -891,13 +891,13 @@ Acceptance scenarios should include:
 - Workday multi-step form;
 - GovernmentJobs/NEOGOV login boundary;
 - Salesforce-style dynamic form;
-- a generic non-job form to prove Network is not career-only.
+- a generic non-job form to prove Web is not career-only.
 
 Capture gaps as fixtures before fixing them.
 
 ## Proposed target capability groups
 
-Instead of growing a flat tool list indefinitely, organize Network capabilities conceptually as:
+Instead of growing a flat tool list indefinitely, organize Web capabilities conceptually as:
 
 ### Runtime
 
@@ -972,7 +972,7 @@ Instead of growing a flat tool list indefinitely, organize Network capabilities 
 
 This milestone is complete when Browser MCP can take a real multi-step external form from URL to verified pre-submit review with:
 
-- one durable Console-owned execution/correlation identity plus Network-owned semantic step receipts;
+- one durable Console-owned execution/correlation identity plus Web-owned semantic step receipts;
 - deterministic target/form identities;
 - semantic field extraction;
 - safe document upload;

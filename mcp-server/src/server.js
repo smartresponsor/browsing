@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createNetworkToolBundle } from './browser-tool-bundle.js';
+import { createWebToolBundle } from './web-tool-bundle.js';
 
 const host = process.env.BROWSER_MCP_SERVER_HOST || '127.0.0.1';
 const port = Number(process.env.BROWSER_MCP_SERVER_PORT || 8792);
@@ -10,7 +10,7 @@ const workerUrl = process.env.BROWSER_MCP_BROWSER_WORKER_URL || 'http://127.0.0.
 const upstreamToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN || '';
 const upstreamPreviousToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
 
-const networkToolBundle = createNetworkToolBundle({
+const webToolBundle = createWebToolBundle({
   workerUrl,
   browserWorkerToken: process.env.BROWSER_MCP_BROWSER_WORKER_TOKEN || ''
 });
@@ -112,7 +112,7 @@ function buildServer() {
     version: '0.1.0-rc2'
   });
 
-  networkToolBundle.register(mcpServer);
+  webToolBundle.register(mcpServer);
 
   return mcpServer;
 }

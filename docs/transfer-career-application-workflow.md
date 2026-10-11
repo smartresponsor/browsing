@@ -14,17 +14,17 @@ Do not restart the MCP repair discussion unless the user asks. First try the ava
 Preferred first tool test:
 
 ```text
-network.open("https://careers.uh.edu/jobs/es-application-developer-ii-iii-on-site-broadband-posting-houston-texas-united-states")
+web.open("https://careers.uh.edu/jobs/es-application-developer-ii-iii-on-site-broadband-posting-houston-texas-united-states")
 ```
 
 If the page opens, continue with:
 
 ```text
-network.inspect()
-network.extract_form()
+web.inspect()
+web.extract_form()
 ```
 
-Do not use `network.fill_after_approval` unless the user explicitly approves the exact fields. Never perform final submit automatically.
+Do not use `web.fill_after_approval` unless the user explicitly approves the exact fields. Never perform final submit automatically.
 
 ## User profile for applications
 
@@ -83,7 +83,7 @@ Prior state:
 - Public page was opened earlier.
 - Apply CTA was the blocking step.
 - Page showed prefilled/disabled Oleksandr identity fields and interest/job-alert/referral CTA forms.
-- Good target for supervised browser workflow once `network.open` and click/inspect tools work.
+- Good target for supervised browser workflow once `web.open` and click/inspect tools work.
 
 Fit angle:
 
@@ -93,7 +93,7 @@ Fit angle:
 
 Next action:
 
-1. Open URL with `network.open`.
+1. Open URL with `web.open`.
 2. If visible browser opens, click Apply only if it is a non-final navigation button.
 3. Inspect application form.
 4. Prepare proposed answers for user review.

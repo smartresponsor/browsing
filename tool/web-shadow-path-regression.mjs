@@ -17,7 +17,7 @@ for (const token of [
   "const actualShadowPath = await locator.evaluate(node => {",
   "const expectedShadowPath = Array.isArray(field?.shadowPath) ? field.shadowPath : []",
   "hashStableJson(actualShadowPath) !== hashStableJson(expectedShadowPath)",
-  "'NETWORK_SHADOW_PATH_STALE'",
+  "'WEB_SHADOW_PATH_STALE'",
   "The open-shadow host path for this control changed.",
 ]) {
   assert.equal(worker.includes(token), true, `Shadow-path invariant missing: ${token}`);
@@ -29,5 +29,5 @@ assert.equal(
   "Closed shadow roots must not be represented as automatable semantic identity.",
 );
 
-console.log("Network open-shadow identity regression passed.");
+console.log("Web open-shadow identity regression passed.");
 

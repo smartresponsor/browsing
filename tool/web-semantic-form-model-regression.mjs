@@ -30,10 +30,10 @@ for (const token of [
   "semanticType === 'contenteditable'",
   "semanticType === 'combobox'",
   "optionFrame.getByRole('option', { name: desired, exact: true })",
-  "optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS'",
+  "optionCount === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS'",
   "optionMatch: 'exact-accessible-name'",
-  "NETWORK_VALIDATION_FAILED",
-  "NETWORK_CONTROL_UNSUPPORTED",
+  "WEB_VALIDATION_FAILED",
+  "WEB_CONTROL_UNSUPPORTED",
   "return { locator: await locatorForFieldSnapshot(target, field), field };",
 ]) {
   assert.equal(source.includes(token), true, `Semantic Form Model v2 invariant missing: ${token}`);
@@ -49,5 +49,5 @@ assert.equal(
   "file controls must be modeled semantically but remain blocked from generic fill",
 );
 
-console.log("Network semantic form model regression passed.");
+console.log("Web semantic form model regression passed.");
 

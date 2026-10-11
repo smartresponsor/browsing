@@ -31,12 +31,12 @@ $restartText = & $DevScript restart
 $restart = $restartText | ConvertFrom-Json
 
 if (-not $restart.ok) {
-    throw 'network restart failed.'
+    throw 'web restart failed.'
 }
 
 $publicUrl = [string]$restart.tunnel.public_url
 if ([string]::IsNullOrWhiteSpace($publicUrl)) {
-    throw 'network restart did not return tunnel.public_url.'
+    throw 'web restart did not return tunnel.public_url.'
 }
 
 if ($publicUrl -notmatch '^https://[a-z0-9.-]+\.trycloudflare\.com$') {

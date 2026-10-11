@@ -1,6 +1,6 @@
 # Browsing
 
-`Browsing` is the repository for the supervised browser/network capability consumer in the canonical MCP workspace. The runtime/service compatibility identifier remains `browser-mcp`.
+`Browsing` is the repository for the supervised browser/web capability consumer in the canonical MCP workspace. The runtime/service compatibility identifier remains `browser-mcp`.
 
 It provides browser/form domain semantics while Console MCP remains the ChatGPT-facing connector and generic execution/runtime owner.
 
@@ -28,19 +28,19 @@ The local `mcp-server` remains a compatibility/local-validation surface. It is n
 ## Current supervised flow
 
 1. Console binds or opens the browser target.
-2. Network captures exact target/page/form identity.
-3. Network extracts semantic controls.
+2. Web captures exact target/page/form identity.
+3. Web extracts semantic controls.
 4. Values/actions are proposed.
 5. Approval-gated mutations are applied.
-6. Network verifies each supported postcondition.
+6. Web verifies each supported postcondition.
 7. Files are uploaded only through guarded artifact references.
 8. A review artifact is captured.
 9. Final submit remains disabled by default and requires explicit approval when enabled.
-10. Network returns verified or explicitly unverified terminal evidence.
+10. Web returns verified or explicitly unverified terminal evidence.
 
 ## Safety defaults
 
-- Network must not launch a competing browser in Console-owned mode.
+- Web must not launch a competing browser in Console-owned mode.
 - Credentials remain manual.
 - CAPTCHA, 2FA, login/security challenges pause automation as human boundaries.
 - Form mutations use target/page/form revision guards.
@@ -70,7 +70,7 @@ The machine-readable source of truth is:
 
 `mcp-server/src/capability-contract.js`
 
-It defines Console/Network ownership, risk classes, approvals, binding, replay policy, timeout class, artifact behavior, postconditions, visibility, and compatibility aliases.
+It defines Console/Web ownership, risk classes, approvals, binding, replay policy, timeout class, artifact behavior, postconditions, visibility, and compatibility aliases.
 
 ## Local validation
 
@@ -100,7 +100,7 @@ Operational lifecycle commands remain available for compatibility/local validati
 ## Documentation
 
 - [Architecture](docs/architecture.md)
-- [Network/Console parity milestone](docs/milestone-browser-mcp-console-parity.md)
+- [Web/Console parity milestone](docs/milestone-browser-mcp-console-parity.md)
 - [Operations](docs/operations.md)
 - [Security](docs/security.md)
 - [Restore on Windows](docs/restore-windows.md)

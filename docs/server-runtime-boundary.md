@@ -6,8 +6,8 @@ The local server is temporary infrastructure. The durable Browser MCP value is t
 
 ## Keep as Browser MCP ownership
 
-- `network.*` tool names and schemas.
-- `NetworkToolRegistry` and its worker route mapping.
+- `web.*` tool names and schemas.
+- `WebToolRegistry` and its worker route mapping.
 - Browser worker policy and safety controls.
 - Playwright worker process, managed profile, visible browser behavior, and form-review approval gates.
 - Browser MCP deployment identifiers, public origins, connector URLs, tunnel names, token names, and OAuth/OIDC setting names.
@@ -45,7 +45,7 @@ Do not rename or delete these references during cleanup. Values are secrets or e
 Known public examples currently documented:
 
 - `https://browser-mcp.taa0662621456.workers.dev`
-- `https://network.smartresponsor.com`
+- `https://web.smartresponsor.com`
 
 ### Local ports and endpoints
 

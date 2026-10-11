@@ -1,27 +1,27 @@
 const { z } = require('zod');
 
-const networkExecutionCorrelationSchema = z.object({
+const webExecutionCorrelationSchema = z.object({
   taskId: z.string().min(1).max(200).optional(),
   runId: z.string().min(1).max(200).optional(),
   invocationId: z.string().min(1).max(200).optional(),
 }).strict();
 
-function createNetworkCoreDomainToolDefinitions() {
+function createWebCoreDomainToolDefinitions() {
   return Object.freeze([
     definition({
-      canonicalName: 'browser.targets',
+      canonicalName: 'web.browser.targets',
       consoleName: 'read_.web.browser.targets',
       route: '/browser-targets',
-      capabilityName: 'network.browser_targets',
+      capabilityName: 'web.browser_targets',
       access: 'read',
       description: 'List supervised browser pages with stable target identity, URLs, titles, and active-page identity.',
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'browser.bind',
+      canonicalName: 'web.browser.bind',
       consoleName: 'write.web.browser.bind',
       route: '/browser-bind',
-      capabilityName: 'network.browser_bind',
+      capabilityName: 'web.browser_bind',
       access: 'write',
       description: 'Bind Browser MCP semantics to a specific Console-owned browser target by exact target identity or compatibility locator.',
       inputSchema: z.object({
@@ -32,10 +32,10 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.open',
+      canonicalName: 'web.target.open',
       consoleName: 'write.web.target.open',
       route: '/open',
-      capabilityName: 'network.open',
+      capabilityName: 'web.open',
       access: 'write',
       description: 'Navigate the bound Console-owned supervised browser target to any policy-allowed HTTP(S) URL.',
       inputSchema: z.object({
@@ -43,11 +43,11 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.job.open',
+      canonicalName: 'web.job.open',
       consoleName: 'write.web.job.open',
       route: '/open-job',
-      legacyName: 'network.open_job',
-      capabilityName: 'network.open_job',
+      legacyName: 'web.open_job',
+      capabilityName: 'web.open_job',
       access: 'write',
       description: 'Open a policy-allowed job/career URL using the optional job profile; unknown public hosts remain supported through generic browser semantics.',
       inputSchema: z.object({
@@ -55,20 +55,20 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.chatgpt.snapshot',
+      canonicalName: 'web.chatgpt.snapshot',
       consoleName: 'read_.web.chatgpt.snapshot',
       route: '/chatgpt-snapshot',
-      legacyName: 'network.chatgpt_snapshot',
-      capabilityName: 'network.chatgpt_snapshot',
+      legacyName: 'web.chatgpt_snapshot',
+      capabilityName: 'web.chatgpt_snapshot',
       access: 'read',
       description: 'Read the bound ChatGPT Web target URL and message snapshot for semantic execution gating.',
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'browser.page.capture',
+      canonicalName: 'web.page.capture',
       consoleName: 'read_.web.page.capture',
       route: '/page-capture',
-      capabilityName: 'network.page_capture',
+      capabilityName: 'web.page_capture',
       access: 'read',
       description: 'Capture page identity, revisions, semantic form state, submit candidates, and optional review screenshot evidence.',
       inputSchema: z.object({
@@ -76,10 +76,10 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.page.wait',
+      canonicalName: 'web.page.wait',
       consoleName: 'read_.web.page.wait',
       route: '/wait-for-ready',
-      capabilityName: 'network.wait_for_ready',
+      capabilityName: 'web.wait_for_ready',
       access: 'read',
       description: 'Wait for bounded browser readiness such as DOM content, selector visibility, network idle, or mutation quietness.',
       inputSchema: z.object({
@@ -90,47 +90,47 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.inspect',
+      canonicalName: 'web.form.inspect',
       consoleName: 'read_.web.form.inspect',
       route: '/inspect',
-      capabilityName: 'network.inspect',
+      capabilityName: 'web.inspect',
       access: 'read',
       description: 'Inspect the current semantic form model without mutation.',
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'browser.click',
+      canonicalName: 'web.page.click',
       consoleName: 'write.web.page.click',
       route: '/click',
-      capabilityName: 'network.click',
+      capabilityName: 'web.click',
       access: 'write',
       description: 'Perform a revision-bound non-final click and verify the resulting transition.',
       inputSchema: z.object({
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
-        correlation: networkExecutionCorrelationSchema.optional(),
+        correlation: webExecutionCorrelationSchema.optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
         nth: z.number().int().nonnegative().optional(),
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.extract',
+      canonicalName: 'web.form.extract',
       consoleName: 'read_.web.form.extract',
       route: '/extract-form',
-      legacyName: 'network.extract_form',
-      capabilityName: 'network.extract_form',
+      legacyName: 'web.extract_form',
+      capabilityName: 'web.extract_form',
       access: 'read',
       description: 'Extract the current semantic form snapshot.',
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.proposal.preview',
+      canonicalName: 'web.form.proposal.preview',
       consoleName: 'write.web.form.proposal.preview',
       route: '/propose',
-      legacyName: 'network.propose',
-      capabilityName: 'network.propose',
+      legacyName: 'web.propose',
+      capabilityName: 'web.propose',
       access: 'write',
       description: 'Build normalized answer proposals and mint a revision-bound one-time fill approval receipt.',
       inputSchema: z.object({
@@ -138,11 +138,11 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.fill',
+      canonicalName: 'web.form.fill',
       consoleName: 'write.web.form.fill',
       route: '/fill-after-approval',
-      legacyName: 'network.fill_after_approval',
-      capabilityName: 'network.fill_after_approval',
+      legacyName: 'web.fill_after_approval',
+      capabilityName: 'web.fill_after_approval',
       access: 'write',
       description: 'Apply an explicitly approved, receipt-bound set of semantic form mutations with postcondition verification.',
       inputSchema: z.object({
@@ -152,16 +152,16 @@ function createNetworkCoreDomainToolDefinitions() {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
-        correlation: networkExecutionCorrelationSchema.optional(),
+        correlation: webExecutionCorrelationSchema.optional(),
         fields: z.array(z.record(z.unknown())),
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.upload',
+      canonicalName: 'web.form.upload',
       consoleName: 'write.web.form.upload',
       route: '/upload-artifact',
-      legacyName: 'network.upload_artifact',
-      capabilityName: 'network.upload_artifact',
+      legacyName: 'web.upload_artifact',
+      capabilityName: 'web.upload_artifact',
       access: 'write',
       description: 'Upload one approved guarded artifact reference to an exact semantic file control.',
       inputSchema: z.object({
@@ -170,7 +170,7 @@ function createNetworkCoreDomainToolDefinitions() {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
-        correlation: networkExecutionCorrelationSchema.optional(),
+        correlation: webExecutionCorrelationSchema.optional(),
         controlId: z.string().optional(),
         selector: z.string().optional(),
         artifactRef: z.string().min(1),
@@ -178,20 +178,20 @@ function createNetworkCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.review.snapshot',
+      canonicalName: 'web.form.review.snapshot',
       consoleName: 'write.web.form.review.snapshot',
       route: '/review-before-submit',
-      legacyName: 'network.review_before_submit',
-      capabilityName: 'network.review_before_submit',
+      legacyName: 'web.review_before_submit',
+      capabilityName: 'web.review_before_submit',
       access: 'write',
       description: 'Capture the exact pre-submit review revision and mint its one-time submit approval receipt.',
       inputSchema: z.object({}).strict(),
     }),
     definition({
-      canonicalName: 'browser.form.submit',
+      canonicalName: 'web.form.submit',
       consoleName: 'write.web.form.submit',
       route: '/submit-after-approval',
-      capabilityName: 'network.submit_after_approval',
+      capabilityName: 'web.submit_after_approval',
       access: 'write',
       description: 'Perform the final submit only with explicit approval and exact revision/receipt binding, then verify or explicitly mark the postcondition uncertain.',
       inputSchema: z.object({
@@ -201,7 +201,7 @@ function createNetworkCoreDomainToolDefinitions() {
         expectedTargetId: z.string().optional(),
         expectedPageRevision: z.string().optional(),
         expectedFormRevision: z.string().optional(),
-        correlation: networkExecutionCorrelationSchema.optional(),
+        correlation: webExecutionCorrelationSchema.optional(),
         reviewHash: z.string().optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
@@ -211,8 +211,8 @@ function createNetworkCoreDomainToolDefinitions() {
   ]);
 }
 
-function registerNetworkCoreDomainToolDefinitions(mcpServer, registry) {
-  for (const tool of createNetworkCoreDomainToolDefinitions()) {
+function registerWebCoreDomainToolDefinitions(mcpServer, registry) {
+  for (const tool of createWebCoreDomainToolDefinitions()) {
     const config = {
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -257,8 +257,8 @@ function toolResult(result) {
 
 
 module.exports = {
-  networkExecutionCorrelationSchema,
-  createNetworkCoreDomainToolDefinitions,
-  registerNetworkCoreDomainToolDefinitions,
+  webExecutionCorrelationSchema,
+  createWebCoreDomainToolDefinitions,
+  registerWebCoreDomainToolDefinitions,
 };
 

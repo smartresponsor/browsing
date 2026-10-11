@@ -15,7 +15,7 @@ These mechanics can later move to a neutral supervisor library:
 - scheduled task wrapper shape;
 - JSON status serialization.
 
-## Network-owned behavior
+## Web-owned behavior
 
 These parts should remain Browser MCP behavior:
 
@@ -23,14 +23,14 @@ These parts should remain Browser MCP behavior:
 - visible browser defaults;
 - browser profile behavior;
 - local MCP server wiring until the neutral runtime exists;
-- Network tunnel naming conventions;
-- Network smoke checks;
+- Web tunnel naming conventions;
+- Web smoke checks;
 - worker route probes;
 - `BROWSER_MCP_*` configuration names.
 
 ## Safe split order
 
-1. Add dot-sourced files under `tool/dev-network.d/`.
+1. Add dot-sourced files under `tool/dev-web.d/`.
 2. Move pure helpers first.
 3. Move state readers next.
 4. Move process lifecycle functions next.
