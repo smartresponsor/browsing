@@ -1,4 +1,7 @@
-﻿import express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
+import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -251,11 +254,8 @@ async function getBrowserStatus() {
   const policy = getPolicy();
   const runtime = buildBrowserRuntimeStatus(policy);
   const managedProcesses = await listManagedBrowserProcesses(policy);
-  const detectedVisibleWindow = Boolean(
-    managedProcesses?.ok &&
-      Array.isArray(managedProcesses.processes) &&
-      managedProcesses.processes.some(item => Number(item.mainWindowHandle || 0) > 0 || String(item.mainWindowTitle || '').trim() !== '')
-  );
+  // HWND/title presence is diagnostic only; the canonical verifier owns visibility.
+  const detectedVisibleWindow = null;
   return {
     ok: true,
     service: 'browser-mcp-browser-worker',
@@ -343,32 +343,13 @@ function planWebConnectorRefresh({ connectorName, connectorId, timeoutMs } = {})
   };
 }
 
-async function createRawCdpTarget(policy, targetUrl, timeoutMs) {
-  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
-  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(targetUrl)}`, {
-    method: 'PUT',
-    signal: AbortSignal.timeout(Math.max(250, timeoutMs))
-  });
-  if (!response.ok) throw new Error(`DevTools target create failed with HTTP ${response.status}: ${await response.text()}`);
-  return response.json();
-}
-
-async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, timeoutMs) {
+async function resolveConnectorRefreshTarget(policy, _targetUrl, _connectorId, _timeoutMs) {
+  const session = visibleRequest.getStore();
+  if (!session?.ok) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Connector refresh requires the verified bound target.');
   const inventory = await listRawCdpTargets(policy);
-  const targets = inventory.targets.filter(target => target.type === 'page' && typeof target.webSocketDebuggerUrl === 'string');
-  const existing = targets.find(target => connectorId && String(target.url || '').includes(connectorId))
-    || targets.find(target => String(target.url || '').includes('#settings/Connectors'))
-    || targets.find(target => String(target.url || '').includes('#settings/Apps'));
-  if (existing) return { ...existing, reused: true };
-  const created = await createRawCdpTarget(policy, targetUrl, timeoutMs);
-  const deadline = Date.now() + Math.min(timeoutMs, 15000);
-  while (Date.now() <= deadline) {
-    const refreshed = await listRawCdpTargets(policy);
-    const createdTarget = refreshed.targets.find(target => target.id === created.id && target.webSocketDebuggerUrl);
-    if (createdTarget) return { ...createdTarget, reused: false };
-    await new Promise(resolve => setTimeout(resolve, 150));
-  }
-  return { ...created, reused: false };
+  const target = inventory.targets.find(t => t.id === session.evidence.targetId && t.type === 'page' && t.webSocketDebuggerUrl);
+  if (!target) throw revisionError('WEB_TARGET_STALE', 'The bound connector target no longer exists.');
+  return { ...target, reused: true };
 }
 
 function buildWebConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
@@ -573,71 +554,22 @@ async function ensurePage() {
   await assertSessionWindow(policy);
 
   if (!browser) {
-    const userDataDir = getManagedUserDataDir(policy);
-
-    await mkdir(userDataDir, { recursive: true });
-
-    if (policy.externalVisibleChrome) {
-      try {
-        const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
-        connectedBrowser = externalRuntime.connectedBrowser;
-        browser = externalRuntime.context;
-        lastExternalAttachError = '';
-      } catch (error) {
-        connectedBrowser = undefined;
-        lastExternalAttachError = normalizeError(error);
-        throw new Error(`Shared browser CDP attach failed. ${lastExternalAttachError}`);
-      }
-    }
-
-    if (!browser) {
-      await killManagedBrowserProcesses(policy);
-
-      const launchOptions = {
-        headless: policy.headless,
-        args: [
-          '--new-window',
-          '--start-maximized',
-          '--window-position=80,80',
-          '--window-size=1400,1000'
-        ]
-      };
-
-      if (policy.browserChannel !== 'chromium') {
-        launchOptions.channel = policy.browserChannel;
-      }
-
-      try {
-        browser = await chromium.launchPersistentContext(userDataDir, launchOptions);
-      } catch (error) {
-        if (policy.browserChannel === 'chromium') {
-          throw error;
-        }
-
-        console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
-        browser = await chromium.launchPersistentContext(userDataDir, {
-          headless: policy.headless,
-          args: [
-            '--new-window',
-            '--start-maximized',
-            '--window-position=80,80',
-            '--window-size=1400,1000'
-          ]
-        });
-      }
-    }
+    // Browser execution remains Console-owned: attachment never creates profiles or contexts.
+    if (!policy.externalVisibleChrome) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment is required; competing runtime launch is prohibited.');
+    const externalRuntime = await connectExternalVisibleChrome(policy);
+    connectedBrowser = externalRuntime.connectedBrowser;
+    browser = externalRuntime.context;
   }
 
-  if (!page) {
-    const existingPages = browser.pages();
-    page = existingPages.length > 0 ? existingPages[0] : await browser.newPage();
-    await page.bringToFront().catch(() => {});
-    if (page.url() === 'about:blank') {
-      await page.goto(getStartupUrl(), { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(error => {
-        console.warn(`Startup page open failed. ${normalizeError(error)}`);
-      });
-    }
+  const session = visibleRequest.getStore();
+  if (!session?.ok) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'A verified visible-session lease is required.');
+  const selectedId = session.evidence.targetId;
+  let selected;
+  for (const candidate of browser.pages()) {
+    if (!candidate.isClosed() && await getPageTargetId(candidate) === selectedId) selected = candidate;
   }
+  if (!selected) throw revisionError('WEB_TARGET_STALE', 'The verified target no longer exists.');
+  page = selected;
 
   return page;
 }
@@ -657,7 +589,8 @@ async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
   }
 
   const cdpBrowser = await chromium.connectOverCDP(connectEndpoint, { timeout: Math.max(250, timeoutMs) });
-  const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+  const context = cdpBrowser.contexts()[0];
+  if (!context) { await cdpBrowser.close(); throw new Error('Console-owned browser context is unavailable'); }
   return { connectedBrowser: cdpBrowser, context };
 }
 
@@ -1019,10 +952,7 @@ async function getPageTargetId(target) {
     await session?.detach().catch(() => {});
   }
 
-  return `fallback:${hashStableJson({
-    url: target.url(),
-    title: await target.title().catch(() => ''),
-  })}`;
+  throw revisionError('WEB_TARGET_STALE', 'Native CDP target identity is unavailable; synthetic identity is prohibited.');
 }
 
 function expectedRevisionsFromBody(body) {
@@ -1096,30 +1026,12 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
 }
 
 async function listBrowserTargets() {
-  await ensurePage();
-  const pages = browser ? browser.pages() : [];
-  const targets = [];
-
-  for (let index = 0; index < pages.length; index += 1) {
-    const item = pages[index];
-    const closed = item.isClosed();
-    targets.push({
-      index,
-      targetId: closed ? null : await getPageTargetId(item),
-      active: item === page,
-      closed,
-      url: closed ? null : item.url(),
-      title: closed ? null : await item.title().catch(() => null)
-    });
-  }
-
-  const active = targets.find(item => item.active) ?? null;
-  return {
-    ok: true,
-    activeIndex: active?.index ?? null,
-    activeTargetId: active?.targetId ?? null,
-    targets
-  };
+  const inventory = await listRawCdpTargets(getPolicy());
+  const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
+  const targets = inventory.targets.filter(item => item.type === 'page').map((item, index) => ({
+    ...item, index, targetId: item.id, active: item.id === activeTargetId, closed: false,
+  }));
+  return { ...inventory, targets, activeTargetId, activeIndex: targets.find(item => item.active)?.index ?? null };
 }
 
 async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
@@ -1766,7 +1678,9 @@ app.get('/healthz', (_req, res) => {
     ok: true,
     service: 'browser-mcp',
     configuredVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
-    browserVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
+    browserVisible: null,
+    visibility_verified: false,
+    user_interaction_ready: false,
     browserChannel: policy.browserChannel,
     browserMode: getBrowserMode(policy),
     persistentProfile: true,
@@ -1785,6 +1699,57 @@ app.use((req, res, next) => {
   }
 
   return next();
+});
+
+// All automation routes share the same native visibility policy. Diagnostics never imply readiness.
+const visibleRequest = new AsyncLocalStorage();
+let visibleOperationInFlight = false;
+let boundVisibleRuntime;
+const diagnosticRoutes = new Set(['/browser-status', '/health-full', '/shared-browser-status', '/connector-sync-plan', '/browser-cdp-targets', '/browser-targets', '/browser-cdp-verify-chatgpt-home', '/browser-cdp-cleanup-plan-chatgpt-home']);
+app.use(async (req, res, next) => {
+  if (req.path === '/healthz') return next();
+  if (diagnosticRoutes.has(req.path)) {
+    const send = res.json.bind(res);
+    res.json = body => send({ ...body, visibility_verified: false, user_interaction_ready: false });
+    return next();
+  }
+  if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
+  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY' });
+  visibleOperationInFlight = true;
+  const release = () => { visibleOperationInFlight = false; };
+  res.once('finish', release);
+  // A disconnected client must not release the lease while automation is still running.
+  try {
+    const correlationId = req.body?.correlation?.invocationId || randomUUID();
+    const port = getPolicy().remoteDebuggingPort;
+    let targetId = req.body?.targetId || req.body?.expectedTargetId;
+    if (!targetId && (req.body?.index !== undefined || req.body?.urlContains || (req.path === '/browser-bind' && req.body?.url))) {
+      const inventory = await listRawCdpTargets(getPolicy());
+      const candidates = inventory.targets.filter(t => t.type === 'page').filter((t, i) => req.body.index === undefined || i === req.body.index).filter(t => !req.body.urlContains || String(t.url).includes(req.body.urlContains)).filter(t => req.path !== '/browser-bind' || !req.body.url || t.url === req.body.url);
+      if (candidates.length !== 1) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'AMBIGUOUS_VISIBLE_SESSIONS' });
+      targetId = candidates[0].id;
+    }
+    if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
+    const before = boundVisibleRuntime && targetId
+      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime })
+      : await selectVisibleTarget([port], targetId, correlationId);
+    if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
+    if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
+    const send = res.json.bind(res);
+    res.json = body => {
+      void (async () => {
+        let after;
+        try {
+          const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
+          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId });
+        } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
+        if (after.ok) boundVisibleRuntime = after.evidence;
+        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after, browser_telemetry: { correlation_id: correlationId, cdp_success: after.states.includes('CDP_CONNECTED'), operation_success: body.ok === true, navigation_success: ['/open', '/open-job'].includes(req.path) ? body.ok === true : null, target_binding_success: after.ok, visibility_verification_success: after.visibility_verified, user_interaction_ready: after.user_interaction_ready } });
+      })().catch(() => { send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false }); }).finally(release);
+      return res;
+    };
+    return visibleRequest.run(before, next);
+  } catch { return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false }); }
 });
 
 app.post('/browser-status', async (_req, res) => {
