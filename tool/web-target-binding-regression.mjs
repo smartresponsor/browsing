@@ -13,8 +13,8 @@ for (const token of [
 }
 
 for (const token of [
-  "targetId: closed ? null : await getPageTargetId(item)",
-  "activeTargetId: active?.targetId ?? null",
+  "targetId: item.id",
+  "activeTargetId,",
   "async function bindBrowserTarget({ targetId, index, url, urlContains } = {})",
   "if (targetId) {",
   "await getPageTargetId(candidate) === String(targetId)",
@@ -26,5 +26,8 @@ for (const token of [
   assert.equal(worker.includes(token), true, `Exact target binding invariant missing: ${token}`);
 }
 
+const inventoryFunction = worker.slice(worker.indexOf("async function listBrowserTargets()"), worker.indexOf("async function bindBrowserTarget("));
+assert.equal(inventoryFunction.includes("await ensurePage()"), false, "Read-only target inventory must never attach, navigate or launch a browser");
+assert.equal(inventoryFunction.includes("listRawCdpTargets(getPolicy())"), true, "Inventory must retain native target identity even without an automation binding");
 console.log("Web exact target binding regression passed.");
 
