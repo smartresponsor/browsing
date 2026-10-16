@@ -591,6 +591,15 @@ async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
   const cdpBrowser = await chromium.connectOverCDP(connectEndpoint, { timeout: Math.max(250, timeoutMs) });
   const context = cdpBrowser.contexts()[0];
   if (!context) { await cdpBrowser.close(); throw new Error('Console-owned browser context is unavailable'); }
+  if (process.platform === 'linux') {
+    // Bound actionability failures below the Console bridge's 20s deadline.
+    context.setDefaultTimeout(10000);
+    context.setDefaultNavigationTimeout(10000);
+    // Legacy Playwright CDP attach overrides Edge's persisted download folder.
+    const downloadSession = await cdpBrowser.newBrowserCDPSession();
+    await downloadSession.send('Browser.setDownloadBehavior', { behavior: 'default' });
+    await downloadSession.detach();
+  }
   return { connectedBrowser: cdpBrowser, context };
 }
 
@@ -1293,10 +1302,12 @@ async function writeField(target, locator, value, field = {}) {
       throw revisionError('WEB_CONTROL_UNSUPPORTED', 'ARIA autocomplete mutation only supports input/textarea/contenteditable controls.', { controlId: field.controlId || null, tagName });
     }
 
-    await locator.click();
+    // Focus is not blocked by fixed navigation covering pointer coordinates.
+    await locator.focus();
     await locator.fill(desired);
     const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
     const option = optionFrame.getByRole('option', { name: desired, exact: true });
+    await option.first().waitFor({ state: 'visible' });
     const optionCount = await option.count();
     if (optionCount !== 1) {
       throw revisionError(
@@ -1307,6 +1318,7 @@ async function writeField(target, locator, value, field = {}) {
         { desired, optionCount, controlId: field.controlId || null }
       );
     }
+    await option.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
     await option.click();
     const actual = await locator.evaluate(node => {
       if ('value' in node) return String(node.value ?? '').trim();
@@ -1722,6 +1734,7 @@ app.use(async (req, res, next) => {
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
+    const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && (req.body?.index !== undefined || req.body?.urlContains || (req.path === '/browser-bind' && req.body?.url))) {
       const inventory = await listRawCdpTargets(getPolicy());
@@ -1731,8 +1744,8 @@ app.use(async (req, res, next) => {
     }
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
     const before = boundVisibleRuntime && targetId
-      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime })
-      : await selectVisibleTarget([port], targetId, correlationId);
+      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
+      : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
@@ -1741,7 +1754,7 @@ app.use(async (req, res, next) => {
         let after;
         try {
           const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
-          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId });
+          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after, browser_telemetry: { correlation_id: correlationId, cdp_success: after.states.includes('CDP_CONNECTED'), operation_success: body.ok === true, navigation_success: ['/open', '/open-job'].includes(req.path) ? body.ok === true : null, target_binding_success: after.ok, visibility_verification_success: after.visibility_verified, user_interaction_ready: after.user_interaction_ready } });
@@ -2020,6 +2033,40 @@ app.post('/page-capture', async (req, res) => {
   }
 });
 
+app.post('/page-capture-dom', async (_req, res) => {
+  try {
+    const target = await ensurePage();
+    await ensureNotChallenge(target);
+    const dom = await target.evaluate(() => ({
+      text: String(document.body?.innerText || '').slice(0, 24000),
+      links: [...document.querySelectorAll('a[href]')].slice(0, 250).map(a => ({
+        text: String(a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 200),
+        href: a.href
+      })),
+      identifiers: [...document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id],a[href],input[type=hidden]')].slice(0, 500).map(e => ({tag:e.tagName.toLowerCase(),attributes:[...e.attributes].filter(a=>/^(data-|href$|name$|value$)/.test(a.name)).map(a=>[a.name,a.value.slice(0,200)])})).filter(e=>e.attributes.length),
+      findControls: [...document.querySelectorAll('input,button,[role=searchbox]')].slice(0, 100).map(e=>({tag:e.tagName.toLowerCase(),type:e.getAttribute('type'),placeholder:e.getAttribute('placeholder'),ariaLabel:e.getAttribute('aria-label'),outer:e.outerHTML.slice(0,400)})),
+      items: [...document.querySelectorAll('article,[data-testid],li')].slice(0, 250).map(e => ({
+        tag: e.tagName.toLowerCase(),
+        testId: e.getAttribute('data-testid'),
+        text: String(e.innerText || '').trim().slice(0, 650),
+        links: [...e.querySelectorAll('a[href]')].slice(0, 5).map(a => a.href)
+      })).filter(e => e.text),
+    }));
+    res.json({ ok: true, url: target.url(), title: await target.title(), targetId: await getPageTargetId(target), dom });
+  } catch (error) {
+    sendWebError(res, error, 'WEB_PAGE_CAPTURE_DOM_FAILED');
+  }
+});
+
+app.post('/page-capture-form', async (_req, res) => {
+  try {
+    const target = await ensurePage();
+    res.json(await capturePageArtifact(target, { screenshot: false }));
+  } catch (error) {
+    sendWebError(res, error, 'WEB_PAGE_CAPTURE_FORM_FAILED');
+  }
+});
+
 app.post('/wait-for-ready', async (req, res) => {
   try {
     const target = await ensurePage();
@@ -2291,6 +2338,7 @@ app.post('/click', async (req, res) => {
     if (count <= nth) {
       throw revisionError('WEB_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
     }
+    await locator.nth(nth).evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});

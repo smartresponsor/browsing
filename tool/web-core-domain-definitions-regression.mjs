@@ -6,7 +6,7 @@ import { webCapabilityContract } from "../mcp-server/src/capability-contract.js"
 const definitions = createWebCoreDomainToolDefinitions();
 const contractByName = new Map(webCapabilityContract.tools.map((tool) => [tool.name, tool]));
 
-assert.equal(definitions.length, 15, "Core Console-consumable Web domain surface must have 15 definitions");
+assert.equal(definitions.length, 17, "Core Console-consumable Web domain surface must have 17 definitions");
 assert.equal(new Set(definitions.map((tool) => tool.canonicalName)).size, definitions.length, "Core domain canonical names must be unique");
 assert.equal(new Set(definitions.map((tool) => tool.consoleName)).size, definitions.length, "Console-prefixed Web names must be unique");
 
