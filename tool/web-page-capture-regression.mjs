@@ -22,7 +22,10 @@ for (const token of [
 for (const invariant of [
   "req.body?.captureView === 'dom'",
   "req.body?.captureView === 'form'",
-  "captureView: 'dom', dom: { text: artifact.visibleText, links }",
+  "captureView: 'dom', dom: { text: artifact.visibleText, ...dom }",
+  "const identifiers = Array.from(document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id]'))",
+  "const findControls = Array.from(document.querySelectorAll('input,button,[role=searchbox]'))",
+  "const items = Array.from(document.querySelectorAll('article,[data-testid],li'))",
   "Array.from(document.querySelectorAll('a[href]')).slice(0, 350)",
 ]) {
   assert.ok(worker.includes(invariant), `Read-only DOM/form projection missing: ${invariant}`);

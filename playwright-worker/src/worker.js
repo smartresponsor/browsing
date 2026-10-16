@@ -672,7 +672,17 @@ async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
   }
 
   const cdpBrowser = await chromium.connectOverCDP(connectEndpoint, { timeout: Math.max(250, timeoutMs) });
-  const context = cdpBrowser.contexts()[0] ?? await cdpBrowser.newContext();
+  const context = cdpBrowser.contexts()[0];
+  if (!context) { await cdpBrowser.close(); throw new Error('Console-owned browser context is unavailable'); }
+  if (process.platform === 'linux') {
+    // Bound actionability failures below the Console bridge's 20s deadline.
+    context.setDefaultTimeout(10000);
+    context.setDefaultNavigationTimeout(10000);
+    // Legacy Playwright CDP attach overrides Edge's persisted download folder.
+    const downloadSession = await cdpBrowser.newBrowserCDPSession();
+    await downloadSession.send('Browser.setDownloadBehavior', { behavior: 'default' });
+    await downloadSession.detach();
+  }
   return { connectedBrowser: cdpBrowser, context };
 }
 
@@ -1382,10 +1392,12 @@ async function writeField(target, locator, value, field = {}) {
       throw revisionError('WEB_CONTROL_UNSUPPORTED', 'ARIA autocomplete mutation only supports input/textarea/contenteditable controls.', { controlId: field.controlId || null, tagName });
     }
 
-    await locator.click();
+    // Focus is not blocked by fixed navigation covering pointer coordinates.
+    await locator.focus();
     await locator.fill(desired);
     const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
     const option = optionFrame.getByRole('option', { name: desired, exact: true });
+    await option.first().waitFor({ state: 'visible' });
     const optionCount = await option.count();
     if (optionCount !== 1) {
       throw revisionError(
@@ -1396,6 +1408,7 @@ async function writeField(target, locator, value, field = {}) {
         { desired, optionCount, controlId: field.controlId || null }
       );
     }
+    await option.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
     await option.click();
     const actual = await locator.evaluate(node => {
       if ('value' in node) return String(node.value ?? '').trim();
@@ -1840,11 +1853,12 @@ app.use(async (req, res, next) => {
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
+    const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
     const before = boundVisibleRuntime && targetId
-      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime })
-      : await selectVisibleTarget([port], targetId, correlationId);
+      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
+      : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
@@ -1853,10 +1867,8 @@ app.use(async (req, res, next) => {
         let after;
         try {
           const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
-          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId });
-        } catch {
-          after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false };
-        }
+          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
+        } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
       })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
@@ -2132,14 +2144,38 @@ app.post('/page-capture', async (req, res) => {
     await target.bringToFront().catch(() => {});
     const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
     if (req.body?.captureView === 'dom') {
-      const links = await target.evaluate(() => Array.from(document.querySelectorAll('a[href]')).slice(0, 350)
-        .map(a => ({
-          text: String(a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240),
-          href: String(a.href || ''),
-        }))
-        .filter(link => link.href.startsWith('https://') || link.href.startsWith('http://')));
+      const dom = await target.evaluate(() => {
+        const text = (value, max = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+        const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 350)
+          .map(a => ({ text: text(a.innerText || a.textContent), href: String(a.href || '') }))
+          .filter(link => link.href.startsWith('https://') || link.href.startsWith('http://'));
+        const identifiers = Array.from(document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id]')).slice(0, 250)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            values: Object.fromEntries(['data-id', 'data-item-id', 'data-auction-id', 'data-lot-id']
+              .filter(name => element.hasAttribute(name))
+              .map(name => [name, text(element.getAttribute(name), 160)]))
+          }));
+        const findControls = Array.from(document.querySelectorAll('input,button,[role=searchbox]')).slice(0, 80)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            type: element.getAttribute('type'),
+            placeholder: text(element.getAttribute('placeholder')),
+            ariaLabel: text(element.getAttribute('aria-label')),
+            label: text(element.innerText || element.textContent)
+          }));
+        const items = Array.from(document.querySelectorAll('article,[data-testid],li')).slice(0, 160)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            testId: text(element.getAttribute('data-testid'), 120),
+            text: text(element.innerText || element.textContent, 650),
+            links: Array.from(element.querySelectorAll('a[href]')).slice(0, 5)
+              .map(a => String(a.href || '')).filter(href => /^https?:\/\//.test(href))
+          })).filter(item => item.text);
+        return { links, identifiers, findControls, items };
+      });
       const { fields: _fields, submitCandidates: _submitCandidates, ...pageIdentity } = artifact;
-      return res.json({ ...pageIdentity, captureView: 'dom', dom: { text: artifact.visibleText, links } });
+      return res.json({ ...pageIdentity, captureView: 'dom', dom: { text: artifact.visibleText, ...dom } });
     }
     if (req.body?.captureView === 'form') {
       return res.json({ ...artifact, captureView: 'form' });
@@ -2428,6 +2464,7 @@ app.post('/click', async (req, res) => {
     if (count <= nth) {
       throw revisionError('WEB_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
     }
+    await locator.nth(nth).evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
