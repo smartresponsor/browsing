@@ -40,13 +40,13 @@ assert.equal(
 );
 
 for (const [expected, status] of [
-  [{ targetId: "target-2" }, "NETWORK_TARGET_STALE"],
-  [{ pageRevision: "stale-page" }, "NETWORK_PAGE_REVISION_STALE"],
-  [{ formRevision: "stale-form" }, "NETWORK_FORM_REVISION_STALE"],
+  [{ targetId: "target-2" }, "WEB_TARGET_STALE"],
+  [{ pageRevision: "stale-page" }, "WEB_PAGE_REVISION_STALE"],
+  [{ formRevision: "stale-form" }, "WEB_FORM_REVISION_STALE"],
 ]) {
   assert.throws(
     () => assertExpectedRevisions(expected, base),
-    (error) => error?.networkStatus === status && typeof error?.evidence === "object",
+    (error) => error?.webStatus === status && typeof error?.evidence === "object",
     `expected stale revision status ${status}`,
   );
 }
@@ -62,5 +62,5 @@ const changedForm = buildRevisionEnvelope({
 assert.notEqual(changedForm.formRevision, base.formRevision);
 assert.notEqual(changedForm.pageRevision, base.pageRevision);
 
-console.log("Network revision contract regression passed.");
+console.log("Web revision contract regression passed.");
 

@@ -15,5 +15,5 @@ for (const token of [
   assert.equal(worker.includes(token), true, `Multi-select invariant missing: ${token}`);
 }
 
-console.log("Network native multi-select regression passed.");
+console.log("Web native multi-select regression passed.");
 

@@ -12,7 +12,7 @@ import {
 } from "../playwright-worker/src/approval-receipt.js";
 import { hashStableJson } from "../playwright-worker/src/revision-contract.js";
 
-const root = await mkdtemp(path.join(os.tmpdir(), "network-approval-"));
+const root = await mkdtemp(path.join(os.tmpdir(), "web-approval-"));
 try {
   const operations = normalizeFillApprovalOperations([
     { controlId: "control-a", value: "Alice" },
@@ -45,7 +45,7 @@ try {
       formRevision: "form-1",
       payloadHash: "0".repeat(64),
     }),
-    (error) => error?.networkStatus === "NETWORK_APPROVAL_STALE",
+    (error) => error?.webStatus === "WEB_APPROVAL_STALE",
   );
 
   const consumed = await consumeApprovalReceipt({
@@ -70,7 +70,7 @@ try {
       formRevision: "form-1",
       payloadHash,
     }),
-    (error) => error?.networkStatus === "NETWORK_APPROVAL_RECEIPT_REPLAYED",
+    (error) => error?.webStatus === "WEB_APPROVAL_RECEIPT_REPLAYED",
   );
 
   const dynamicFillReceipt = await createApprovalReceipt({
@@ -113,14 +113,14 @@ try {
       formRevision: "form-2",
       payloadHash: hashStableJson({ reviewHash: "review-a" }),
     }),
-    (error) => error?.networkStatus === "NETWORK_APPROVAL_STALE",
+    (error) => error?.webStatus === "WEB_APPROVAL_STALE",
   );
 } finally {
   await rm(root, { recursive: true, force: true });
 }
 
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
-const definitionSource = fs.readFileSync(new URL("../mcp-server/src/core-domain-tool-definitions.cjs", import.meta.url), "utf8");
+const definitionSource = fs.readFileSync(new URL("../mcp-server/src/web-domain-tool-definitions.cjs", import.meta.url), "utf8");
 
 for (const token of [
   "const approvalReceipt = await createApprovalReceipt({",
@@ -131,5 +131,5 @@ for (const token of [
   assert.equal(workerSource.includes(token) || definitionSource.includes(token), true, `Approval receipt integration invariant missing: ${token}`);
 }
 
-console.log("Network approval receipt regression passed.");
+console.log("Web approval receipt regression passed.");
 

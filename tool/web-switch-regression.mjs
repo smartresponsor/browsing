@@ -18,5 +18,5 @@ for (const token of [
   assert.equal(worker.includes(token), true, `ARIA switch invariant missing: ${token}`);
 }
 
-console.log("Network ARIA switch regression passed.");
+console.log("Web ARIA switch regression passed.");
 

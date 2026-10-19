@@ -6,6 +6,7 @@ import { classifyChallengeText, classifyHumanBoundary } from "../playwright-work
 assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
+assert.equal(classifyChallengeText("The system will create your account after you submit your application. Use a password. Use a one-time code."), null);
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
 assert.equal(classifyChallengeText("Explore Security and Asset Protection careers"), null);
 assert.equal(classifyChallengeText("Assistance programs for life’s challenges"), null);
@@ -58,9 +59,9 @@ assert.equal(
 
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 for (const token of [
-  "'NETWORK_HUMAN_ACTION_REQUIRED'",
+  "'WEB_HUMAN_ACTION_REQUIRED'",
   "requestedAction: boundary.requestedAction",
-  "hasPasswordField: Boolean(document.querySelector('input[type=\"password\"]'))",
+  "hasPasswordField: Array.from(document.querySelectorAll('input[type=\"password\"]')).some(element => {",
   "hasCredentialIdentifierField: Boolean(document.querySelector([",
   "consentText,",
   "alertDialogText,",
@@ -70,15 +71,15 @@ for (const token of [
   "[role=\"slider\"]",
   "[role=\"spinbutton\"]",
   "resumeCondition:",
-  "sendNetworkError(res, error, 'NETWORK_PAGE_CAPTURE_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_INSPECT_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_FORM_EXTRACT_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_CLICK_FAILED', correlation)",
-  "sendNetworkError(res, error, 'NETWORK_REVIEW_CAPTURE_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_OPEN_FAILED')",
-  "sendNetworkError(res, error, 'NETWORK_OPEN_JOB_FAILED')",
+  "sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED')",
+  "sendWebError(res, error, 'WEB_INSPECT_FAILED')",
+  "sendWebError(res, error, 'WEB_FORM_EXTRACT_FAILED')",
+  "sendWebError(res, error, 'WEB_CLICK_FAILED', correlation)",
+  "sendWebError(res, error, 'WEB_REVIEW_CAPTURE_FAILED')",
+  "sendWebError(res, error, 'WEB_OPEN_FAILED')",
+  "sendWebError(res, error, 'WEB_OPEN_JOB_FAILED')",
 ]) {
   assert.equal(workerSource.includes(token), true, `Human-boundary propagation invariant missing: ${token}`);
 }
 
-console.log("Network human-boundary regression passed.");
+console.log("Web human-boundary regression passed.");

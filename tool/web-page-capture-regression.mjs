@@ -37,5 +37,5 @@ for (const text of ["Submit application", "Complete application", "Finish applic
 
 assert.equal(classifyFinalActionCandidate({ text: "Continue", type: "submit" }), true, "native submit controls remain conservatively final candidates");
 
-console.log("Network page capture hashing regression passed.");
+console.log("Web page capture hashing regression passed.");
 
