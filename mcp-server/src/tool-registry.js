@@ -1,22 +1,22 @@
 import {
-  getNetworkCapabilityRoute,
-  listNetworkCapabilityToolNames,
-  networkCapabilityAliases
+  getWebCapabilityRoute,
+  listWebCapabilityToolNames,
+  webCapabilityAliases
 } from './capability-contract.js';
-import { createNetworkCoreDomainToolDefinitions } from './core-domain-tool-definitions.js';
+import { createWebCoreDomainToolDefinitions } from './web-domain-tool-definitions.js';
 
-const workerCapabilityNames = Object.freeze(listNetworkCapabilityToolNames());
-const coreDomainPublicNames = createNetworkCoreDomainToolDefinitions().flatMap((tool) => [tool.canonicalName, ...tool.aliases]);
+const workerCapabilityNames = Object.freeze(listWebCapabilityToolNames());
+const coreDomainPublicNames = createWebCoreDomainToolDefinitions().flatMap((tool) => [tool.canonicalName, ...tool.aliases]);
 const publicToolNames = Object.freeze([...new Set([
-  ...listNetworkCapabilityToolNames({ publicOnly: true }),
-  ...Object.keys(networkCapabilityAliases).filter((name) => name.startsWith('browser.')),
-  'network.browser.status',
-  'network.browser.restart',
-  'network.browser.kill',
+  ...listWebCapabilityToolNames({ publicOnly: true }),
+  ...Object.keys(webCapabilityAliases),
+  'web.browser.status',
+  'web.browser.restart',
+  'web.browser.kill',
   ...coreDomainPublicNames
 ])]);
 
-export class NetworkToolRegistry {
+export class WebToolRegistry {
   constructor(workerUrl, browserWorkerToken = '') {
     this.workerUrl = workerUrl;
     this.browserWorkerToken = browserWorkerToken;
@@ -55,7 +55,7 @@ export class NetworkToolRegistry {
 
     return {
       ok: false,
-      status: 'NETWORK_BROWSER_WORKER_ERROR',
+      status: 'WEB_BROWSER_WORKER_ERROR',
       worker: {
         ok: false,
         url: this.workerUrl,
@@ -64,26 +64,26 @@ export class NetworkToolRegistry {
         httpStatusText: response.statusText || ''
       },
       result: body ?? bodyText.slice(0, 2000),
-      recommendedAction: 'Inspect the worker response, then restart the Network browser worker if this was not an expected guarded failure.'
+      recommendedAction: 'Inspect the worker response, then restart the Web browser worker if this was not an expected guarded failure.'
     };
   }
 
   workerUnavailableResult(path, error) {
     return {
       ok: false,
-      status: 'NETWORK_BROWSER_WORKER_DOWN',
+      status: 'WEB_BROWSER_WORKER_DOWN',
       worker: {
         ok: false,
         url: this.workerUrl,
         path,
         error: normalizeError(error)
       },
-      recommendedAction: 'Start the Network browser worker before using Browser MCP browser tools.'
+      recommendedAction: 'Start the Web browser worker before using Browser MCP browser tools.'
     };
   }
 
   async callTool(toolName, payload) {
-    const route = getNetworkCapabilityRoute(toolName);
+    const route = getWebCapabilityRoute(toolName);
     if (!route) {
       throw new Error(`Unknown Browser MCP tool: ${toolName}`);
     }

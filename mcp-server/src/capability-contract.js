@@ -1,43 +1,33 @@
-export const networkCapabilityAliases = Object.freeze({
-  'browser.status': 'network.browser_status',
-  'browser.restart': 'network.browser_restart',
-  'browser.kill': 'network.browser_kill',
-  'browser.health': 'network.health_full',
-  'browser.shared.status': 'network.shared_browser_status',
-  'browser.cdp.targets': 'network.browser_cdp_targets',
-  'browser.chatgpt.home.verify': 'network.browser_cdp_verify_chatgpt_home',
-  'browser.chatgpt.home.cleanup.plan': 'network.browser_cdp_cleanup_plan_chatgpt_home',
-  'browser.chatgpt.home.cleanup': 'network.browser_cdp_cleanup_chatgpt_home',
-  'browser.surface.plan': 'network.surface_plan',
-  'browser.surface.execute': 'network.surface_execute',
-  'browser.targets': 'network.browser_targets',
-  'browser.bind': 'network.browser_bind',
-  'browser.open': 'network.open',
-  'browser.job.open': 'network.open_job',
-  'browser.chatgpt.snapshot': 'network.chatgpt_snapshot',
-  'browser.page.capture': 'network.page_capture',
-  'browser.page.wait': 'network.wait_for_ready',
-  'browser.click': 'network.click',
-  'browser.form.inspect': 'network.inspect',
-  'browser.form.extract': 'network.extract_form',
-  'browser.form.proposal.preview': 'network.propose',
-  'browser.form.fill': 'network.fill_after_approval',
-  'browser.form.upload': 'network.upload_artifact',
-  'browser.form.review.snapshot': 'network.review_before_submit',
-  'browser.form.submit': 'network.submit_after_approval',
-  'network.browser.status': 'network.browser_status',
-  'network.browser.restart': 'network.browser_restart',
-  'network.browser.kill': 'network.browser_kill',
-  'network.job.open': 'network.open_job',
-  'network.chatgpt.snapshot': 'network.chatgpt_snapshot',
-  'network.form.extract': 'network.extract_form',
-  'network.form.proposal.preview': 'network.propose',
-  'network.form.fill': 'network.fill_after_approval',
-  'network.form.upload': 'network.upload_artifact',
-  'network.form.review.snapshot': 'network.review_before_submit'
+export const webCapabilityAliases = Object.freeze({
+  'web.browser.status': 'web.browser_status',
+  'web.browser.restart': 'web.browser_restart',
+  'web.browser.kill': 'web.browser_kill',
+  'web.browser.health': 'web.health_full',
+  'web.browser.shared.status': 'web.shared_browser_status',
+  'web.browser.cdp.targets': 'web.browser_cdp_targets',
+  'web.browser.chatgpt.home.verify': 'web.browser_cdp_verify_chatgpt_home',
+  'web.browser.chatgpt.home.cleanup.plan': 'web.browser_cdp_cleanup_plan_chatgpt_home',
+  'web.browser.chatgpt.home.cleanup': 'web.browser_cdp_cleanup_chatgpt_home',
+  'web.surface.plan': 'web.surface_plan',
+  'web.surface.execute': 'web.surface_execute',
+  'web.browser.targets': 'web.browser_targets',
+  'web.browser.bind': 'web.browser_bind',
+  'web.target.open': 'web.open',
+  'web.job.open': 'web.open_job',
+  'web.chatgpt.snapshot': 'web.chatgpt_snapshot',
+  'web.page.capture': 'web.page_capture',
+  'web.page.wait': 'web.wait_for_ready',
+  'web.page.click': 'web.click',
+  'web.form.inspect': 'web.inspect',
+  'web.form.extract': 'web.extract_form',
+  'web.form.proposal.preview': 'web.propose',
+  'web.form.fill': 'web.fill_after_approval',
+  'web.form.upload': 'web.upload_artifact',
+  'web.form.review.snapshot': 'web.review_before_submit',
+  'web.form.submit': 'web.submit_after_approval'
 });
 
-export const networkCapabilityContract = Object.freeze({
+export const webCapabilityContract = Object.freeze({
   schemaVersion: 2,
   contractVersion: '2.1.0',
   owner: 'browser-mcp',
@@ -50,8 +40,8 @@ export const networkCapabilityContract = Object.freeze({
     domainStateOwner: 'browser-mcp',
     standaloneConnectorRequired: false,
     competingBrowserLaunchAllowed: false,
-    genericAsyncLifecycleOwnedByNetwork: false,
-    genericExecutionLeaseOwnedByNetwork: false
+    genericAsyncLifecycleOwnedByWeb: false,
+    genericExecutionLeaseOwnedByWeb: false
   }),
   worker: Object.freeze({
     defaultUrl: 'http://127.0.0.1:8791',
@@ -60,100 +50,100 @@ export const networkCapabilityContract = Object.freeze({
     browserAttachment: 'console-owned-cdp'
   }),
   tools: Object.freeze([
-    tool('network.browser_status', '/browser-status', 'read', {
+    tool('web.browser_status', '/browser-status', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'runtime-snapshot'
     }),
-    tool('network.browser_restart', '/browser-restart', 'write', {
+    tool('web.browser_restart', '/browser-restart', 'write', {
       riskClass: 'runtime-control', binding: 'optional', replayPolicy: 'non-idempotent', postcondition: 'browser-runtime-ready'
     }),
-    tool('network.browser_kill', '/browser-kill', 'write', {
-      riskClass: 'runtime-control', binding: 'optional', replayPolicy: 'idempotent', postcondition: 'network-browser-session-closed'
+    tool('web.browser_kill', '/browser-kill', 'write', {
+      riskClass: 'runtime-control', binding: 'optional', replayPolicy: 'idempotent', postcondition: 'web-browser-session-closed'
     }),
-    tool('network.health_full', '/health-full', 'read', {
+    tool('web.health_full', '/health-full', 'read', {
       riskClass: 'observation', binding: 'optional', timeoutClass: 'diagnostic', postcondition: 'diagnostic-snapshot'
     }),
-    tool('network.shared_browser_status', '/shared-browser-status', 'read', {
+    tool('web.shared_browser_status', '/shared-browser-status', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'shared-runtime-snapshot'
     }),
-    tool('network.browser_cdp_targets', '/browser-cdp-targets', 'read', {
+    tool('web.browser_cdp_targets', '/browser-cdp-targets', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'target-inventory'
     }),
-    tool('network.browser_cdp_verify_chatgpt_home', '/browser-cdp-verify-chatgpt-home', 'read', {
+    tool('web.browser_cdp_verify_chatgpt_home', '/browser-cdp-verify-chatgpt-home', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'candidate-verification'
     }),
-    tool('network.browser_cdp_cleanup_plan_chatgpt_home', '/browser-cdp-cleanup-plan-chatgpt-home', 'read', {
+    tool('web.browser_cdp_cleanup_plan_chatgpt_home', '/browser-cdp-cleanup-plan-chatgpt-home', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'cleanup-plan'
     }),
-    tool('network.browser_cdp_cleanup_chatgpt_home', '/browser-cdp-cleanup-chatgpt-home', 'write', {
+    tool('web.browser_cdp_cleanup_chatgpt_home', '/browser-cdp-cleanup-chatgpt-home', 'write', {
       riskClass: 'destructive-ui', binding: 'optional', approvalPolicy: 'explicit-boolean', replayPolicy: 'idempotent',
       postcondition: 'verified-empty-targets-closed'
     }),
-    tool('network.surface_plan', '/connector-sync-plan', 'read', {
+    tool('web.surface_plan', '/connector-sync-plan', 'read', {
       riskClass: 'observation', binding: 'optional', legacyConnectorSurface: true, postcondition: 'connector-refresh-plan'
     }),
-    tool('network.surface_execute', '/connector-sync-execute', 'write', {
+    tool('web.surface_execute', '/connector-sync-execute', 'write', {
       riskClass: 'account-session-mutation', binding: 'optional', approvalPolicy: 'explicit-boolean',
       legacyConnectorSurface: true, postcondition: 'connector-refresh-result'
     }),
-    tool('network.connector_sync_execute', '/connector-sync-execute', 'write', {
+    tool('web.connector_sync_execute', '/connector-sync-execute', 'write', {
       riskClass: 'account-session-mutation', binding: 'optional', approvalPolicy: 'explicit-boolean',
       visibility: 'internal', legacyConnectorSurface: true, postcondition: 'connector-refresh-result'
     }),
-    tool('network.browser_targets', '/browser-targets', 'read', {
+    tool('web.browser_targets', '/browser-targets', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'target-inventory'
     }),
-    tool('network.browser_bind', '/browser-bind', 'write', {
+    tool('web.browser_bind', '/browser-bind', 'write', {
       riskClass: 'reversible-ui', binding: 'optional', replayPolicy: 'idempotent', postcondition: 'target-bound'
     }),
-    tool('network.open', '/open', 'write', {
+    tool('web.open', '/open', 'write', {
       riskClass: 'navigation', binding: 'optional', replayPolicy: 'non-idempotent', postcondition: 'navigation-observed'
     }),
-    tool('network.open_job', '/open-job', 'write', {
+    tool('web.open_job', '/open-job', 'write', {
       riskClass: 'navigation', binding: 'optional', replayPolicy: 'non-idempotent', postcondition: 'navigation-observed'
     }),
-    tool('network.open_fresh', '/open-fresh', 'write', {
+    tool('web.open_fresh', '/open-fresh', 'write', {
       riskClass: 'navigation', binding: 'optional', replayPolicy: 'non-idempotent', visibility: 'internal',
       postcondition: 'new-target-opened'
     }),
-    tool('network.chatgpt_snapshot', '/chatgpt-snapshot', 'read', {
+    tool('web.chatgpt_snapshot', '/chatgpt-snapshot', 'read', {
       riskClass: 'observation', binding: 'required', postcondition: 'chatgpt-snapshot'
     }),
-    tool('network.page_capture', '/page-capture', 'read', {
+    tool('web.page_capture', '/page-capture', 'read', {
       riskClass: 'observation', binding: 'required', artifactBehavior: 'optional-screenshot',
       postcondition: 'page-revision-snapshot'
     }),
-    tool('network.wait_for_ready', '/wait-for-ready', 'read', {
+    tool('web.wait_for_ready', '/wait-for-ready', 'read', {
       riskClass: 'observation', binding: 'required', timeoutClass: 'bounded-wait', postcondition: 'readiness-evidence'
     }),
-    tool('network.click', '/click', 'write', {
+    tool('web.click', '/click', 'write', {
       riskClass: 'reversible-ui', binding: 'required', replayPolicy: 'non-idempotent',
       executionCorrelation: 'console-owned-optional', postcondition: 'transition-observed-or-explicitly-unverified'
     }),
-    tool('network.inspect', '/inspect', 'read', {
+    tool('web.inspect', '/inspect', 'read', {
       riskClass: 'observation', binding: 'required', postcondition: 'form-snapshot'
     }),
-    tool('network.extract_form', '/extract-form', 'read', {
+    tool('web.extract_form', '/extract-form', 'read', {
       riskClass: 'observation', binding: 'required', postcondition: 'form-snapshot'
     }),
-    tool('network.propose', '/propose', 'write', {
+    tool('web.propose', '/propose', 'write', {
       riskClass: 'local-domain-state', binding: 'required', replayPolicy: 'non-idempotent',
       approvalReceiptBehavior: 'mints-fill-one-time', postcondition: 'proposal-and-fill-approval-receipt-created'
     }),
-    tool('network.fill_after_approval', '/fill-after-approval', 'write', {
+    tool('web.fill_after_approval', '/fill-after-approval', 'write', {
       riskClass: 'data-entry', binding: 'required', approvalPolicy: 'explicit-apply',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', executionCorrelation: 'console-owned-optional',
       approvalReceiptBehavior: 'consumes-fill-one-time', postcondition: 'field-values-verified'
     }),
-    tool('network.upload_artifact', '/upload-artifact', 'write', {
+    tool('web.upload_artifact', '/upload-artifact', 'write', {
       riskClass: 'local-artifact-upload', binding: 'required', approvalPolicy: 'explicit-upload',
       requiresExplicitApproval: true, replayPolicy: 'non-idempotent', artifactBehavior: 'guarded-local-upload',
       executionCorrelation: 'console-owned-optional', postcondition: 'file-name-and-size-verified'
     }),
-    tool('network.review_before_submit', '/review-before-submit', 'write', {
+    tool('web.review_before_submit', '/review-before-submit', 'write', {
       riskClass: 'local-domain-state', binding: 'required', artifactBehavior: 'review-snapshot', replayPolicy: 'non-idempotent',
       approvalReceiptBehavior: 'mints-submit-one-time', postcondition: 'review-revision-and-submit-approval-receipt-created'
     }),
-    tool('network.submit_after_approval', '/submit-after-approval', 'write', {
+    tool('web.submit_after_approval', '/submit-after-approval', 'write', {
       riskClass: 'final-external-submit', binding: 'required', approvalPolicy: 'explicit-submit',
       requiresExplicitApproval: true, replayPolicy: 'never-replay', timeoutClass: 'long',
       artifactBehavior: 'terminal-evidence', executionCorrelation: 'console-owned-optional',
@@ -162,32 +152,32 @@ export const networkCapabilityContract = Object.freeze({
   ])
 });
 
-export const networkCapabilityRoutes = Object.freeze(
-  Object.fromEntries(networkCapabilityContract.tools.map((item) => [item.name, item.route]))
+export const webCapabilityRoutes = Object.freeze(
+  Object.fromEntries(webCapabilityContract.tools.map((item) => [item.name, item.route]))
 );
 
-export const networkCapabilityAdmissions = Object.freeze(
-  Object.fromEntries(networkCapabilityContract.tools.map((item) => [item.name, item.admission]))
+export const webCapabilityAdmissions = Object.freeze(
+  Object.fromEntries(webCapabilityContract.tools.map((item) => [item.name, item.admission]))
 );
 
-export function listNetworkCapabilityToolNames({ publicOnly = false } = {}) {
+export function listWebCapabilityToolNames({ publicOnly = false } = {}) {
   const tools = publicOnly
-    ? networkCapabilityContract.tools.filter((item) => item.visibility !== 'internal')
-    : networkCapabilityContract.tools;
+    ? webCapabilityContract.tools.filter((item) => item.visibility !== 'internal')
+    : webCapabilityContract.tools;
 
   return tools.map((item) => item.name);
 }
 
-export function getNetworkCapabilityRoute(toolName) {
-  const canonicalName = networkCapabilityAliases[toolName] ?? toolName;
-  return networkCapabilityRoutes[canonicalName] ?? null;
+export function getWebCapabilityRoute(toolName) {
+  const canonicalName = webCapabilityAliases[toolName] ?? toolName;
+  return webCapabilityRoutes[canonicalName] ?? null;
 }
 
-export function getNetworkCapabilityAdmission(toolName) {
-  const canonicalName = networkCapabilityAliases[toolName] ?? toolName;
-  const admission = networkCapabilityAdmissions[canonicalName];
+export function getWebCapabilityAdmission(toolName) {
+  const canonicalName = webCapabilityAliases[toolName] ?? toolName;
+  const admission = webCapabilityAdmissions[canonicalName];
   if (!admission || admission.lifecycle === 'retired') {
-    throw new Error(`Network capability is not admitted: ${toolName}`);
+    throw new Error(`Web capability is not admitted: ${toolName}`);
   }
   return admission;
 }

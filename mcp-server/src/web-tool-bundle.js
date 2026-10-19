@@ -1,47 +1,47 @@
 import { z } from 'zod';
-import { registerNetworkCoreDomainToolDefinitions } from './core-domain-tool-definitions.js';
-import { NetworkToolRegistry } from './tool-registry.js';
+import { registerWebCoreDomainToolDefinitions } from './web-domain-tool-definitions.js';
+import { WebToolRegistry } from './tool-registry.js';
 
-const networkExecutionCorrelationSchema = z.object({
+const webExecutionCorrelationSchema = z.object({
   taskId: z.string().min(1).max(200).optional(),
   runId: z.string().min(1).max(200).optional(),
   invocationId: z.string().min(1).max(200).optional(),
 }).strict();
 
-export function createNetworkToolBundle({ workerUrl, browserWorkerToken }) {
-  const registry = new NetworkToolRegistry(workerUrl, browserWorkerToken || '');
+export function createWebToolBundle({ workerUrl, browserWorkerToken }) {
+  const registry = new WebToolRegistry(workerUrl, browserWorkerToken || '');
 
   return {
-    name: 'network-tool-bundle',
+    name: 'web-tool-bundle',
     register(mcpServer) {
-      registerNetworkTools(mcpServer, registry);
+      registerBrowserTools(mcpServer, registry);
     }
   };
 }
 
 function registerBrowserTool(mcpServer, canonicalName, legacyNames, config, handler) {
   mcpServer.registerTool(canonicalName, config, handler);
-  for (const legacyName of [...new Set(legacyNames.filter(Boolean))]) {
+  for (const legacyName of [...new Set(legacyNames.filter((name) => Boolean(name) && name !== canonicalName))]) {
     mcpServer.registerTool(legacyName, config, handler);
   }
 }
 
-function registerNetworkTools(mcpServer, registry) {
+function registerBrowserTools(mcpServer, registry) {
   registerBrowserTool(
     mcpServer,
-    'browser.status',
-    ['network.browser.status', 'network.browser_status'],
+    'web.browser.status',
+    ['web.browser.status', 'web.browser_status'],
     {
       description: 'Inspect the supervised browser runtime state.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('network.browser_status', {}))
+    async () => toolResult(await registry.callTool('web.browser_status', {}))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.restart',
-    ['network.browser.restart', 'network.browser_restart'],
+    'web.browser.restart',
+    ['web.browser.restart', 'web.browser_restart'],
     {
       description: 'Restart the supervised browser session.',
       inputSchema: z.object({
@@ -50,7 +50,7 @@ function registerNetworkTools(mcpServer, registry) {
         reason: z.string().max(200).optional()
       }).strict()
     },
-    async ({ hard, reopen, reason }) => toolResult(await registry.callTool('network.browser_restart', {
+    async ({ hard, reopen, reason }) => toolResult(await registry.callTool('web.browser_restart', {
       force: hard === true,
       reopen,
       reason
@@ -59,54 +59,54 @@ function registerNetworkTools(mcpServer, registry) {
 
   registerBrowserTool(
     mcpServer,
-    'browser.kill',
-    ['network.browser.kill', 'network.browser_kill'],
+    'web.browser.kill',
+    ['web.browser.kill', 'web.browser_kill'],
     {
       description: 'Close the supervised browser session and kill managed browser processes for the configured profile.',
       inputSchema: z.object({
         reason: z.string().max(200).optional()
       }).strict()
     },
-    async ({ reason }) => toolResult(await registry.callTool('network.browser_kill', { reason }))
+    async ({ reason }) => toolResult(await registry.callTool('web.browser_kill', { reason }))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.health',
-    ['network.health_full'],
+    'web.browser.health',
+    ['web.health_full'],
     {
       description: 'Run deep supervised browser diagnostics including worker, browser, target, profile, and DevTools reachability.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('network.health_full', {}))
+    async () => toolResult(await registry.callTool('web.health_full', {}))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.shared.status',
-    ['network.shared_browser_status'],
+    'web.browser.shared.status',
+    ['web.shared_browser_status'],
     {
       description: 'Read the shared Edge-first browser runtime registry and live CDP attachment status.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('network.shared_browser_status', {}))
+    async () => toolResult(await registry.callTool('web.shared_browser_status', {}))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.cdp.targets',
-    ['network.browser_cdp_targets'],
+    'web.browser.cdp.targets',
+    ['web.browser_cdp_targets'],
     {
       description: 'List raw shared browser CDP targets without attaching through Playwright or opening pages.',
       inputSchema: z.object({}).strict()
     },
-    async () => toolResult(await registry.callTool('network.browser_cdp_targets', {}))
+    async () => toolResult(await registry.callTool('web.browser_cdp_targets', {}))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.chatgpt.home.verify',
-    ['network.browser_cdp_verify_chatgpt_home'],
+    'web.browser.chatgpt.home.verify',
+    ['web.browser_cdp_verify_chatgpt_home'],
     {
       description: 'Verify raw ChatGPT home CDP cleanup candidates by reading DOM composer state without writing, clicking, closing, or using Playwright attach.',
       inputSchema: z.object({
@@ -116,13 +116,13 @@ function registerNetworkTools(mcpServer, registry) {
         timeoutMs: z.number().int().min(250).max(10000).optional()
       }).strict()
     },
-    async ({ index, id, maxVerify, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_verify_chatgpt_home', { index, id, maxVerify, timeoutMs }))
+    async ({ index, id, maxVerify, timeoutMs }) => toolResult(await registry.callTool('web.browser_cdp_verify_chatgpt_home', { index, id, maxVerify, timeoutMs }))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.chatgpt.home.cleanup.plan',
-    ['network.browser_cdp_cleanup_plan_chatgpt_home'],
+    'web.browser.chatgpt.home.cleanup.plan',
+    ['web.browser_cdp_cleanup_plan_chatgpt_home'],
     {
       description: 'Build a read-only dry-run cleanup plan for verified empty ChatGPT home CDP targets.',
       inputSchema: z.object({
@@ -131,13 +131,13 @@ function registerNetworkTools(mcpServer, registry) {
         timeoutMs: z.number().int().min(250).max(10000).optional()
       }).strict()
     },
-    async ({ maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_plan_chatgpt_home', { maxVerify, maxClose, timeoutMs }))
+    async ({ maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('web.browser_cdp_cleanup_plan_chatgpt_home', { maxVerify, maxClose, timeoutMs }))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.chatgpt.home.cleanup',
-    ['network.browser_cdp_cleanup_chatgpt_home'],
+    'web.browser.chatgpt.home.cleanup',
+    ['web.browser_cdp_cleanup_chatgpt_home'],
     {
       description: 'Close only verified empty ChatGPT home CDP targets after explicit confirmation, then verify conversation tabs were preserved.',
       inputSchema: z.object({
@@ -147,13 +147,13 @@ function registerNetworkTools(mcpServer, registry) {
         timeoutMs: z.number().int().min(250).max(10000).optional()
       }).strict()
     },
-    async ({ confirmCleanup, maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('network.browser_cdp_cleanup_chatgpt_home', { confirmCleanup, maxVerify, maxClose, timeoutMs }))
+    async ({ confirmCleanup, maxVerify, maxClose, timeoutMs }) => toolResult(await registry.callTool('web.browser_cdp_cleanup_chatgpt_home', { confirmCleanup, maxVerify, maxClose, timeoutMs }))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.surface.plan',
-    ['network.surface_plan'],
+    'web.surface.plan',
+    ['web.surface_plan'],
     {
       description: 'Build a read-only publication update plan for browser-mcp.',
       inputSchema: z.object({
@@ -162,13 +162,13 @@ function registerNetworkTools(mcpServer, registry) {
         timeoutMs: z.number().int().min(5000).max(120000).optional()
       }).strict()
     },
-    async ({ connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.surface_plan', { connectorName, connectorId, timeoutMs }))
+    async ({ connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('web.surface_plan', { connectorName, connectorId, timeoutMs }))
   );
 
   registerBrowserTool(
     mcpServer,
-    'browser.surface.execute',
-    ['network.surface_execute'],
+    'web.surface.execute',
+    ['web.surface_execute'],
     {
       description: 'Run the approved publication update for browser-mcp.',
       inputSchema: z.object({
@@ -178,7 +178,7 @@ function registerNetworkTools(mcpServer, registry) {
         timeoutMs: z.number().int().min(5000).max(120000).optional()
       }).strict()
     },
-    async ({ confirmSync, connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('network.connector_sync_execute', {
+    async ({ confirmSync, connectorName, connectorId, timeoutMs }) => toolResult(await registry.callTool('web.connector_sync_execute', {
       confirmRefresh: confirmSync === true,
       connectorName,
       connectorId,
@@ -186,7 +186,7 @@ function registerNetworkTools(mcpServer, registry) {
     }))
   );
 
-  registerNetworkCoreDomainToolDefinitions(mcpServer, registry);
+  registerWebCoreDomainToolDefinitions(mcpServer, registry);
 }
 
 function toolResult(result) {

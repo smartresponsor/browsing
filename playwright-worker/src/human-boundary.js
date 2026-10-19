@@ -8,7 +8,7 @@ export function classifyChallengeText(text) {
     };
   }
 
-  if (/2fa|two-factor|two factor|authentication code|authenticator|verification code|one-time code|one time code/i.test(normalized)) {
+  if (/(?:enter|provide|type|verify with|use your|we sent|sent you|check your)[\s\S]{0,120}(?:2fa|two-factor|two factor|authentication code|authenticator code|verification code|one-time code|one time code)|(?:2fa|two-factor|two factor)[\s\S]{0,80}(?:code|verification|authentication)/i.test(normalized)) {
     return {
       type: 'two_factor',
       requestedAction: 'Complete the second-factor verification manually in the bound browser target.'
@@ -57,21 +57,21 @@ export function classifyHumanBoundary({
   if ((hasPasswordField && (loginText || loginUrl)) || (loginUrl && hasCredentialIdentifierField)) {
     return {
       type: 'login_required',
-      requestedAction: 'Complete login manually in the bound browser target. Network will not read or enter credentials.'
+      requestedAction: 'Complete login manually in the bound browser target. Web will not read or enter credentials.'
     };
   }
 
   if (String(alertDialogText || '').trim()) {
     return {
       type: 'unexpected_modal',
-      requestedAction: 'Review and resolve the blocking alert dialog manually before Network continues.'
+      requestedAction: 'Review and resolve the blocking alert dialog manually before Web continues.'
     };
   }
 
   if (unsupportedControl && typeof unsupportedControl === 'object') {
     return {
       type: 'unsupported_control',
-      requestedAction: 'Complete or resolve the unsupported control manually, then re-inspect the form before Network resumes.'
+      requestedAction: 'Complete or resolve the unsupported control manually, then re-inspect the form before Web resumes.'
     };
   }
 

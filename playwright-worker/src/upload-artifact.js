@@ -32,7 +32,7 @@ export async function resolveGuardedUploadArtifact({
   const configuredRoot = path.resolve(String(uploadRoot || '').trim());
   const rootRealPath = await realpath(configuredRoot).catch(() => {
     throw uploadError(
-      'NETWORK_UPLOAD_ROOT_UNAVAILABLE',
+      'WEB_UPLOAD_ROOT_UNAVAILABLE',
       'The configured upload artifact root does not exist or is not accessible.',
       { uploadRoot: configuredRoot }
     );
@@ -43,7 +43,7 @@ export async function resolveGuardedUploadArtifact({
 
   const artifactRealPath = await realpath(candidatePath).catch(() => {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_NOT_FOUND',
+      'WEB_UPLOAD_ARTIFACT_NOT_FOUND',
       'The requested upload artifact was not found in the dedicated artifact root.',
       { artifactRef: normalizedRef }
     );
@@ -53,21 +53,21 @@ export async function resolveGuardedUploadArtifact({
   const info = await stat(artifactRealPath);
   if (!info.isFile()) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_INVALID',
+      'WEB_UPLOAD_ARTIFACT_INVALID',
       'The upload artifact reference must resolve to a regular file.',
       { artifactRef: normalizedRef }
     );
   }
   if (info.size <= 0) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_INVALID',
+      'WEB_UPLOAD_ARTIFACT_INVALID',
       'The upload artifact is empty.',
       { artifactRef: normalizedRef }
     );
   }
   if (info.size > boundedMaxBytes) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_TOO_LARGE',
+      'WEB_UPLOAD_ARTIFACT_TOO_LARGE',
       'The upload artifact exceeds the configured size limit.',
       { artifactRef: normalizedRef, size: info.size, maxBytes: boundedMaxBytes }
     );
@@ -79,7 +79,7 @@ export async function resolveGuardedUploadArtifact({
   );
   if (!normalizedAllowedExtensions.has(extension)) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_TYPE_BLOCKED',
+      'WEB_UPLOAD_ARTIFACT_TYPE_BLOCKED',
       'The upload artifact extension is not allowed.',
       { artifactRef: normalizedRef, extension, allowedExtensions: [...normalizedAllowedExtensions] }
     );
@@ -89,7 +89,7 @@ export async function resolveGuardedUploadArtifact({
   const sha256 = createHash('sha256').update(buffer).digest('hex');
   if (normalizedExpectedSha256 && normalizedExpectedSha256 !== sha256) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_HASH_MISMATCH',
+      'WEB_UPLOAD_ARTIFACT_HASH_MISMATCH',
       'The upload artifact SHA-256 does not match the expected hash.',
       { artifactRef: normalizedRef, expectedSha256: normalizedExpectedSha256, actualSha256: sha256 }
     );
@@ -112,14 +112,14 @@ export async function resolveGuardedUploadArtifact({
 export function normalizeArtifactRef(value) {
   const raw = String(value || '').trim();
   if (!raw) {
-    throw uploadError('NETWORK_UPLOAD_ARTIFACT_REF_REQUIRED', 'artifactRef is required.');
+    throw uploadError('WEB_UPLOAD_ARTIFACT_REF_REQUIRED', 'artifactRef is required.');
   }
   if (raw.includes('\0')) {
-    throw uploadError('NETWORK_UPLOAD_ARTIFACT_REF_INVALID', 'artifactRef contains a null byte.');
+    throw uploadError('WEB_UPLOAD_ARTIFACT_REF_INVALID', 'artifactRef contains a null byte.');
   }
   if (path.isAbsolute(raw) || /^[A-Za-z]:/.test(raw)) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_REF_INVALID',
+      'WEB_UPLOAD_ARTIFACT_REF_INVALID',
       'artifactRef must be relative to the dedicated upload artifact root.',
       { artifactRef: raw }
     );
@@ -128,7 +128,7 @@ export function normalizeArtifactRef(value) {
   const segments = raw.split(/[\\/]+/).filter(Boolean);
   if (segments.length === 0 || segments.some(segment => segment === '..' || segment === '.')) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_REF_INVALID',
+      'WEB_UPLOAD_ARTIFACT_REF_INVALID',
       'artifactRef contains an unsafe traversal segment.',
       { artifactRef: raw }
     );
@@ -139,7 +139,7 @@ export function normalizeArtifactRef(value) {
 
 export function uploadError(status, message, evidence = {}) {
   const error = new Error(message);
-  error.networkStatus = status;
+  error.webStatus = status;
   error.evidence = evidence;
   return error;
 }
@@ -148,7 +148,7 @@ function assertInsideRoot(candidatePath, rootPath, artifactRef) {
   const rootPrefix = rootPath.endsWith(path.sep) ? rootPath : `${rootPath}${path.sep}`;
   if (candidatePath !== rootPath && !candidatePath.startsWith(rootPrefix)) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_REF_INVALID',
+      'WEB_UPLOAD_ARTIFACT_REF_INVALID',
       'The upload artifact resolved outside the dedicated artifact root.',
       { artifactRef }
     );
@@ -162,7 +162,7 @@ function normalizeExpectedSha256(value) {
   }
   if (!/^[a-f0-9]{64}$/.test(normalized)) {
     throw uploadError(
-      'NETWORK_UPLOAD_ARTIFACT_HASH_INVALID',
+      'WEB_UPLOAD_ARTIFACT_HASH_INVALID',
       'expectedSha256 must be a 64-character lowercase/uppercase hexadecimal SHA-256 value.'
     );
   }

@@ -147,7 +147,6 @@ function getPolicy() {
     approvalReceiptTtlMs: Number(process.env.BROWSER_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
     uploadRoot: path.resolve(String(process.env.BROWSER_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
     maxUploadBytes: Number(process.env.BROWSER_MCP_MAX_UPLOAD_BYTES || 26214400),
-    submitEnabled: String(process.env.BROWSER_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
     maxSessionSeconds: Number(process.env.BROWSER_MCP_MAX_SESSION_SECONDS || 7200),
     maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
     maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
@@ -160,7 +159,7 @@ function getPolicy() {
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
     remoteDebuggingPort: Number(process.env.BROWSER_MCP_REMOTE_DEBUGGING_PORT || 9223),
-    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
+    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 45000)
   };
 }
 
@@ -320,17 +319,17 @@ function buildConnectorSettingsUrl(connectorId = '') {
     : 'https://chatgpt.com/#settings/Apps';
 }
 
-function planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs } = {}) {
+function planWebConnectorRefresh({ connectorName, connectorId, timeoutMs } = {}) {
   const name = String(connectorName || process.env.BROWSER_MCP_CHATGPT_CONNECTOR_NAME || 'browser-mcp');
   const id = String(connectorId || process.env.BROWSER_MCP_CHATGPT_CONNECTOR_ID || '');
   const boundedTimeoutMs = Number.isInteger(timeoutMs) ? Math.min(Math.max(timeoutMs, 5000), 120000) : 90000;
   return {
     ok: true,
-    status: 'NETWORK_CONNECTOR_REFRESH_PLAN_READY',
+    status: 'WEB_CONNECTOR_REFRESH_PLAN_READY',
     connectorName: name,
     connectorId: id || null,
     targetUrl: buildConnectorSettingsUrl(id),
-    executeTool: 'network.surface_execute',
+    executeTool: 'web.surface_execute',
     executeRequires: { confirmSync: true, connectorName: name, connectorId: id || undefined },
     timeoutMs: boundedTimeoutMs,
     policy: {
@@ -371,22 +370,22 @@ async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, tim
   return { ...created, reused: false };
 }
 
-function buildNetworkConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
-  return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const networkToolsVisible = /network\./.test(pageText); if (!result && networkToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_NETWORK_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
+function buildWebConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
+  return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const networkToolsVisible = /network\./.test(pageText); if (!result && networkToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_WEB_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
 }
 
-async function executeNetworkConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
-  const plan = planNetworkConnectorRefresh({ connectorName, connectorId, timeoutMs });
+async function executeWebConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
+  const plan = planWebConnectorRefresh({ connectorName, connectorId, timeoutMs });
   if (confirmRefresh !== true) {
     return { ok: false, status: 'CONFIRM_CONNECTOR_REFRESH_REQUIRED', willRefreshConnector: true, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true } };
   }
   const policy = getPolicy();
   const target = await resolveConnectorRefreshTarget(policy, plan.targetUrl, plan.connectorId || '', plan.timeoutMs);
   if (!target.webSocketDebuggerUrl) return { ok: false, status: 'CONNECTOR_REFRESH_TARGET_WEBSOCKET_MISSING', target, plan };
-  const result = await evaluateRawCdpTarget(target, buildNetworkConnectorRefreshExpression(plan.connectorName, plan.connectorId || '', plan.targetUrl), Math.min(plan.timeoutMs, 120000));
+  const result = await evaluateRawCdpTarget(target, buildWebConnectorRefreshExpression(plan.connectorName, plan.connectorId || '', plan.targetUrl), Math.min(plan.timeoutMs, 120000));
   const pageText = typeof result?.pageText === 'string' ? result.pageText : '';
-  const observedTools = [...new Set([...pageText.matchAll(/\bnetwork\.[A-Za-z0-9_.]+/g)].map(match => match[0]))].sort();
-  return { ok: Boolean(result?.ok), status: result?.ok ? 'NETWORK_CONNECTOR_REFRESH_DONE' : String(result?.status || 'NETWORK_CONNECTOR_REFRESH_FAILED'), connectorName: plan.connectorName, connectorId: plan.connectorId, target: compactRawCdpTarget(target), refresh: result, observedSchema: { exposed: observedTools.length > 0, count: observedTools.length, tools: observedTools }, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true, writesInput: false, submitsInput: false, closesTabs: false } };
+  const observedTools = [...new Set([...pageText.matchAll(/\bweb\.[A-Za-z0-9_.]+/g)].map(match => match[0]))].sort();
+  return { ok: Boolean(result?.ok), status: result?.ok ? 'WEB_CONNECTOR_REFRESH_DONE' : String(result?.status || 'WEB_CONNECTOR_REFRESH_FAILED'), connectorName: plan.connectorName, connectorId: plan.connectorId, target: compactRawCdpTarget(target), refresh: result, observedSchema: { exposed: observedTools.length > 0, count: observedTools.length, tools: observedTools }, plan, policy: { browserMutation: true, connectorRefresh: true, requiresConfirmRefresh: true, writesInput: false, submitsInput: false, closesTabs: false } };
 }
 
 async function restartBrowserSession({ force = false, reopen = true, reason = '' } = {}) {
@@ -422,6 +421,12 @@ async function assertSessionWindow(policy) {
 
   const elapsedSeconds = (Date.now() - sessionStartedAt) / 1000;
   if (elapsedSeconds > policy.maxSessionSeconds) {
+    // External visible Edge is owned by Console, not this worker. Rotate only
+    // the observation window; never close tabs or reset usage counters.
+    if (policy.externalVisibleBrowser) {
+      sessionStartedAt = Date.now();
+      return;
+    }
     await closeSession();
     throw new Error(`Browser session exceeded ${policy.maxSessionSeconds} seconds. Restart the worker.`);
   }
@@ -528,7 +533,12 @@ async function ensureNotChallenge(target) {
     return {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
-      hasPasswordField: Boolean(document.querySelector('input[type="password"]')),
+      hasPasswordField: Array.from(document.querySelectorAll('input[type="password"]')).some(element => {
+        if (!isVisible(element)) return false;
+        const context = normalize((element.closest('form, [role="dialog"], [aria-modal="true"]') || element.parentElement)?.innerText || '');
+        const routeLooksLikeLogin = /\/(?:login|log-in|signin|sign-in|auth)(?:[/?#]|$)/i.test(location.href);
+        return routeLooksLikeLogin || /\b(sign[ -]?in|log[ -]?in|login)\b/i.test(context);
+      }),
       hasCredentialIdentifierField: Boolean(document.querySelector([
         'input[autocomplete="username"]',
         'input[name*="username" i]',
@@ -553,15 +563,15 @@ async function ensureNotChallenge(target) {
   });
   if (boundary) {
     throw revisionError(
-      'NETWORK_HUMAN_ACTION_REQUIRED',
-      'A human-action boundary was detected. Resolve it manually before Network resumes.',
+      'WEB_HUMAN_ACTION_REQUIRED',
+      'A human-action boundary was detected. Resolve it manually before Web resumes.',
       {
         boundary: {
           type: boundary.type,
           requestedAction: boundary.requestedAction,
           targetUrl: target.url(),
           title: String(snapshot.title || '').slice(0, 300),
-          resumeCondition: 'Re-run page capture or the intended Network operation after the human step is complete.'
+          resumeCondition: 'Re-run page capture or the intended Web operation after the human step is complete.'
         }
       }
     );
@@ -1049,10 +1059,10 @@ function normalizeExecutionCorrelation(body) {
   };
 }
 
-function sendNetworkError(res, error, fallbackStatus = 'NETWORK_OPERATION_FAILED', correlation = null) {
+function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', correlation = null) {
   res.status(409).json({
     ok: false,
-    status: typeof error?.networkStatus === 'string' ? error.networkStatus : fallbackStatus,
+    status: typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus,
     error: normalizeError(error),
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
@@ -1074,6 +1084,7 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
     url,
     title,
     textHash,
+    visibleText,
     fields,
     ...revisions,
     submitCandidates
@@ -1144,7 +1155,7 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
   }
 
   if (!selected || selected.isClosed()) {
-    throw revisionError('NETWORK_TARGET_STALE', 'Requested browser target was not found or is closed.', {
+    throw revisionError('WEB_TARGET_STALE', 'Requested browser target was not found or is closed.', {
       targetId: targetId ? String(targetId) : null,
       index: Number.isInteger(index) ? index : null,
       url: url ? String(url) : null,
@@ -1156,7 +1167,7 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
   await page.bringToFront().catch(() => {});
   return {
     ok: true,
-    status: 'NETWORK_TARGET_BOUND',
+    status: 'WEB_TARGET_BOUND',
     bound: {
       targetId: await getPageTargetId(page),
       index: pages.findIndex(item => item === page),
@@ -1220,7 +1231,7 @@ async function writeField(target, locator, value, field = {}) {
     const multiple = field.multiple === true || await locator.evaluate(node => Boolean(node.multiple));
     if (multiple) {
       if (!Array.isArray(value)) {
-        throw revisionError('NETWORK_VALIDATION_FAILED', 'Multi-select mutation requires an array of option values.', { controlId: field.controlId || null });
+        throw revisionError('WEB_VALIDATION_FAILED', 'Multi-select mutation requires an array of option values.', { controlId: field.controlId || null });
       }
       const desired = [...new Set(value.map(item => String(item)))];
       await locator.selectOption(desired);
@@ -1228,7 +1239,7 @@ async function writeField(target, locator, value, field = {}) {
       const normalizedDesired = [...desired].sort();
       const normalizedActual = [...actual].sort();
       if (JSON.stringify(normalizedActual) !== JSON.stringify(normalizedDesired)) {
-        throw revisionError('NETWORK_VALIDATION_FAILED', 'Multi-select postcondition did not match the requested option set.', { desired, actual, controlId: field.controlId || null });
+        throw revisionError('WEB_VALIDATION_FAILED', 'Multi-select postcondition did not match the requested option set.', { desired, actual, controlId: field.controlId || null });
       }
       return { semanticType: 'select', multiple: true, requested: desired, actual };
     }
@@ -1243,7 +1254,7 @@ async function writeField(target, locator, value, field = {}) {
       };
     });
     if (selected.value !== desired && selected.label !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Select postcondition did not match the requested value or label.', { desired, actual: selected.value, actualLabel: selected.label, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Select postcondition did not match the requested value or label.', { desired, actual: selected.value, actualLabel: selected.label, controlId: field.controlId || null });
     }
     return { semanticType: 'select', multiple: false, requested: desired, actual: selected.value, actualLabel: selected.label };
   }
@@ -1254,7 +1265,7 @@ async function writeField(target, locator, value, field = {}) {
     else await locator.uncheck();
     const actual = await locator.isChecked();
     if (actual !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Checkbox postcondition did not match the requested checked state.', { desired, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Checkbox postcondition did not match the requested checked state.', { desired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'checkbox', requested: desired, actual };
   }
@@ -1267,7 +1278,7 @@ async function writeField(target, locator, value, field = {}) {
     }
     const actual = await locator.getAttribute('aria-checked') === 'true';
     if (actual !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Switch postcondition did not match the requested state.', { desired, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Switch postcondition did not match the requested state.', { desired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'switch', requested: desired, actual };
   }
@@ -1279,7 +1290,7 @@ async function writeField(target, locator, value, field = {}) {
       const matches = options.filter(option => !option.disabled && (String(option.value ?? '') === desired || String(option.label ?? '') === desired));
       if (matches.length !== 1) {
         throw revisionError(
-          matches.length === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          matches.length === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
           matches.length === 0
             ? 'Radio-group option was not found by exact value or label.'
             : 'Radio-group option is ambiguous by exact value or label.',
@@ -1289,14 +1300,14 @@ async function writeField(target, locator, value, field = {}) {
       const selected = matches[0];
       const accessibleName = String(selected.label || '').trim();
       if (!accessibleName) {
-        throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Radio-group exact selection requires an accessible option label.', { desired, value: selected.value ?? null, controlId: field.controlId || null });
+        throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Radio-group exact selection requires an accessible option label.', { desired, value: selected.value ?? null, controlId: field.controlId || null });
       }
       const optionFrame = resolveFrameByPath(target, Array.isArray(field.framePath) ? field.framePath : []) ?? target.mainFrame();
       const option = optionFrame.getByRole('radio', { name: accessibleName, exact: true });
       const optionCount = await option.count();
       if (optionCount !== 1) {
         throw revisionError(
-          optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          optionCount === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
           optionCount === 0
             ? 'Radio-group option was not found by exact accessible name.'
             : 'Radio-group option accessible name is ambiguous.',
@@ -1306,7 +1317,7 @@ async function writeField(target, locator, value, field = {}) {
       await option.check();
       const actual = await option.isChecked();
       if (!actual) {
-        throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio-group postcondition did not confirm the requested option.', { desired, accessibleName, actual, controlId: field.controlId || null });
+        throw revisionError('WEB_VALIDATION_FAILED', 'Radio-group postcondition did not confirm the requested option.', { desired, accessibleName, actual, controlId: field.controlId || null });
       }
       return {
         semanticType: 'radio',
@@ -1320,12 +1331,12 @@ async function writeField(target, locator, value, field = {}) {
 
     const desired = normalizeBooleanMutationValue(value, true);
     if (!desired) {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'A radio control can only be selected; deselect by choosing another option in the group.', { controlId: field.controlId || null });
+      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'A radio control can only be selected; deselect by choosing another option in the group.', { controlId: field.controlId || null });
     }
     await locator.check();
     const actual = await locator.isChecked();
     if (!actual) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Radio postcondition did not confirm the requested option.', { desired: true, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Radio postcondition did not confirm the requested option.', { desired: true, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'radio', groupSelection: false, requested: true, actual };
   }
@@ -1336,7 +1347,7 @@ async function writeField(target, locator, value, field = {}) {
     const actual = await locator.evaluate(node => String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim());
     const normalizedDesired = desired.replace(/\s+/g, ' ').trim();
     if (actual !== normalizedDesired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Contenteditable postcondition did not match the requested text.', { desired: normalizedDesired, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Contenteditable postcondition did not match the requested text.', { desired: normalizedDesired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'contenteditable', requested: normalizedDesired, actual };
   }
@@ -1344,7 +1355,7 @@ async function writeField(target, locator, value, field = {}) {
   if (semanticType === 'autocomplete') {
     const desired = String(value ?? '').trim();
     if (!desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Autocomplete mutation requires a non-empty option label or value.', { controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Autocomplete mutation requires a non-empty option label or value.', { controlId: field.controlId || null });
     }
 
     const autocompleteMode = field.autocompleteMode || await locator.evaluate(node => node.tagName.toLowerCase() === 'input' && node.list ? 'native-datalist' : 'aria');
@@ -1357,7 +1368,7 @@ async function writeField(target, locator, value, field = {}) {
       const matches = options.filter(option => !option.disabled && (option.value === desired || option.label === desired));
       if (matches.length !== 1) {
         throw revisionError(
-          matches.length === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+          matches.length === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
           matches.length === 0
             ? 'Native datalist option was not found by exact value or label.'
             : 'Native datalist option is ambiguous by exact value or label.',
@@ -1368,7 +1379,7 @@ async function writeField(target, locator, value, field = {}) {
       await locator.fill(canonicalValue);
       const actual = await locator.inputValue();
       if (actual !== canonicalValue) {
-        throw revisionError('NETWORK_VALIDATION_FAILED', 'Native datalist postcondition did not match the selected value.', { desired, canonicalValue, actual, controlId: field.controlId || null });
+        throw revisionError('WEB_VALIDATION_FAILED', 'Native datalist postcondition did not match the selected value.', { desired, canonicalValue, actual, controlId: field.controlId || null });
       }
       return { semanticType: 'autocomplete', mode: 'native-datalist', requested: desired, actual, optionMatch: 'exact-value-or-label' };
     }
@@ -1378,7 +1389,7 @@ async function writeField(target, locator, value, field = {}) {
       return tag === 'input' || tag === 'textarea' || node.getAttribute('contenteditable') === 'true';
     });
     if (!fillable) {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'ARIA autocomplete mutation only supports input/textarea/contenteditable controls.', { controlId: field.controlId || null, tagName });
+      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'ARIA autocomplete mutation only supports input/textarea/contenteditable controls.', { controlId: field.controlId || null, tagName });
     }
 
     await locator.click();
@@ -1388,7 +1399,7 @@ async function writeField(target, locator, value, field = {}) {
     const optionCount = await option.count();
     if (optionCount !== 1) {
       throw revisionError(
-        optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+        optionCount === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
         optionCount === 0
           ? 'Autocomplete option was not found by exact accessible name.'
           : 'Autocomplete option accessible name is ambiguous.',
@@ -1401,7 +1412,7 @@ async function writeField(target, locator, value, field = {}) {
       return String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
     });
     if (actual !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Autocomplete postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Autocomplete postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'autocomplete', mode: 'aria', requested: desired, actual, optionMatch: 'exact-accessible-name' };
   }
@@ -1409,7 +1420,7 @@ async function writeField(target, locator, value, field = {}) {
   if (semanticType === 'combobox') {
     const desired = String(value ?? '').trim();
     if (!desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Combobox mutation requires a non-empty option label.', { controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Combobox mutation requires a non-empty option label.', { controlId: field.controlId || null });
     }
 
     const fillable = await locator.evaluate(node => {
@@ -1417,7 +1428,7 @@ async function writeField(target, locator, value, field = {}) {
       return tag === 'input' || tag === 'textarea' || node.getAttribute('contenteditable') === 'true';
     });
     if (!fillable) {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Generic combobox mutation only supports input/textarea/contenteditable combobox controls.', { controlId: field.controlId || null, tagName });
+      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Generic combobox mutation only supports input/textarea/contenteditable combobox controls.', { controlId: field.controlId || null, tagName });
     }
 
     await locator.click();
@@ -1427,7 +1438,7 @@ async function writeField(target, locator, value, field = {}) {
     const optionCount = await option.count();
     if (optionCount !== 1) {
       throw revisionError(
-        optionCount === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+        optionCount === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
         optionCount === 0
           ? 'Combobox option was not found by exact accessible name.'
           : 'Combobox option accessible name is ambiguous.',
@@ -1441,18 +1452,44 @@ async function writeField(target, locator, value, field = {}) {
       return String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
     });
     if (actual !== desired) {
-      throw revisionError('NETWORK_VALIDATION_FAILED', 'Combobox postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
+      throw revisionError('WEB_VALIDATION_FAILED', 'Combobox postcondition did not match the selected option.', { desired, actual, controlId: field.controlId || null });
     }
     return { semanticType: 'combobox', requested: desired, actual, optionMatch: 'exact-accessible-name' };
   }
 
   const desired = String(value ?? '');
-  await locator.fill(desired);
+  // Workday-style controlled month/year segments require keyboard events.
+  // Verify only after blur; the framework may re-render the input on change.
+  const dateSegment = await locator.evaluate(node => {
+    if (node.tagName.toLowerCase() !== 'input') return null;
+    const marker = [
+      node.getAttribute('data-automation-id') || '',
+      node.getAttribute('aria-label') || '',
+    ].join(' ');
+    if (!/(dateSection|date[-_ ]?segment|month[-_ ]?input|year[-_ ]?input)/i.test(marker)) return null;
+    if (/month/i.test(marker)) return 'month';
+    if (/year/i.test(marker)) return 'year';
+    return null;
+  });
+  if (dateSegment && desired) {
+    const expected = dateSegment === 'month' ? /^\d{1,2}$/ : /^\d{4}$/;
+    if (!expected.test(desired) || (dateSegment === 'month' && (+desired < 1 || +desired > 12))) {
+      throw revisionError('WEB_VALIDATION_FAILED', 'Invalid composite date segment.', {
+        dateSegment, desired, controlId: field.controlId || null
+      });
+    }
+    await locator.click();
+    await locator.press('ControlOrMeta+A');
+    await locator.pressSequentially(desired, { delay: 35 });
+    await locator.press('Tab');
+  } else {
+    await locator.fill(desired);
+  }
   const actual = await locator.inputValue();
   if (actual !== desired) {
-    throw revisionError('NETWORK_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+    throw revisionError('WEB_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, dateSegment, controlId: field.controlId || null });
   }
-  return { semanticType, requested: desired, actual };
+  return { semanticType, requested: desired, actual, ...(dateSegment ? { dateSegment, verifiedAfterBlur: true } : {}) };
 }
 
 function normalizeBooleanMutationValue(value, defaultValue = false) {
@@ -1462,7 +1499,7 @@ function normalizeBooleanMutationValue(value, defaultValue = false) {
   if (!normalized) return defaultValue;
   if (['true', '1', 'yes', 'on', 'checked', 'select', 'selected'].includes(normalized)) return true;
   if (['false', '0', 'no', 'off', 'unchecked'].includes(normalized)) return false;
-  throw revisionError('NETWORK_VALIDATION_FAILED', 'Boolean control value must be an explicit boolean-like value.', { received: String(value) });
+  throw revisionError('WEB_VALIDATION_FAILED', 'Boolean control value must be an explicit boolean-like value.', { received: String(value) });
 }
 
 function authorizeBrowserWorkerRequest(req, res) {
@@ -1506,8 +1543,8 @@ function assertSafeMutableField(field, identityEvidence = {}) {
       }
     });
     throw revisionError(
-      'NETWORK_HUMAN_ACTION_REQUIRED',
-      'An unsupported form control requires manual completion before Network can continue.',
+      'WEB_HUMAN_ACTION_REQUIRED',
+      'An unsupported form control requires manual completion before Web can continue.',
       {
         boundary: {
           type: boundary?.type || 'unsupported_control',
@@ -1523,7 +1560,7 @@ function assertSafeMutableField(field, identityEvidence = {}) {
   }
 
   throw revisionError(
-    'NETWORK_CONTROL_UNSUPPORTED',
+    'WEB_CONTROL_UNSUPPORTED',
     field?.blockedReason || 'Control is not safely editable.',
     {
       semanticType: field?.semanticType || null,
@@ -1549,7 +1586,7 @@ async function locatorForFieldSnapshot(target, field) {
   const frame = resolveFrameByPath(target, framePath);
   if (!frame) {
     throw revisionError(
-      'NETWORK_FRAME_STALE',
+      'WEB_FRAME_STALE',
       'The frame path for this control no longer exists. Re-inspect the form before mutating.',
       { framePath, controlId: field?.controlId || null }
     );
@@ -1557,7 +1594,7 @@ async function locatorForFieldSnapshot(target, field) {
 
   const localIndex = Number.isInteger(field?.localIndex) ? field.localIndex : field?.index;
   if (!Number.isInteger(localIndex) || localIndex < 0) {
-    throw revisionError('NETWORK_FIELD_NOT_FOUND', 'The control does not have a valid frame-local index.', {
+    throw revisionError('WEB_FIELD_NOT_FOUND', 'The control does not have a valid frame-local index.', {
       framePath,
       controlId: field?.controlId || null
     });
@@ -1585,7 +1622,7 @@ async function locatorForFieldSnapshot(target, field) {
   const expectedShadowPath = Array.isArray(field?.shadowPath) ? field.shadowPath : [];
   if (hashStableJson(actualShadowPath) !== hashStableJson(expectedShadowPath)) {
     throw revisionError(
-      'NETWORK_SHADOW_PATH_STALE',
+      'WEB_SHADOW_PATH_STALE',
       'The open-shadow host path for this control changed. Re-inspect the form before mutating.',
       { expectedShadowPath, actualShadowPath, controlId: field?.controlId || null }
     );
@@ -1599,7 +1636,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
   if (controlId) {
     const field = fields.find(candidate => candidate.controlId === controlId);
     if (!field) {
-      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Control identity is stale or missing from the current form revision.', { controlId });
+      throw revisionError('WEB_FIELD_NOT_FOUND', 'Control identity is stale or missing from the current form revision.', { controlId });
     }
     assertSafeMutableField(field, { controlId });
 
@@ -1610,7 +1647,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
   if (index !== null) {
     const field = fields[index];
     if (!field) {
-      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Legacy field index is out of range for the current form revision.', { index });
+      throw revisionError('WEB_FIELD_NOT_FOUND', 'Legacy field index is out of range for the current form revision.', { index });
     }
 
     assertSafeMutableField(field, { index });
@@ -1622,7 +1659,7 @@ async function resolveRequestedFieldLocator(target, item, fields) {
     return describeSelectorField(target, item.selector.trim());
   }
 
-  throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Each mutation must identify a control by controlId, legacy index, or exact selector.');
+  throw revisionError('WEB_FIELD_NOT_FOUND', 'Each mutation must identify a control by controlId, legacy index, or exact selector.');
 }
 
 async function resolveUploadControl(target, item, fields) {
@@ -1630,24 +1667,24 @@ async function resolveUploadControl(target, item, fields) {
   if (controlId) {
     const field = fields.find(candidate => candidate.controlId === controlId);
     if (!field) {
-      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Upload control identity is stale or missing from the current form revision.', { controlId });
+      throw revisionError('WEB_FIELD_NOT_FOUND', 'Upload control identity is stale or missing from the current form revision.', { controlId });
     }
     if (field.semanticType !== 'file') {
-      throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
+      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
     }
     return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   const selector = typeof item?.selector === 'string' ? item.selector.trim() : '';
   if (!selector) {
-    throw revisionError('NETWORK_UPLOAD_CONTROL_REQUIRED', 'Upload requires an exact file controlId or selector.');
+    throw revisionError('WEB_UPLOAD_CONTROL_REQUIRED', 'Upload requires an exact file controlId or selector.');
   }
 
   const locator = target.locator(selector);
   const count = await locator.count();
   if (count !== 1) {
     throw revisionError(
-      count === 0 ? 'NETWORK_FIELD_NOT_FOUND' : 'NETWORK_FIELD_AMBIGUOUS',
+      count === 0 ? 'WEB_FIELD_NOT_FOUND' : 'WEB_FIELD_AMBIGUOUS',
       'Upload selector must resolve to exactly one file control.',
       { selector, count }
     );
@@ -1664,10 +1701,10 @@ async function resolveUploadControl(target, item, fields) {
     enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
   }));
   if (field.tag !== 'input' || field.type !== 'file') {
-    throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
+    throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
   }
   if (!field.enabled) {
-    throw revisionError('NETWORK_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
+    throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
   }
 
   return {
@@ -1845,7 +1882,7 @@ app.post('/shared-browser-status', async (_req, res) => {
 
 app.post('/connector-sync-plan', async (req, res) => {
   try {
-    res.json(planNetworkConnectorRefresh({ connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
+    res.json(planWebConnectorRefresh({ connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
@@ -1853,7 +1890,7 @@ app.post('/connector-sync-plan', async (req, res) => {
 
 app.post('/connector-sync-execute', async (req, res) => {
   try {
-    res.json(await executeNetworkConnectorRefresh({ confirmRefresh: req.body?.confirmRefresh === true || req.body?.confirmSync === true, connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
+    res.json(await executeWebConnectorRefresh({ confirmRefresh: req.body?.confirmRefresh === true || req.body?.confirmSync === true, connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
@@ -1940,7 +1977,7 @@ app.post('/browser-bind', async (req, res) => {
       urlContains: typeof req.body?.urlContains === 'string' ? req.body.urlContains : undefined
     }));
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_TARGET_BIND_FAILED');
+    sendWebError(res, error, 'WEB_TARGET_BIND_FAILED');
   }
 });
 
@@ -1975,7 +2012,7 @@ app.post('/open-fresh', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_OPEN_FRESH_FAILED');
+    sendWebError(res, error, 'WEB_OPEN_FRESH_FAILED');
   }
 });
 
@@ -2005,7 +2042,7 @@ app.post('/open', async (req, res) => {
 
     res.json(response);
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_OPEN_FAILED');
+    sendWebError(res, error, 'WEB_OPEN_FAILED');
   }
 });
 
@@ -2031,7 +2068,7 @@ app.post('/open-job', async (req, res) => {
       profile: describeJobProfile(normalizedUrl)
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_OPEN_JOB_FAILED');
+    sendWebError(res, error, 'WEB_OPEN_JOB_FAILED');
   }
 });
 
@@ -2051,7 +2088,7 @@ app.post('/page-capture', async (req, res) => {
     await target.bringToFront().catch(() => {});
     res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_PAGE_CAPTURE_FAILED');
+    sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');
   }
 });
 
@@ -2067,7 +2104,7 @@ app.post('/wait-for-ready', async (req, res) => {
       quietMs: Number.isInteger(req.body?.quietMs) ? Math.min(Math.max(req.body.quietMs, 100), 10000) : 500
     }));
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_READINESS_WAIT_FAILED');
+    sendWebError(res, error, 'WEB_READINESS_WAIT_FAILED');
   }
 });
 
@@ -2083,7 +2120,7 @@ app.post('/inspect', async (_req, res) => {
       fields
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_INSPECT_FAILED');
+    sendWebError(res, error, 'WEB_INSPECT_FAILED');
   }
 });
 
@@ -2098,7 +2135,7 @@ app.post('/extract-form', async (_req, res) => {
       fields
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_FORM_EXTRACT_FAILED');
+    sendWebError(res, error, 'WEB_FORM_EXTRACT_FAILED');
   }
 });
 
@@ -2129,7 +2166,7 @@ app.post('/propose', async (req, res) => {
 
     res.json({
       ok: true,
-      status: 'NETWORK_PROPOSAL_READY',
+      status: 'WEB_PROPOSAL_READY',
       url: before.url,
       title: before.title,
       targetId: before.targetId,
@@ -2140,7 +2177,7 @@ app.post('/propose', async (req, res) => {
       proposals
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_PROPOSAL_FAILED');
+    sendWebError(res, error, 'WEB_PROPOSAL_FAILED');
   }
 });
 
@@ -2151,16 +2188,16 @@ app.post('/fill-after-approval', async (req, res) => {
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
     if (policy.requireApprovalForFill && (!approved || approvalText !== 'APPLY')) {
-      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=APPLY is required for fill actions.');
+      throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=APPLY is required for fill actions.');
     }
 
     const requestedFields = Array.isArray(req.body?.fields) ? req.body.fields : [];
     if (formFillCount >= policy.maxFormFills) {
-      throw revisionError('NETWORK_OPERATION_LIMIT_REACHED', 'Form fill limit reached for this supervised session.', { limit: policy.maxFormFills, kind: 'form-fill' });
+      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Form fill limit reached for this supervised session.', { limit: policy.maxFormFills, kind: 'form-fill' });
     }
 
     if (fieldWriteCount + requestedFields.length > policy.maxFieldWrites) {
-      throw revisionError('NETWORK_OPERATION_LIMIT_REACHED', 'Field write limit would be exceeded for this supervised session.', { limit: policy.maxFieldWrites, kind: 'field-write', requestedWrites: requestedFields.length });
+      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Field write limit would be exceeded for this supervised session.', { limit: policy.maxFieldWrites, kind: 'field-write', requestedWrites: requestedFields.length });
     }
 
     const target = await ensurePage();
@@ -2202,7 +2239,7 @@ app.post('/fill-after-approval', async (req, res) => {
 
     res.json({
       ok: true,
-      status: 'NETWORK_FORM_MUTATION_VERIFIED',
+      status: 'WEB_FORM_MUTATION_VERIFIED',
       correlation,
       approvalReceipt,
       operationsHash,
@@ -2219,7 +2256,7 @@ app.post('/fill-after-approval', async (req, res) => {
       },
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_FORM_MUTATION_FAILED', correlation);
+    sendWebError(res, error, 'WEB_FORM_MUTATION_FAILED', correlation);
   }
 });
 
@@ -2230,7 +2267,7 @@ app.post('/upload-artifact', async (req, res) => {
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
     if (policy.requireApprovalForUpload && (!approved || approvalText !== 'UPLOAD')) {
-      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=UPLOAD is required for file upload actions.');
+      throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=UPLOAD is required for file upload actions.');
     }
 
     const target = await ensurePage();
@@ -2260,7 +2297,7 @@ app.post('/upload-artifact', async (req, res) => {
     const matched = uploaded.find(file => file.name === guarded.artifact.filename && file.size === guarded.artifact.size);
     if (!matched) {
       throw revisionError(
-        'NETWORK_VALIDATION_FAILED',
+        'WEB_VALIDATION_FAILED',
         'File upload postcondition did not confirm the expected file name and size.',
         {
           controlId: resolvedControl.field.controlId || null,
@@ -2274,7 +2311,7 @@ app.post('/upload-artifact', async (req, res) => {
     const after = await capturePageArtifact(target, { screenshot: false });
     res.json({
       ok: true,
-      status: 'NETWORK_UPLOAD_VERIFIED',
+      status: 'WEB_UPLOAD_VERIFIED',
       correlation,
       controlId: resolvedControl.field.controlId || null,
       artifact: guarded.artifact,
@@ -2295,7 +2332,7 @@ app.post('/upload-artifact', async (req, res) => {
       }
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_UPLOAD_FAILED', correlation);
+    sendWebError(res, error, 'WEB_UPLOAD_FAILED', correlation);
   }
 });
 
@@ -2310,10 +2347,10 @@ app.post('/click', async (req, res) => {
     const selector = String(req.body?.selector || '').trim();
     const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
     if (!text && !selector) {
-      throw revisionError('NETWORK_CLICK_TARGET_REQUIRED', 'Either text or selector is required for click.');
+      throw revisionError('WEB_CLICK_TARGET_REQUIRED', 'Either text or selector is required for click.');
     }
     if (/submit|final|delete|withdraw|payment|purchase|confirm/i.test(text)) {
-      throw revisionError('NETWORK_FINAL_ACTION_REQUIRES_SUBMIT_TOOL', 'Final submit or destructive clicks are not allowed through network.click.');
+      throw revisionError('WEB_FINAL_ACTION_REQUIRES_SUBMIT_TOOL', 'Final submit or destructive clicks are not allowed through web.click.');
     }
     let locator = selector ? target.locator(selector) : target.getByRole('button', { name: text, exact: true });
     if (!selector && await locator.count() === 0) {
@@ -2324,7 +2361,7 @@ app.post('/click', async (req, res) => {
     }
     const count = await locator.count();
     if (count <= nth) {
-      throw revisionError('NETWORK_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
+      throw revisionError('WEB_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
     }
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
@@ -2340,7 +2377,7 @@ app.post('/click', async (req, res) => {
     const verified = Object.values(transition).some(Boolean);
     res.json({
       ok: verified,
-      status: verified ? 'NETWORK_CLICK_TRANSITION_VERIFIED' : 'NETWORK_CLICK_POSTCONDITION_UNVERIFIED',
+      status: verified ? 'WEB_CLICK_TRANSITION_VERIFIED' : 'WEB_CLICK_POSTCONDITION_UNVERIFIED',
       verified,
       retrySafe: false,
       externalActionMayHaveOccurred: true,
@@ -2370,7 +2407,7 @@ app.post('/click', async (req, res) => {
         : 'Inspect the current page before deciding the next action. Do not automatically repeat the click.'
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_CLICK_FAILED', correlation);
+    sendWebError(res, error, 'WEB_CLICK_FAILED', correlation);
   }
 });
 
@@ -2392,13 +2429,13 @@ app.post('/review-before-submit', async (_req, res) => {
     });
     res.json({
       ...artifact,
-      status: 'NETWORK_REVIEW_READY',
+      status: 'WEB_REVIEW_READY',
       reviewPayloadHash,
       approvalReceipt,
       message: 'Review manually before submit. Approve only this exact review receipt/revision before final submit.'
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_REVIEW_CAPTURE_FAILED');
+    sendWebError(res, error, 'WEB_REVIEW_CAPTURE_FAILED');
   }
 });
 
@@ -2408,11 +2445,8 @@ app.post('/submit-after-approval', async (req, res) => {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
-    if (!policy.submitEnabled) {
-      throw revisionError('NETWORK_SUBMIT_DISABLED', 'Final submit is disabled by Network policy.');
-    }
     if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
-      throw revisionError('NETWORK_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
+      throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
     }
 
     const target = await ensurePage();
@@ -2421,7 +2455,7 @@ app.post('/submit-after-approval', async (req, res) => {
     assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const expectedReviewHash = String(req.body?.reviewHash || '').trim();
     if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
-      throw revisionError('NETWORK_APPROVAL_STALE', 'Current page review revision does not match the approved review artifact. Capture a fresh review artifact before submitting.', { expectedReviewHash, actualReviewHash: before.reviewHash });
+      throw revisionError('WEB_APPROVAL_STALE', 'Current page review revision does not match the approved review artifact. Capture a fresh review artifact before submitting.', { expectedReviewHash, actualReviewHash: before.reviewHash });
     }
     const reviewPayloadHash = approvalPayloadHash(hashStableJson, { reviewHash: before.reviewHash });
     const approvalReceipt = policy.requireApprovalReceiptForSubmit
@@ -2480,7 +2514,7 @@ app.post('/submit-after-approval', async (req, res) => {
         : 'Inspect the current page and resolve validation or confirmation uncertainty. Do not automatically repeat submit.'
     });
   } catch (error) {
-    sendNetworkError(res, error, 'NETWORK_SUBMIT_FAILED', correlation);
+    sendWebError(res, error, 'WEB_SUBMIT_FAILED', correlation);
   }
 });
 
@@ -2501,7 +2535,7 @@ $windowApi = @"
 using System;
 using System.Text;
 using System.Runtime.InteropServices;
-public class NetworkMcpWindowApi {
+public class WebMcpWindowApi {
   public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -2514,14 +2548,14 @@ Add-Type -TypeDefinition $windowApi -ErrorAction SilentlyContinue
 function Get-WindowInfoForProcessId {
   param([int]$ProcessId)
   $result = [PSCustomObject]@{ MainWindowHandle = 0; MainWindowTitle = '' }
-  $callback = [NetworkMcpWindowApi+EnumWindowsProc]{
+  $callback = [WebMcpWindowApi+EnumWindowsProc]{
     param([IntPtr]$handle, [IntPtr]$lParam)
     [uint32]$windowProcessId = 0
-    [NetworkMcpWindowApi]::GetWindowThreadProcessId($handle, [ref]$windowProcessId) | Out-Null
-    if ($windowProcessId -eq [uint32]$ProcessId -and [NetworkMcpWindowApi]::IsWindowVisible($handle)) {
-      $length = [NetworkMcpWindowApi]::GetWindowTextLength($handle)
+    [WebMcpWindowApi]::GetWindowThreadProcessId($handle, [ref]$windowProcessId) | Out-Null
+    if ($windowProcessId -eq [uint32]$ProcessId -and [WebMcpWindowApi]::IsWindowVisible($handle)) {
+      $length = [WebMcpWindowApi]::GetWindowTextLength($handle)
       $builder = New-Object System.Text.StringBuilder ([Math]::Max($length + 1, 256))
-      [NetworkMcpWindowApi]::GetWindowText($handle, $builder, $builder.Capacity) | Out-Null
+      [WebMcpWindowApi]::GetWindowText($handle, $builder, $builder.Capacity) | Out-Null
       $title = $builder.ToString()
       if ($title.Trim() -ne '') {
         $result.MainWindowHandle = $handle.ToInt64()
@@ -2531,7 +2565,7 @@ function Get-WindowInfoForProcessId {
     }
     return $true
   }
-  [NetworkMcpWindowApi]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+  [WebMcpWindowApi]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
   return $result
 }
 $full = [System.IO.Path]::GetFullPath($UserDataDir).TrimEnd('\\')
@@ -2608,6 +2642,6 @@ function sanitizeProcessInfo(item) {
 
 const port = Number(process.env.PORT || process.env.BROWSER_MCP_WORKER_PORT || DEFAULT_WORKER_PORT);
 app.listen(port, '127.0.0.1', () => {
-  console.log(`Network browser worker listening on http://127.0.0.1:${port}`);
+  console.log(`Web browser worker listening on http://127.0.0.1:${port}`);
 });
 

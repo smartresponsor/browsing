@@ -42,7 +42,7 @@ export function assertExpectedRevisions(expected, actual, options = {}) {
 
   if (expectedTargetId && expectedTargetId !== actual.targetId) {
     throw revisionError(
-      'NETWORK_TARGET_STALE',
+      'WEB_TARGET_STALE',
       'The bound browser target no longer matches the expected target identity.',
       { expectedTargetId, actualTargetId: actual.targetId },
     );
@@ -55,7 +55,7 @@ export function assertExpectedRevisions(expected, actual, options = {}) {
     !(allowPageRevisionDriftWhenFormStable && formRevisionStable)
   ) {
     throw revisionError(
-      'NETWORK_PAGE_REVISION_STALE',
+      'WEB_PAGE_REVISION_STALE',
       'The page revision changed after inspection. Capture a fresh page snapshot before mutating.',
       { expectedPageRevision, actualPageRevision: actual.pageRevision },
     );
@@ -63,7 +63,7 @@ export function assertExpectedRevisions(expected, actual, options = {}) {
 
   if (expectedFormRevision && expectedFormRevision !== actual.formRevision) {
     throw revisionError(
-      'NETWORK_FORM_REVISION_STALE',
+      'WEB_FORM_REVISION_STALE',
       'The form revision changed after inspection. Re-inspect the form before mutating.',
       { expectedFormRevision, actualFormRevision: actual.formRevision },
     );
@@ -74,7 +74,7 @@ export function assertExpectedRevisions(expected, actual, options = {}) {
 
 export function revisionError(status, message, evidence = {}) {
   const error = new Error(message);
-  error.networkStatus = status;
+  error.webStatus = status;
   error.evidence = evidence;
   return error;
 }

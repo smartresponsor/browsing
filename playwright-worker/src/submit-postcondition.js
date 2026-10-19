@@ -28,7 +28,7 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
   if (validationMatch) {
     return {
       ok: false,
-      status: 'NETWORK_SUBMIT_VALIDATION_FAILED',
+      status: 'WEB_SUBMIT_VALIDATION_FAILED',
       verified: false,
       retrySafe: false,
       evidence: {
@@ -42,7 +42,7 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
   if (confirmationMatch) {
     return {
       ok: true,
-      status: 'NETWORK_SUBMIT_VERIFIED',
+      status: 'WEB_SUBMIT_VERIFIED',
       verified: true,
       retrySafe: false,
       evidence: {
@@ -61,7 +61,7 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
 
   return {
     ok: false,
-    status: 'NETWORK_SUBMIT_POSTCONDITION_UNVERIFIED',
+    status: 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED',
     verified: false,
     retrySafe: false,
     externalActionMayHaveOccurred: true,
