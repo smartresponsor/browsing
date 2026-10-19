@@ -37,7 +37,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
-import { classifyHumanBoundary } from './human-boundary.js';
+import { classifyHumanBoundary, isSafeGoogleSsoTrigger } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
@@ -499,7 +499,7 @@ function describeJobProfile(targetUrl) {
   };
 }
 
-async function ensureNotChallenge(target) {
+async function ensureNotChallenge(target, { allowLoginInspection = false } = {}) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
@@ -563,7 +563,7 @@ async function ensureNotChallenge(target) {
     consentText: snapshot.consentText,
     alertDialogText: snapshot.alertDialogText,
   });
-  if (boundary) {
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required')) {
     throw revisionError(
       'WEB_HUMAN_ACTION_REQUIRED',
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
@@ -886,6 +886,8 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
         ? Array.from(node.selectedOptions || []).map(option => String(option.value ?? ''))
         : node.getAttribute('contenteditable') === 'true'
           ? normalize(node.innerText || node.textContent || '')
+          : semanticType === 'password'
+          ? '[redacted]'
           : String(node.value ?? '');
 
     const validity = typeof node.checkValidity === 'function'
@@ -1071,8 +1073,8 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   });
 }
 
-async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture' } = {}) {
-  await ensureNotChallenge(target);
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false } = {}) {
+  await ensureNotChallenge(target, { allowLoginInspection });
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
@@ -2093,7 +2095,7 @@ app.post('/page-capture', async (req, res) => {
   try {
     const target = await ensurePage();
     await target.bringToFront().catch(() => {});
-    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
+    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true }));
   } catch (error) {
     sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');
   }
@@ -2118,7 +2120,7 @@ app.post('/wait-for-ready', async (req, res) => {
 app.post('/inspect', async (_req, res) => {
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
+    await ensureNotChallenge(target, { allowLoginInspection: true });
     const fields = await snapshotFields(target);
     res.json({
       ok: true,
@@ -2134,7 +2136,7 @@ app.post('/inspect', async (_req, res) => {
 app.post('/extract-form', async (_req, res) => {
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
+    await ensureNotChallenge(target, { allowLoginInspection: true });
     const fields = await snapshotFields(target);
     res.json({
       ok: true,
@@ -2353,12 +2355,13 @@ app.post('/click', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
-    const before = await capturePageArtifact(target, { screenshot: false });
-    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const text = String(req.body?.text || '').trim();
     const selector = String(req.body?.selector || '').trim();
     const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
+    const googleSso = isSafeGoogleSsoTrigger({ text, selector, nth });
+    await ensureNotChallenge(target, { allowLoginInspection: googleSso });
+    const before = await capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     if (!text && !selector) {
       throw revisionError('WEB_CLICK_TARGET_REQUIRED', 'Either text or selector is required for click.');
     }
@@ -2379,12 +2382,12 @@ app.post('/click', async (req, res) => {
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-    await ensureNotChallenge(target);
-    const initialAfter = await capturePageArtifact(target, { screenshot: false });
+    await ensureNotChallenge(target, { allowLoginInspection: googleSso });
+    const initialAfter = await capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso });
     const settled = await settleClickTransition({
       before,
       initialAfter,
-      capture: () => capturePageArtifact(target, { screenshot: false })
+      capture: () => capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso })
     });
     const { after, transition } = settled;
     const verified = Object.values(transition).some(Boolean);

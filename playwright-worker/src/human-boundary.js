@@ -25,6 +25,14 @@ export function classifyChallengeText(text) {
   return null;
 }
 
+// A provider redirect is not a credential operation. It may be initiated only
+// through an exact, user-approved, text-labelled provider entry point; never
+// through arbitrary selectors, nth matches, passwords or submit controls.
+export function isSafeGoogleSsoTrigger({ text = '', selector = '', nth = 0 } = {}) {
+  return !String(selector || '').trim() && nth === 0
+    && /^(?:continue|sign\s?in|log\s?in|register|create account) (?:with|using) google$/i.test(String(text || '').trim());
+}
+
 export function classifyHumanBoundary({
   text,
   url = '',

@@ -12,7 +12,7 @@ for (const token of [
   "import { createHash } from 'node:crypto';",
   "return createHash('sha256').update(String(text || '').replace(/\\r\\n/g, '\\n').trim(), 'utf8').digest('hex');",
   "app.post('/page-capture'",
-  "capturePageArtifact(target, { screenshot: req.body?.screenshot === true })",
+  "capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true })",
   ".map(item => ({",
   "finalCandidate: classifyFinalActionCandidate(item)",
 ]) {
