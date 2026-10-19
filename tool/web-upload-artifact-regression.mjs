@@ -8,6 +8,7 @@ import {
   normalizeArtifactRef,
   resolveGuardedUploadArtifact,
 } from "../playwright-worker/src/upload-artifact.js";
+import { chooseUploadField, selectGuardedUploadFile } from "../playwright-worker/src/upload-control.js";
 
 assert.throws(
   () => normalizeArtifactRef("C:\\Users\\example\\resume.pdf"),
@@ -71,6 +72,97 @@ try {
   );
 } finally {
   await rm(root, { recursive: true, force: true });
+}
+
+
+const fileControls = [
+  { controlId: "iframe:resume", semanticType: "file", enabled: true, visible: false, framePath: [1] },
+  { controlId: "cover-letter", semanticType: "file", enabled: false, visible: true, framePath: [] },
+];
+assert.equal(chooseUploadField(fileControls).controlId, "iframe:resume", "Unique enabled hidden input must be selectable");
+assert.equal(chooseUploadField(fileControls, "iframe:resume").framePath[0], 1, "Iframe identity must be preserved");
+assert.throws(() => chooseUploadField(fileControls, "stale"), error => error?.webStatus === "WEB_FIELD_NOT_FOUND");
+assert.throws(() => chooseUploadField(fileControls, "cover-letter"), error => error?.webStatus === "WEB_CONTROL_UNSUPPORTED");
+assert.throws(() => chooseUploadField([
+  ...fileControls,
+  { controlId: "another", semanticType: "file", enabled: true, visible: false },
+]), error => error?.webStatus === "WEB_FIELD_AMBIGUOUS");
+assert.throws(() => chooseUploadField([{ controlId: "name", semanticType: "text", enabled: true }]),
+  error => error?.webStatus === "WEB_UPLOAD_CONTROL_REQUIRED");
+assert.throws(() => chooseUploadField(fileControls, "name"),
+  error => error?.webStatus === "WEB_FIELD_NOT_FOUND");
+
+const uploadFixture = {
+  filePath: "mock://artifact/candidate/resume.pdf",
+  artifact: { filename: "resume.pdf", size: 1024 },
+};
+function mockUploadInput({ type = "file", enabled = true, detachOnUpload = false, persistFiles = true } = {}) {
+  let dispatched = 0;
+  let detached = false;
+  // The mock has no visibility API: upload must never require isVisible().
+  const node = {
+    tagName: "INPUT",
+    disabled: !enabled,
+    getAttribute(name) { return name === "type" ? type : null; },
+    files: []
+  };
+  const locator = {
+    async evaluate(fn) {
+      if (detached) throw new Error("DOM input was replaced by the framework");
+      return fn(node);
+    },
+    async setInputFiles(value) {
+      assert.equal(value, uploadFixture.filePath);
+      dispatched++;
+      if (detachOnUpload) detached = true;
+      if (persistFiles) node.files = [{ name: "resume.pdf", size: 1024, type: "application/pdf" }];
+    },
+  };
+  return { locator, get dispatched() { return dispatched; } };
+}
+
+const hidden = mockUploadInput();
+const uploaded = await selectGuardedUploadFile({ locator: hidden.locator, artifact: uploadFixture });
+assert.equal(hidden.dispatched, 1);
+assert.equal(uploaded.status, "WEB_UPLOAD_INPUT_VERIFIED");
+assert.equal(uploaded.selectionVerified, true);
+assert.equal(uploaded.serverAcceptanceVerified, false);
+assert.equal(uploaded.uploaded.filename, "resume.pdf");
+
+const detached = mockUploadInput({ detachOnUpload: true });
+await assert.rejects(
+  () => selectGuardedUploadFile({ locator: detached.locator, artifact: uploadFixture, sleep: async () => {} }),
+  error => error?.webStatus === "WEB_UPLOAD_POSTCONDITION_UNVERIFIED"
+    && error?.evidence?.automaticRetryAllowed === false
+    && error?.evidence?.externalActionMayHaveOccurred === true,
+);
+assert.equal(detached.dispatched, 1, "Uncertain upload must never repeat setInputFiles");
+const missingPostcondition = mockUploadInput({ persistFiles: false });
+await assert.rejects(
+  () => selectGuardedUploadFile({ locator: missingPostcondition.locator, artifact: uploadFixture, sleep: async () => {} }),
+  error => error?.webStatus === "WEB_UPLOAD_POSTCONDITION_UNVERIFIED"
+);
+assert.equal(missingPostcondition.dispatched, 1);
+for (const attributes of [{ type: "text" }, { enabled: false }]) {
+  const rejected = mockUploadInput(attributes);
+  await assert.rejects(
+    () => selectGuardedUploadFile({ locator: rejected.locator, artifact: uploadFixture }),
+    error => error?.webStatus === "WEB_CONTROL_UNSUPPORTED"
+  );
+  assert.equal(rejected.dispatched, 0, "Invalid or disabled input may not receive files");
+}
+
+const dispatchUnknown = mockUploadInput();
+dispatchUnknown.locator.setInputFiles = async () => { throw new Error("Playwright lost the CDP reply"); };
+await assert.rejects(
+  () => selectGuardedUploadFile({ locator: dispatchUnknown.locator, artifact: uploadFixture }),
+  error => error?.webStatus === "WEB_UPLOAD_DISPATCH_UNVERIFIED"
+    && error?.evidence?.automaticRetryAllowed === false
+);
+
+const workerSource = (await import("node:fs")).readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
+for (const token of ["chooseUploadField(fields, controlId)", "selectGuardedUploadFile({", "selectionVerified: selection.selectionVerified", "serverAcceptanceVerified: selection.serverAcceptanceVerified"]) {
+  assert.ok(workerSource.includes(token), `Worker integration invariant missing: ${token}`);
 }
 
 console.log("Web guarded upload artifact regression passed.");
