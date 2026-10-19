@@ -47,6 +47,7 @@ Known public examples currently documented:
 - `https://browser-mcp.taa0662621456.workers.dev`
 - `https://web.smartresponsor.com`
 
+
 ### Local ports and endpoints
 
 - `BROWSER_MCP_WORKER_PORT`, default `8791`

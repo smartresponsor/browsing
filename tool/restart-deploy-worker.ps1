@@ -32,11 +32,13 @@ $restart = $restartText | ConvertFrom-Json
 
 if (-not $restart.ok) {
     throw 'web restart failed.'
+
 }
 
 $publicUrl = [string]$restart.tunnel.public_url
 if ([string]::IsNullOrWhiteSpace($publicUrl)) {
     throw 'web restart did not return tunnel.public_url.'
+
 }
 
 if ($publicUrl -notmatch '^https://[a-z0-9.-]+\.trycloudflare\.com$') {

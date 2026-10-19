@@ -55,6 +55,7 @@ $env:BROWSER_MCP_TUNNEL_NAME = 'browser-mcp-worker'
 $env:BROWSER_MCP_TUNNEL_HOSTNAME = 'web.smartresponsor.com'
 $env:BROWSER_MCP_TUNNEL_CONFIG = 'C:\Users\Admin\.cloudflared\browser-mcp-worker.yml'
 $env:BROWSER_MCP_WORKER_URL = 'https://web.smartresponsor.com'
+
 ```
 
 Run the stable tunnel locally:

@@ -78,6 +78,7 @@ $WatchdogStateFile = Join-Path $RunDir 'web-watchdog-state.json'
 $WatchdogLogFile = Join-Path $LogDir 'web-watchdog.ndjson'
 $DefaultMcpPublicOrigin = ''
 $LegacySmartresponsorOrigin = 'https://web.smartresponsor.com'
+
 $DefaultSharedBrowserRoot = Join-Path (Split-Path -Parent $Root) 'browser'
 $DefaultSharedBrowserProfile = Join-Path $DefaultSharedBrowserRoot 'profile'
 $DefaultSharedBrowserRunDir = Join-Path $DefaultSharedBrowserRoot 'run'
@@ -323,6 +324,7 @@ function Invoke-McpSmoke {
             capabilities = @{}
             clientInfo = @{
                 name = 'browser-mcp-dev-web'
+
                 version = '0.1.0'
             }
         }
