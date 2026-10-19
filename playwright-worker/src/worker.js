@@ -38,7 +38,7 @@ import {
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { classifyHumanBoundary } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
-import { classifySubmitPostcondition } from './submit-postcondition.js';
+import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
   approvalPayloadHash,
   consumeApprovalReceipt,
@@ -2499,9 +2499,14 @@ app.post('/submit-after-approval', async (req, res) => {
     await locator.nth(nth).click();
     await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
     await ensureNotChallenge(target);
-    const after = await capturePageArtifact(target, { screenshot: false });
-    const postSubmitText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 20000));
-    const postcondition = classifySubmitPostcondition({ before, after, visibleText: postSubmitText });
+    const postcondition = await settleSubmitPostcondition({
+      before,
+      readSnapshot: async () => ({
+        after: await capturePageArtifact(target, { screenshot: false }),
+        visibleText: await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 20000))
+      })
+    });
+    const after = postcondition.after ?? null;
     res.json({
       ...postcondition,
       action: 'submit_after_approval',
