@@ -6,6 +6,7 @@ import { classifyChallengeText, classifyHumanBoundary } from "../playwright-work
 assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
+assert.equal(classifyChallengeText("The system will create your account after you submit your application. Use a password. Use a one-time code."), null);
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
 assert.equal(classifyChallengeText("Explore Security and Asset Protection careers"), null);
 assert.equal(classifyChallengeText("Assistance programs for life’s challenges"), null);
@@ -60,7 +61,7 @@ const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js
 for (const token of [
   "'WEB_HUMAN_ACTION_REQUIRED'",
   "requestedAction: boundary.requestedAction",
-  "hasPasswordField: Boolean(document.querySelector('input[type=\"password\"]'))",
+  "hasPasswordField: Array.from(document.querySelectorAll('input[type=\"password\"]')).some(element => {",
   "hasCredentialIdentifierField: Boolean(document.querySelector([",
   "consentText,",
   "alertDialogText,",

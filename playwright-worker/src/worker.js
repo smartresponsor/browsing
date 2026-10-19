@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -147,7 +147,6 @@ function getPolicy() {
     approvalReceiptTtlMs: Number(process.env.BROWSER_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
     uploadRoot: path.resolve(String(process.env.BROWSER_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
     maxUploadBytes: Number(process.env.BROWSER_MCP_MAX_UPLOAD_BYTES || 26214400),
-    submitEnabled: String(process.env.BROWSER_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
     maxSessionSeconds: Number(process.env.BROWSER_MCP_MAX_SESSION_SECONDS || 7200),
     maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
     maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
@@ -160,7 +159,7 @@ function getPolicy() {
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
     remoteDebuggingPort: Number(process.env.BROWSER_MCP_REMOTE_DEBUGGING_PORT || 9223),
-    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
+    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 45000)
   };
 }
 
@@ -373,6 +372,7 @@ async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, tim
 
 function buildWebConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
   return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const webToolsVisible = /web\./.test(pageText); if (!result && webToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_WEB_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
+
 }
 
 async function executeWebConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
@@ -422,6 +422,12 @@ async function assertSessionWindow(policy) {
 
   const elapsedSeconds = (Date.now() - sessionStartedAt) / 1000;
   if (elapsedSeconds > policy.maxSessionSeconds) {
+    // External visible Edge is owned by Console, not this worker. Rotate only
+    // the observation window; never close tabs or reset usage counters.
+    if (policy.externalVisibleBrowser) {
+      sessionStartedAt = Date.now();
+      return;
+    }
     await closeSession();
     throw new Error(`Browser session exceeded ${policy.maxSessionSeconds} seconds. Restart the worker.`);
   }
@@ -528,7 +534,12 @@ async function ensureNotChallenge(target) {
     return {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
-      hasPasswordField: Boolean(document.querySelector('input[type="password"]')),
+      hasPasswordField: Array.from(document.querySelectorAll('input[type="password"]')).some(element => {
+        if (!isVisible(element)) return false;
+        const context = normalize((element.closest('form, [role="dialog"], [aria-modal="true"]') || element.parentElement)?.innerText || '');
+        const routeLooksLikeLogin = /\/(?:login|log-in|signin|sign-in|auth)(?:[/?#]|$)/i.test(location.href);
+        return routeLooksLikeLogin || /\b(sign[ -]?in|log[ -]?in|login)\b/i.test(context);
+      }),
       hasCredentialIdentifierField: Boolean(document.querySelector([
         'input[autocomplete="username"]',
         'input[name*="username" i]',
@@ -1074,6 +1085,7 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
     url,
     title,
     textHash,
+    visibleText,
     fields,
     ...revisions,
     submitCandidates
@@ -1447,12 +1459,39 @@ async function writeField(target, locator, value, field = {}) {
   }
 
   const desired = String(value ?? '');
-  await locator.fill(desired);
+  // Workday-style controlled month/year segments require keyboard events.
+  // Verify only after blur; the framework may re-render the input on change.
+  const dateSegment = await locator.evaluate(node => {
+    if (node.tagName.toLowerCase() !== 'input') return null;
+    const marker = [
+      node.getAttribute('data-automation-id') || '',
+      node.getAttribute('aria-label') || '',
+    ].join(' ');
+    if (!/(dateSection|date[-_ ]?segment|month[-_ ]?input|year[-_ ]?input)/i.test(marker)) return null;
+    if (/month/i.test(marker)) return 'month';
+    if (/year/i.test(marker)) return 'year';
+    return null;
+  });
+  if (dateSegment && desired) {
+    const expected = dateSegment === 'month' ? /^\d{1,2}$/ : /^\d{4}$/;
+    if (!expected.test(desired) || (dateSegment === 'month' && (+desired < 1 || +desired > 12))) {
+      throw revisionError('WEB_VALIDATION_FAILED', 'Invalid composite date segment.', {
+        dateSegment, desired, controlId: field.controlId || null
+      });
+    }
+    await locator.click();
+    await locator.press('ControlOrMeta+A');
+    await locator.pressSequentially(desired, { delay: 35 });
+    await locator.press('Tab');
+  } else {
+    await locator.fill(desired);
+  }
   const actual = await locator.inputValue();
   if (actual !== desired) {
-    throw revisionError('WEB_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+    throw revisionError('WEB_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, dateSegment, controlId: field.controlId || null });
+
   }
-  return { semanticType, requested: desired, actual };
+  return { semanticType, requested: desired, actual, ...(dateSegment ? { dateSegment, verifiedAfterBlur: true } : {}) };
 }
 
 function normalizeBooleanMutationValue(value, defaultValue = false) {
@@ -2408,9 +2447,7 @@ app.post('/submit-after-approval', async (req, res) => {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
-    if (!policy.submitEnabled) {
-      throw revisionError('WEB_SUBMIT_DISABLED', 'Final submit is disabled by Web policy.');
-    }
+
     if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
       throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
     }

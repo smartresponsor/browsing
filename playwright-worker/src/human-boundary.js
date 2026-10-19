@@ -8,7 +8,7 @@ export function classifyChallengeText(text) {
     };
   }
 
-  if (/2fa|two-factor|two factor|authentication code|authenticator|verification code|one-time code|one time code/i.test(normalized)) {
+  if (/(?:enter|provide|type|verify with|use your|we sent|sent you|check your)[\s\S]{0,120}(?:2fa|two-factor|two factor|authentication code|authenticator code|verification code|one-time code|one time code)|(?:2fa|two-factor|two factor)[\s\S]{0,80}(?:code|verification|authentication)/i.test(normalized)) {
     return {
       type: 'two_factor',
       requestedAction: 'Complete the second-factor verification manually in the bound browser target.'
