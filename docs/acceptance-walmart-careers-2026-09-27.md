@@ -12,8 +12,8 @@ Observed successful path:
 
 1. Console-owned browser opened `https://careers.walmart.com/us/en`.
 2. Walmart redirected to `/us/en/home`.
-3. Network bound by exact `targetId`.
-4. `network.page.wait`, `network.page.capture`, `network.form.inspect`, and `network.form.extract` succeeded.
+3. Web bound by exact `targetId`.
+4. `web.page.wait`, `web.page.capture`, `web.form.inspect`, and `web.form.extract` succeeded.
 5. Existing authenticated account session exposed `Dashboard`, `Applications`, `Profile`, `Saved roles`, and `Sign out`.
 6. `Profile` route exposed a guarded resume file control.
 7. `Applications` showed `Active 0` and `Draft 0`.
@@ -45,7 +45,7 @@ Observed categories:
 - language radio group;
 - current/former-associate relationship radio group.
 
-Network correctly recognized:
+Web correctly recognized:
 
 - file input as upload-only;
 - native selects and bounded option inventories;
@@ -64,9 +64,9 @@ The Walmart page was bound by exact target identity instead of URL/index guessin
 
 ### Revision guards
 
-On a dynamic results page, the DOM changed between capture and click and Network returned:
+On a dynamic results page, the DOM changed between capture and click and Web returned:
 
-`NETWORK_PAGE_REVISION_STALE`
+`WEB_PAGE_REVISION_STALE`
 
 The operation did not proceed until a fresh capture was taken.
 
@@ -74,7 +74,7 @@ The operation did not proceed until a fresh capture was taken.
 
 Several Walmart SPA interactions returned:
 
-`NETWORK_CLICK_POSTCONDITION_UNVERIFIED`
+`WEB_CLICK_POSTCONDITION_UNVERIFIED`
 
 with:
 
@@ -93,7 +93,7 @@ Repeated pattern:
 
 1. click executes;
 2. immediate after-snapshot shows no URL/page/form revision change;
-3. Network reports `NETWORK_CLICK_POSTCONDITION_UNVERIFIED`;
+3. Web reports `WEB_CLICK_POSTCONDITION_UNVERIFIED`;
 4. a subsequent capture shortly afterward shows the intended transition completed.
 
 Observed examples:
@@ -117,13 +117,13 @@ The settling phase should:
 - stop when target/URL/pageRevision/formRevision changes;
 - use a short bounded deadline;
 - return the first verified changed state;
-- still return `NETWORK_CLICK_POSTCONDITION_UNVERIFIED` if no transition evidence appears.
+- still return `WEB_CLICK_POSTCONDITION_UNVERIFIED` if no transition evidence appears.
 
 A deterministic regression should simulate delayed revision change after click.
 
 ## Live gap 2 — mutation-quiet on continuously animated pages
 
-`network.page.wait(state="mutation-quiet")` timed out on Walmart home while later capture/inspect succeeded.
+`web.page.wait(state="mutation-quiet")` timed out on Walmart home while later capture/inspect succeeded.
 
 Likely source: continuously changing decorative/carousel UI.
 

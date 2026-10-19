@@ -67,17 +67,17 @@ BROWSER_MCP_WORKER_PORT=8791
 
 The current internal command prefix is `career_`.
 
-That prefix is legacy/internal and will later migrate to `network_*`.
+That prefix is legacy/internal and will later migrate to `web_*`.
 
 Documented safe operations:
 
-- `network.open_url`
-- `network.discover_opportunity_links`
-- `network.open_opportunity`
-- `network.inspect_form`
-- `network.fill_approved_fields`
-- `network.save_draft` if supported later
-- `network.submit_form` only if explicit submit mode is enabled
+- `web.open_url`
+- `web.discover_opportunity_links`
+- `web.open_opportunity`
+- `web.inspect_form`
+- `web.fill_approved_fields`
+- `web.save_draft` if supported later
+- `web.submit_form` only if explicit submit mode is enabled
 
 ## Cloudflare Worker cost control
 

@@ -128,9 +128,9 @@ Named tunnel local configuration:
 
 ```env
 BROWSER_MCP_TUNNEL_NAME=browser-mcp-worker
-BROWSER_MCP_TUNNEL_HOSTNAME=network.smartresponsor.com
+BROWSER_MCP_TUNNEL_HOSTNAME=__LEGACY_WEB_HOST__
 BROWSER_MCP_TUNNEL_CONFIG=C:\Users\Admin\.cloudflared\browser-mcp-worker.yml
-BROWSER_MCP_WORKER_URL=https://network.smartresponsor.com
+BROWSER_MCP_WORKER_URL=https://__LEGACY_WEB_HOST__
 ```
 
 Use `ops/cloudflare/cloudflared.named.example.yml` as the template. Keep the real credential JSON outside Git.

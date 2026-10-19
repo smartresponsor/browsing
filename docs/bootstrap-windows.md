@@ -52,9 +52,9 @@ Create the local config from `ops/cloudflare/cloudflared.named.example.yml`, kee
 
 ```powershell
 $env:BROWSER_MCP_TUNNEL_NAME = 'browser-mcp-worker'
-$env:BROWSER_MCP_TUNNEL_HOSTNAME = 'network.smartresponsor.com'
+$env:BROWSER_MCP_TUNNEL_HOSTNAME = '__LEGACY_WEB_HOST__'
 $env:BROWSER_MCP_TUNNEL_CONFIG = 'C:\Users\Admin\.cloudflared\browser-mcp-worker.yml'
-$env:BROWSER_MCP_WORKER_URL = 'https://network.smartresponsor.com'
+$env:BROWSER_MCP_WORKER_URL = 'https://__LEGACY_WEB_HOST__'
 ```
 
 Run the stable tunnel locally:

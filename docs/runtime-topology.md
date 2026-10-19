@@ -14,9 +14,9 @@ It should preserve public origin names, upstream references, and OIDC configurat
 
 The local MCP server is a temporary host until a neutral MCP runtime exists.
 
-It currently owns local listen behavior, MCP transport setup, endpoint dispatch, and attachment of the Network tool bundle.
+It currently owns local listen behavior, MCP transport setup, endpoint dispatch, and attachment of the Web tool bundle.
 
-Future cleanup should move generic host behavior out while keeping `network.*` tools in Browser MCP.
+Future cleanup should move generic host behavior out while keeping `web.*` tools in Browser MCP.
 
 ### Browser worker
 
@@ -26,4 +26,4 @@ It owns visible browser execution, worker routes, browser profile behavior, appr
 
 ## Cleanup rule
 
-Remove duplicated generic hosting only after the Network-owned connector surface remains runnable and deployment references are preserved.
+Remove duplicated generic hosting only after the Web-owned connector surface remains runnable and deployment references are preserved.
