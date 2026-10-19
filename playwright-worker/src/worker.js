@@ -150,7 +150,6 @@ function getPolicy() {
     approvalReceiptTtlMs: Number(process.env.BROWSER_MCP_APPROVAL_RECEIPT_TTL_MS || 900000),
     uploadRoot: path.resolve(String(process.env.BROWSER_MCP_UPLOAD_ROOT || path.join(process.cwd(), 'var', 'artifacts', 'uploads')).trim()),
     maxUploadBytes: Number(process.env.BROWSER_MCP_MAX_UPLOAD_BYTES || 26214400),
-    submitEnabled: String(process.env.BROWSER_MCP_ENABLE_SUBMIT || 'false').toLowerCase() === 'true',
     maxSessionSeconds: Number(process.env.BROWSER_MCP_MAX_SESSION_SECONDS || 7200),
     maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
     maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
@@ -2421,9 +2420,6 @@ app.post('/submit-after-approval', async (req, res) => {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
-    if (!policy.submitEnabled) {
-      throw revisionError('WEB_SUBMIT_DISABLED', 'Final submit is disabled by Web policy.');
-    }
     if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
       throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
     }

@@ -10,7 +10,6 @@ for (const token of [
   "revisionError('WEB_OPERATION_LIMIT_REACHED'",
   "revisionError('WEB_CLICK_TARGET_REQUIRED'",
   "revisionError('WEB_FINAL_ACTION_REQUIRES_SUBMIT_TOOL'",
-  "revisionError('WEB_SUBMIT_DISABLED'",
   "revisionError('WEB_APPROVAL_STALE'",
 ]) {
   assert.equal(source.includes(token), true, `Stable Web status invariant missing: ${token}`);
