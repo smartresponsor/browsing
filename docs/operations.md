@@ -12,7 +12,6 @@ BROWSER_MCP_HEADLESS=false
 BROWSER_MCP_REQUIRE_APPROVAL_FOR_FILL=true
 BROWSER_MCP_REQUIRE_APPROVAL_FOR_SUBMIT=true
 BROWSER_MCP_SUBMIT_DEFAULT=false
-BROWSER_MCP_ENABLE_SUBMIT=false
 BROWSER_MCP_MAX_SESSION_SECONDS=900
 BROWSER_MCP_MAX_PAGE_VISITS=20
 BROWSER_MCP_MAX_FORM_FILLS=1
@@ -105,7 +104,7 @@ Real php-cs-fixer failures still block the commit when the tool exists.
 - Enforce max field writes.
 - Require approval for fill actions.
 - Require separate approval for submit actions.
-- Disable submit unless `BROWSER_MCP_ENABLE_SUBMIT=true`.
+- Require explicit submit approval, a revision-bound review and a one-time approval receipt before final submission.
 
 ## Cloudflare worker notes
 

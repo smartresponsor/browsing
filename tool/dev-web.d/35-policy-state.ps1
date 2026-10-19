@@ -22,9 +22,6 @@ function Get-PolicyState {
     if ($env:BROWSER_MCP_SUBMIT_DEFAULT -eq 'true') {
         $warnings += 'BROWSER_MCP_SUBMIT_DEFAULT is true; the MVP expects submit to stay disabled by default.'
     }
-    if ($env:BROWSER_MCP_ENABLE_SUBMIT -eq 'true') {
-        $warnings += 'BROWSER_MCP_ENABLE_SUBMIT is true; submit mode should remain off unless explicitly enabled later.'
-    }
 
     $maxSessionSeconds = if ($env:BROWSER_MCP_MAX_SESSION_SECONDS) { [int]$env:BROWSER_MCP_MAX_SESSION_SECONDS } else { 7200 }
     $maxPageVisits = if ($env:BROWSER_MCP_MAX_PAGE_VISITS) { [int]$env:BROWSER_MCP_MAX_PAGE_VISITS } else { 100 }
@@ -50,7 +47,6 @@ function Get-PolicyState {
         require_approval_for_fill = -not ($env:BROWSER_MCP_REQUIRE_APPROVAL_FOR_FILL -eq 'false')
         require_approval_for_submit = -not ($env:BROWSER_MCP_REQUIRE_APPROVAL_FOR_SUBMIT -eq 'false')
         submit_default = [bool]($env:BROWSER_MCP_SUBMIT_DEFAULT -eq 'true')
-        enable_submit = [bool]($env:BROWSER_MCP_ENABLE_SUBMIT -eq 'true')
         max_session_seconds = $maxSessionSeconds
         max_page_visits = $maxPageVisits
         max_form_fills = $maxFormFills
