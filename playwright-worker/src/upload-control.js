@@ -28,8 +28,29 @@ export function chooseUploadField(fields, controlId = '') {
   return eligible[0];
 }
 
+export function assertSafeUploadActivator(candidate) {
+  const tag = String(candidate?.tag || '').toLowerCase();
+  const role = String(candidate?.role || '').toLowerCase();
+  const label = String(candidate?.label || '').replace(/\s+/g, ' ').trim().slice(0, 250);
+  const marker = String(candidate?.marker || '').toLowerCase();
+  // Never click a submit/reset button or a link as an upload activator.
+  // A button without type=button inside a form defaults to type=submit.
+  const type = String(candidate?.type || '').toLowerCase();
+  const semanticTrigger = tag === 'label' || (tag === 'button' && !['submit', 'reset'].includes(type))
+    || (['div', 'span'].includes(tag) && role === 'button')
+    || (tag === 'div' && /(?:dropzone|file-upload|upload-trigger)/.test(marker));
+  const uploadIntent = /\b(upload|attach|browse|choose files?|select files?|drop files?|add (?:resume|cv|attachment))\b/i.test(label);
+  const forbidden = /\b(submit|apply|finish|delete|remove|withdraw|purchase|pay|checkout|confirm|continue|next|save)\b/i.test(label);
+  if (!candidate?.visible || !candidate?.enabled || !semanticTrigger || !uploadIntent || forbidden) {
+    throw uploadError('WEB_UPLOAD_TRIGGER_UNSAFE',
+      'The selector is not an unambiguous, enabled, visible upload/dropzone activator.',
+      { tag, role, label: label.slice(0, 100), semanticTrigger, uploadIntent, forbidden });
+  }
+  return { tag, role, label };
+}
+
 export async function selectGuardedUploadFile({
-  locator, artifact, maxAttempts = 3,
+  locator, artifact, performSelection, maxAttempts = 3,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 }) {
   if (!locator || !artifact?.filePath || !artifact?.artifact) {
@@ -52,7 +73,8 @@ export async function selectGuardedUploadFile({
   // The single approved mutation. Never reapply files if a reactive form swaps
   // or detaches the input before postcondition observation.
   try {
-    await locator.setInputFiles(artifact.filePath);
+    if (performSelection) await performSelection(artifact.filePath);
+    else await locator.setInputFiles(artifact.filePath);
   } catch (error) {
     throw uploadError('WEB_UPLOAD_DISPATCH_UNVERIFIED',
       'File selection did not return a confirmed result. Inspect the current form; do not automatically retry.',

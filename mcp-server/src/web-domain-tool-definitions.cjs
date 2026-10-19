@@ -163,7 +163,7 @@ function createWebCoreDomainToolDefinitions() {
       legacyName: 'web.upload_artifact',
       capabilityName: 'web.upload_artifact',
       access: 'write',
-      description: 'Upload one approved guarded artifact reference to an exact semantic file control.',
+      description: 'Select one approved file using an exact or unique native input (including hidden/iframe) or a safe upload/dropzone selector with a guarded file chooser. Verifies browser file selection, not server acceptance; never retries uncertain uploads.',
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),

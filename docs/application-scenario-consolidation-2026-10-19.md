@@ -20,6 +20,20 @@ Promote capabilities only if a reviewed scenario demonstrates a repeatable behav
 4. **Session recovery:** worker/CDP attach timeouts, exact target binding, preservation of external Edge profile and avoidance of unsafe automatic browser restarts.
 5. **Application evidence:** structured capture of opening job URL, final confirmation and status, with personal data excluded from source-control fixtures.
 
+## Upload capability implementation (2026-10-19)
+
+Existing `web.form.upload` now supports three supervised paths without introducing another MCP command:
+
+- An explicit semantic `controlId`, including hidden native file input within an iframe or open shadow root.
+- An omitted `controlId`/`selector` only when exactly one enabled semantic file input exists.
+- An explicit `selector` for exactly one visible and semantically recognizable upload/dropzone trigger; this uses Playwright `FileChooser` only after the existing upload approval and artifact checks. Submit/reset buttons, links, ambiguous selectors and generic navigation controls are refused.
+
+All paths require a relative artifact reference under the dedicated upload root and preserve expected target/page/form revision checks. File selection occurs once; when the UI detaches a native input or CDP loses the reply, the state becomes uncertain and automatic retries are forbidden.
+
+A `WEB_UPLOAD_VERIFIED` response means the selected file's name and size matched `input.files` locally, with `uploadStage=input-file-selected`, `selectionVerified=true`, and **`serverAcceptanceVerified=false`**. Applications must inspect employer-side attachment indicators or confirmation steps separately; no claim of completed server upload is made from local selection alone.
+
+Tests: `npm test` and `npm run typecheck`. Optional isolated real-Edge smoke: `tool/test-upload-browser.ps1`, covering hidden input, iframe file input and dynamic dropzone `FileChooser`; it does not connect to the visible/shared Edge instance.
+
 ## Promotion gate
 
 A capability is eligible for a separate signed commit only after confirming:

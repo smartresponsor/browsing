@@ -8,7 +8,7 @@ import {
   normalizeArtifactRef,
   resolveGuardedUploadArtifact,
 } from "../playwright-worker/src/upload-artifact.js";
-import { chooseUploadField, selectGuardedUploadFile } from "../playwright-worker/src/upload-control.js";
+import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from "../playwright-worker/src/upload-control.js";
 
 assert.throws(
   () => normalizeArtifactRef("C:\\Users\\example\\resume.pdf"),
@@ -163,6 +163,51 @@ await assert.rejects(
 const workerSource = (await import("node:fs")).readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 for (const token of ["chooseUploadField(fields, controlId)", "selectGuardedUploadFile({", "selectionVerified: selection.selectionVerified", "serverAcceptanceVerified: selection.serverAcceptanceVerified"]) {
   assert.ok(workerSource.includes(token), `Worker integration invariant missing: ${token}`);
+}
+
+for (const safe of [
+  { tag: "button", label: "Upload Resume", visible: true, enabled: true },
+  { tag: "label", label: "Browse Files", visible: true, enabled: true },
+  { tag: "div", marker: "dropzone", label: "Drop Files Here", visible: true, enabled: true },
+  { tag: "div", role: "button", label: "Attach CV", visible: true, enabled: true }
+]) {
+  assert.ok(assertSafeUploadActivator(safe).label, "Recognized upload activator must be allowed");
+}
+for (const unsafe of [
+  { tag: "button", label: "Submit Application", visible: true, enabled: true },
+  { tag: "button", label: "Upload CV and Submit", visible: true, enabled: true },
+  { tag: "button", type: "submit", label: "Upload Resume", visible: true, enabled: true },
+  { tag: "button", type: "reset", label: "Browse Files", visible: true, enabled: true },
+  { tag: "a", role: "button", label: "Upload CV", visible: true, enabled: true },
+  { tag: "a", label: "Upload Resume", visible: true, enabled: true },
+  { tag: "button", label: "Browse Files", visible: false, enabled: true },
+  { tag: "button", label: "Attach CV", visible: true, enabled: false },
+  { tag: "div", label: "Drop Files Here", visible: true, enabled: true },
+  { tag: "button", label: "Continue", visible: true, enabled: true }
+]) {
+  assert.throws(() => assertSafeUploadActivator(unsafe),
+    error => error?.webStatus === "WEB_UPLOAD_TRIGGER_UNSAFE");
+}
+const chooserInput = mockUploadInput();
+let chooserCalls = 0;
+const browserInputDispatch = chooserInput.locator.setInputFiles;
+const chooserResult = await selectGuardedUploadFile({
+  locator: chooserInput.locator,
+  artifact: uploadFixture,
+  performSelection: async filePath => { chooserCalls++; await browserInputDispatch(filePath); }
+});
+assert.equal(chooserCalls, 1);
+assert.equal(chooserInput.dispatched, 1);
+assert.equal(chooserResult.selectionVerified, true);
+assert.equal(chooserResult.serverAcceptanceVerified, false);
+for (const invariant of [
+  "assertSafeUploadActivator(field)",
+  "target.waitForEvent('filechooser'",
+  "performSelection: filePath => chooser.setFiles(filePath)",
+  "selectionMechanism: resolvedControl.mode === 'filechooser'",
+  "WEB_UPLOAD_CHOOSER_UNVERIFIED"
+]) {
+  assert.ok(workerSource.includes(invariant), `Safe dropzone/filechooser invariant missing: ${invariant}`);
 }
 
 console.log("Web guarded upload artifact regression passed.");

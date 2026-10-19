@@ -36,7 +36,7 @@ import {
   revisionError
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
-import { chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
+import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
 import { classifyHumanBoundary } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
@@ -1687,7 +1687,10 @@ async function resolveUploadControl(target, item, fields) {
 
   const field = await locator.evaluate(node => ({
     tag: node.tagName.toLowerCase(),
-    type: String(node.getAttribute('type') || '').toLowerCase(),
+    type: String(node.type || node.getAttribute('type') || '').toLowerCase(),
+    role: String(node.getAttribute('role') || '').toLowerCase(),
+    label: String(node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim().slice(0, 250),
+    marker: [node.getAttribute('data-testid'), node.getAttribute('data-automation-id'), node.getAttribute('class')].filter(Boolean).join(' ').slice(0, 250),
     visible: (() => {
       const style = window.getComputedStyle(node);
       const rect = node.getBoundingClientRect();
@@ -1696,7 +1699,16 @@ async function resolveUploadControl(target, item, fields) {
     enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
   }));
   if (field.tag !== 'input' || field.type !== 'file') {
-    throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
+    assertSafeUploadActivator(field);
+    return {
+      locator,
+      mode: 'filechooser',
+      field: {
+        ...field,
+        semanticType: 'filechooser',
+        controlId: `selector:${hashStableJson({ selector, type: 'filechooser' })}`
+      }
+    };
   }
   if (!field.enabled) {
     throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
@@ -2282,10 +2294,32 @@ app.post('/upload-artifact', async (req, res) => {
       maxBytes: policy.maxUploadBytes
     });
 
-    const selection = await selectGuardedUploadFile({
-      locator: resolvedControl.locator,
-      artifact: guarded
-    });
+    let selection;
+    if (resolvedControl.mode === 'filechooser') {
+      // A dropzone may create its native file input only on activation.
+      // Arm the chooser event before the single approved upload click.
+      try {
+        const [chooser] = await Promise.all([
+          target.waitForEvent('filechooser', { timeout: 12000 }),
+          resolvedControl.locator.click()
+        ]);
+        selection = await selectGuardedUploadFile({
+          locator: await chooser.element(),
+          artifact: guarded,
+          performSelection: filePath => chooser.setFiles(filePath)
+        });
+      } catch (error) {
+        if (error?.webStatus) throw error;
+        throw revisionError('WEB_UPLOAD_CHOOSER_UNVERIFIED',
+          'Upload trigger was activated but the file chooser outcome was not verified. Do not automatically retry.',
+          { externalActionMayHaveOccurred: true, automaticRetryAllowed: false, lastError: normalizeError(error).slice(0, 300) });
+      }
+    } else {
+      selection = await selectGuardedUploadFile({
+        locator: resolvedControl.locator,
+        artifact: guarded
+      });
+    }
     const after = await capturePageArtifact(target, { screenshot: false });
     res.json({
       ok: true,
@@ -2294,6 +2328,7 @@ app.post('/upload-artifact', async (req, res) => {
       controlId: resolvedControl.field.controlId || null,
       artifact: guarded.artifact,
       uploadStage: 'input-file-selected',
+      selectionMechanism: resolvedControl.mode === 'filechooser' ? 'filechooser' : 'native-input',
       selectionVerified: selection.selectionVerified,
       serverAcceptanceVerified: selection.serverAcceptanceVerified,
       observationAttempts: selection.observationAttempts,
