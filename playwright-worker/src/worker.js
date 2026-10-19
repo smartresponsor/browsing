@@ -36,6 +36,7 @@ import {
   revisionError
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
+import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
 import { classifyHumanBoundary } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
@@ -1666,20 +1667,12 @@ async function resolveRequestedFieldLocator(target, item, fields) {
 
 async function resolveUploadControl(target, item, fields) {
   const controlId = getRequestedControlId(item);
-  if (controlId) {
-    const field = fields.find(candidate => candidate.controlId === controlId);
-    if (!field) {
-      throw revisionError('WEB_FIELD_NOT_FOUND', 'Upload control identity is stale or missing from the current form revision.', { controlId });
-    }
-    if (field.semanticType !== 'file') {
-      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
-    }
-    return { locator: await locatorForFieldSnapshot(target, field), field };
-  }
-
   const selector = typeof item?.selector === 'string' ? item.selector.trim() : '';
-  if (!selector) {
-    throw revisionError('WEB_UPLOAD_CONTROL_REQUIRED', 'Upload requires an exact file controlId or selector.');
+  if (controlId || !selector) {
+    // A hidden file input still has a stable semantic controlId, including in
+    // an iframe or open shadow root. Choose automatically only if unique.
+    const field = chooseUploadField(fields, controlId);
+    return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   const locator = target.locator(selector);
@@ -1694,7 +1687,10 @@ async function resolveUploadControl(target, item, fields) {
 
   const field = await locator.evaluate(node => ({
     tag: node.tagName.toLowerCase(),
-    type: String(node.getAttribute('type') || '').toLowerCase(),
+    type: String(node.type || node.getAttribute('type') || '').toLowerCase(),
+    role: String(node.getAttribute('role') || '').toLowerCase(),
+    label: String(node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim().slice(0, 250),
+    marker: [node.getAttribute('data-testid'), node.getAttribute('data-automation-id'), node.getAttribute('class')].filter(Boolean).join(' ').slice(0, 250),
     visible: (() => {
       const style = window.getComputedStyle(node);
       const rect = node.getBoundingClientRect();
@@ -1703,7 +1699,16 @@ async function resolveUploadControl(target, item, fields) {
     enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
   }));
   if (field.tag !== 'input' || field.type !== 'file') {
-    throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
+    assertSafeUploadActivator(field);
+    return {
+      locator,
+      mode: 'filechooser',
+      field: {
+        ...field,
+        semanticType: 'filechooser',
+        controlId: `selector:${hashStableJson({ selector, type: 'filechooser' })}`
+      }
+    };
   }
   if (!field.enabled) {
     throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
@@ -2289,27 +2294,32 @@ app.post('/upload-artifact', async (req, res) => {
       maxBytes: policy.maxUploadBytes
     });
 
-    await resolvedControl.locator.setInputFiles(guarded.filePath);
-    const uploaded = await resolvedControl.locator.evaluate(node => Array.from(node.files || []).map(file => ({
-      name: String(file.name || ''),
-      size: Number(file.size || 0),
-      type: String(file.type || '')
-    })));
-
-    const matched = uploaded.find(file => file.name === guarded.artifact.filename && file.size === guarded.artifact.size);
-    if (!matched) {
-      throw revisionError(
-        'WEB_VALIDATION_FAILED',
-        'File upload postcondition did not confirm the expected file name and size.',
-        {
-          controlId: resolvedControl.field.controlId || null,
-          expectedFilename: guarded.artifact.filename,
-          expectedSize: guarded.artifact.size,
-          uploaded
-        }
-      );
+    let selection;
+    if (resolvedControl.mode === 'filechooser') {
+      // A dropzone may create its native file input only on activation.
+      // Arm the chooser event before the single approved upload click.
+      try {
+        const [chooser] = await Promise.all([
+          target.waitForEvent('filechooser', { timeout: 12000 }),
+          resolvedControl.locator.click()
+        ]);
+        selection = await selectGuardedUploadFile({
+          locator: await chooser.element(),
+          artifact: guarded,
+          performSelection: filePath => chooser.setFiles(filePath)
+        });
+      } catch (error) {
+        if (error?.webStatus) throw error;
+        throw revisionError('WEB_UPLOAD_CHOOSER_UNVERIFIED',
+          'Upload trigger was activated but the file chooser outcome was not verified. Do not automatically retry.',
+          { externalActionMayHaveOccurred: true, automaticRetryAllowed: false, lastError: normalizeError(error).slice(0, 300) });
+      }
+    } else {
+      selection = await selectGuardedUploadFile({
+        locator: resolvedControl.locator,
+        artifact: guarded
+      });
     }
-
     const after = await capturePageArtifact(target, { screenshot: false });
     res.json({
       ok: true,
@@ -2317,11 +2327,12 @@ app.post('/upload-artifact', async (req, res) => {
       correlation,
       controlId: resolvedControl.field.controlId || null,
       artifact: guarded.artifact,
-      uploaded: {
-        filename: matched.name,
-        size: matched.size,
-        type: matched.type
-      },
+      uploadStage: 'input-file-selected',
+      selectionMechanism: resolvedControl.mode === 'filechooser' ? 'filechooser' : 'native-input',
+      selectionVerified: selection.selectionVerified,
+      serverAcceptanceVerified: selection.serverAcceptanceVerified,
+      observationAttempts: selection.observationAttempts,
+      uploaded: selection.uploaded,
       before: {
         targetId: before.targetId,
         pageRevision: before.pageRevision,
