@@ -1,6 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
+// Load new grants proof only for the opt-in dedicated worker. Legacy workers never depend on an un-deployed Console build.
+const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
+  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -409,6 +412,9 @@ async function assertSessionWindow(policy) {
 
 function validateTargetUrl(rawUrl, policy) {
   const targetUrl = new URL(rawUrl);
+  if (process.env.BROWSER_MCP_GRANTS_WORKER === 'true' && !grantsPolicy.isGrantsAllowedUrl(targetUrl.toString())) {
+    throw new Error('GRANTS_HOST_NOT_ALLOWED');
+  }
 
   if (!['http:', 'https:'].includes(targetUrl.protocol)) {
     throw new Error(`Unsupported URL scheme: ${targetUrl.protocol}`);
@@ -1733,6 +1739,8 @@ app.use(async (req, res, next) => {
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
+    const grants = process.env.BROWSER_MCP_GRANTS_WORKER === 'true';
+    if (grants && port !== 9230) return res.status(409).json({ok:false,status:'WEB_GRANTS_SESSION_NOT_READY',reason:'GRANTS_PORT_MISMATCH'});
     const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && (req.body?.index !== undefined || req.body?.urlContains || (req.path === '/browser-bind' && req.body?.url))) {
@@ -1742,9 +1750,11 @@ app.use(async (req, res, next) => {
       targetId = candidates[0].id;
     }
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
-    const before = boundVisibleRuntime && targetId
-      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
-      : await selectVisibleTarget([port], targetId, correlationId, background);
+    const before = grants
+      ? await grantsPolicy.inspectGrantsTarget({ targetId, expected: boundVisibleRuntime })
+      : boundVisibleRuntime && targetId
+        ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
+        : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
@@ -1753,7 +1763,9 @@ app.use(async (req, res, next) => {
         let after;
         try {
           const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
-          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
+          after = grants
+            ? await grantsPolicy.inspectGrantsTarget({ targetId: afterId, expected: before.evidence })
+            : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after, browser_telemetry: { correlation_id: correlationId, cdp_success: after.states.includes('CDP_CONNECTED'), operation_success: body.ok === true, navigation_success: ['/open', '/open-job'].includes(req.path) ? body.ok === true : null, target_binding_success: after.ok, visibility_verification_success: after.visibility_verified, user_interaction_ready: after.user_interaction_ready } });
