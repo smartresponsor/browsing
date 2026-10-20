@@ -19,6 +19,15 @@ for (const token of [
   assert.equal(worker.includes(token), true, `Page capture hashing invariant missing: ${token}`);
 }
 
+for (const invariant of [
+  "req.body?.captureView === 'dom'",
+  "req.body?.captureView === 'form'",
+  "captureView: 'dom', dom: { text: artifact.visibleText, links }",
+  "Array.from(document.querySelectorAll('a[href]')).slice(0, 350)",
+]) {
+  assert.ok(worker.includes(invariant), `Read-only DOM/form projection missing: ${invariant}`);
+}
+
 for (const text of ["Apply", "Apply now", "Apply to 1 role", "Apply manually", "Start application", "Continue application"]) {
   assert.equal(
     classifyFinalActionCandidate({ text, type: "button" }),
