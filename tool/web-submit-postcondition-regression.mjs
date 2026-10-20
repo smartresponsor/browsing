@@ -89,14 +89,102 @@ assert.equal(uncertain.retrySafe, false);
 assert.equal(uncertain.externalActionMayHaveOccurred, true);
 assert.equal(uncertain.observationAttempts, 3);
 
+// Real Greenhouse forms contain this instructional text before and after
+// clicking Submit. It must never be interpreted as a validation error.
+// Pre-existing thank-you wording in the job advert cannot establish receipt.
+const evergreenThanks = {
+  ...before,
+  visibleText: 'Job duties include writing thank you for applying emails and workflows.'
+};
+const evergreenClassified = classifySubmitPostcondition({
+  before: evergreenThanks,
+  after: { url: before.url, pageRevision: 'changed' },
+  visibleText: evergreenThanks.visibleText
+});
+assert.equal(evergreenClassified.status, 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED');
+const newConfirmationRoute = classifySubmitPostcondition({
+  before: evergreenThanks,
+  after: { url: 'https://example.test/apply/confirmation', pageRevision: 'confirmed' },
+  visibleText: 'Thank you for applying. Your application has been received.'
+});
+assert.equal(newConfirmationRoute.status, 'WEB_SUBMIT_VERIFIED');
+
+const greenhouseHint = '* indicates a required field';
+const greenhouseBefore = {
+  ...before,
+  visibleText: `Apply for this job ${greenhouseHint} Submit application`
+};
+const baselineHint = classifySubmitPostcondition({
+  before: greenhouseBefore,
+  after: greenhouseBefore,
+  visibleText: greenhouseBefore.visibleText
+});
+assert.equal(baselineHint.status, 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED');
+assert.equal(baselineHint.retrySafe, false);
+
+let greenhouseReads = 0;
+let greenhouseWaits = 0;
+const greenhouseDelayed = await settleSubmitPostcondition({
+  before: greenhouseBefore,
+  maxAttempts: 6,
+  sleep: async () => { greenhouseWaits++; },
+  readSnapshot: async () => {
+    greenhouseReads++;
+    return greenhouseReads === 4
+      ? {
+          after: { url: 'https://job-boards.greenhouse.io/syllo/jobs/4374366009/confirmation', pageRevision: 'confirmed' },
+          visibleText: 'Thank you for applying. Your application has been received.'
+        }
+      : {
+          after: { url: greenhouseBefore.url, pageRevision: 'still-pending' },
+          visibleText: `Apply for this job ${greenhouseHint} Resume/CV Submit application`
+        };
+  }
+});
+assert.equal(greenhouseDelayed.status, 'WEB_SUBMIT_VERIFIED');
+assert.equal(greenhouseDelayed.verified, true);
+assert.equal(greenhouseDelayed.observationAttempts, 4);
+assert.equal(greenhouseReads, 4);
+assert.equal(greenhouseWaits, 3);
+
+let transitionalValidationReads = 0;
+const transitionalValidation = await settleSubmitPostcondition({
+  before, maxAttempts: 4, sleep: async () => {},
+  readSnapshot: async () => {
+    transitionalValidationReads++;
+    return transitionalValidationReads === 1
+      ? { after: before, visibleText: 'Please correct the errors below.' }
+      : { after: { url: 'https://example.test/confirmation' }, visibleText: 'Your application has been received.' };
+  }
+});
+assert.equal(transitionalValidation.status, 'WEB_SUBMIT_VERIFIED');
+assert.equal(transitionalValidationReads, 2);
+
 let calls = 0;
 const validationSettled = await settleSubmitPostcondition({
-  before,
-  readSnapshot: async () => { calls++; return { after: before, visibleText: 'Please correct the errors below.' }; },
-  sleep: async () => { throw new Error('Should not delay after validation failure'); }
+  before, maxAttempts: 3, sleep: async () => {},
+  readSnapshot: async () => {
+    calls++;
+    return { after: before, visibleText: 'Please correct the errors below. This field is required.' };
+  }
 });
 assert.equal(validationSettled.status, 'WEB_SUBMIT_VALIDATION_FAILED');
-assert.equal(calls, 1);
+assert.equal(validationSettled.observationAttempts, 3);
+assert.equal(calls, 3);
+
+const staleValidation = classifySubmitPostcondition({
+  before: { ...before, visibleText: 'Please correct the errors below.' },
+  after: before,
+  visibleText: 'Please correct the errors below.'
+});
+assert.equal(staleValidation.status, 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED');
+
+const invalidGreenhouseCode = classifySubmitPostcondition({
+  before: greenhouseBefore,
+  after: greenhouseBefore,
+  visibleText: `Submit application ${greenhouseHint} Invalid security code`
+});
+assert.equal(invalidGreenhouseCode.status, 'WEB_SUBMIT_VALIDATION_FAILED');
 
 const failedObservations = await settleSubmitPostcondition({
   before, maxAttempts: 2, sleep: async () => {},
@@ -110,6 +198,7 @@ const source = fs.readFileSync(new URL("../playwright-worker/src/worker.js", imp
 for (const token of [
   "settleSubmitPostcondition({",
   "const after = postcondition.after ?? null;",
+  "visibleText: after.visibleText",
   "...postcondition",
   "Do not automatically repeat submit.",
 ]) {

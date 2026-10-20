@@ -34,6 +34,18 @@ A `WEB_UPLOAD_VERIFIED` response means the selected file's name and size matched
 
 Tests: `npm test` and `npm run typecheck`. Optional isolated real-Edge smoke: `tool/test-upload-browser.ps1`, covering hidden input, iframe file input and dynamic dropzone `FileChooser`; it does not connect to the visible/shared Edge instance.
 
+## Submit postcondition handling (Syllo regression, 2026-10-19)
+
+The single approved `web.form.submit` click remains protected by its exact target, review revision and one-use approval receipt. Its postcondition observer is **read-only**: up to 12 snapshots, separated by 750 ms, with no automatic second click.
+
+- Ignore evergreen Greenhouse copy such as `* indicates a required field`; it is not a validation failure.
+- Treat *newly observed, explicit* validation messages (including `Invalid security code`) as failures only after the bounded observation window, allowing a delayed SPA redirect to complete.
+- Mark success only when specific confirmation text was absent before the click or appears on a newly reached confirmation/thank-you route. A success phrase already in the job advert is not evidence.
+- Capture the URL, page revision and visible text in a **single artifact**, preventing a mixed snapshot during navigation.
+- Without confirmation, report `WEB_SUBMIT_POSTCONDITION_UNVERIFIED` or a genuine persistent `WEB_SUBMIT_VALIDATION_FAILED`. **Neither authorizes automatic resubmission.**
+
+Regression: `tool/web-submit-postcondition-regression.mjs` reproduces the Syllo Greenhouse delayed-confirmation sequence, invalid-code feedback and ambiguous/transient states without storing candidate data or a verification code.
+
 ## Promotion gate
 
 A capability is eligible for a separate signed commit only after confirming:

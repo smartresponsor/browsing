@@ -6,13 +6,13 @@
 export async function settleSubmitPostcondition({
   before,
   readSnapshot,
-  maxAttempts = 5,
-  intervalMs = 600,
+  maxAttempts = 12,
+  intervalMs = 750,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 }) {
   if (typeof readSnapshot !== 'function') throw new TypeError('readSnapshot is required');
-  const attempts = Math.min(8, Math.max(1, Number.isInteger(maxAttempts) ? maxAttempts : 5));
-  const pause = Math.min(1500, Math.max(0, Number.isFinite(intervalMs) ? intervalMs : 600));
+  const attempts = Math.min(16, Math.max(1, Number.isInteger(maxAttempts) ? maxAttempts : 12));
+  const pause = Math.min(1500, Math.max(0, Number.isFinite(intervalMs) ? intervalMs : 750));
   let latest = null;
   let lastError = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -26,7 +26,9 @@ export async function settleSubmitPostcondition({
         visibleText: snapshot.visibleText
       });
       latest = { ...result, after: snapshot.after, observationAttempts: attempt };
-      if (result.verified || result.status === 'WEB_SUBMIT_VALIDATION_FAILED') return latest;
+      // A form may display stale validation text while the accepted submission
+      // is still navigating to its confirmation screen. Only success is final.
+      if (result.verified) return latest;
     } catch (error) {
       lastError = String(error?.message || error).slice(0, 300);
     }
@@ -65,14 +67,20 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
   const validationPatterns = [
     /please correct the (?:errors?|following)/,
     /please fix the (?:errors?|following)/,
-    /required field/,
     /this field is required/,
     /there (?:is|are) .* errors?/,
     /unable to submit/,
-    /submission failed/
+    /submission failed/,
+    /invalid security code/,
+    /security code (?:expired|invalid)/,
+    /incorrect (?:security )?code/
   ];
 
-  const validationMatch = validationPatterns.find(pattern => pattern.test(lower));
+  // Ignore boilerplate or errors already present in the approved pre-submit
+  // snapshot. Greenhouse adds '* indicates a required field' to every form.
+  const beforeText = normalize(before?.visibleText).toLowerCase();
+  const validationMatch = validationPatterns.find(pattern =>
+    pattern.test(lower) && !pattern.test(beforeText));
   if (validationMatch) {
     return {
       ok: false,
@@ -86,7 +94,13 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
     };
   }
 
-  const confirmationMatch = confirmationPatterns.find(pattern => pattern.test(lower));
+  // A job page can quote a success phrase in an FAQ or template before
+  // submission. It is confirmation evidence only when it appears newly or on
+  // a distinct confirmation/thank-you route reached after the approved click.
+  const reachedConfirmationRoute = Boolean(before?.url && after?.url && before.url !== after.url &&
+    /\/(?:confirmation|thank-you|submitted)(?:[/?#]|$)/i.test(after.url));
+  const confirmationMatch = confirmationPatterns.find(pattern =>
+    pattern.test(lower) && (!pattern.test(beforeText) || reachedConfirmationRoute));
   if (confirmationMatch) {
     return {
       ok: true,

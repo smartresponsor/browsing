@@ -2515,10 +2515,13 @@ app.post('/submit-after-approval', async (req, res) => {
     await ensureNotChallenge(target);
     const postcondition = await settleSubmitPostcondition({
       before,
-      readSnapshot: async () => ({
-        after: await capturePageArtifact(target, { screenshot: false }),
-        visibleText: await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 20000))
-      })
+      readSnapshot: async () => {
+        // Capture the URL, form and visible text together. A delayed SPA
+        // redirect must not mix a pre-navigation artifact with post-navigation
+        // confirmation text from a different document.
+        const after = await capturePageArtifact(target, { screenshot: false });
+        return { after, visibleText: after.visibleText };
+      }
     });
     const after = postcondition.after ?? null;
     res.json({
