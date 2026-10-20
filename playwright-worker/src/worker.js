@@ -2095,7 +2095,21 @@ app.post('/page-capture', async (req, res) => {
   try {
     const target = await ensurePage();
     await target.bringToFront().catch(() => {});
-    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true }));
+    const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
+    if (req.body?.captureView === 'dom') {
+      const links = await target.evaluate(() => Array.from(document.querySelectorAll('a[href]')).slice(0, 350)
+        .map(a => ({
+          text: String(a.innerText || a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240),
+          href: String(a.href || ''),
+        }))
+        .filter(link => link.href.startsWith('https://') || link.href.startsWith('http://')));
+      const { fields: _fields, submitCandidates: _submitCandidates, ...pageIdentity } = artifact;
+      return res.json({ ...pageIdentity, captureView: 'dom', dom: { text: artifact.visibleText, links } });
+    }
+    if (req.body?.captureView === 'form') {
+      return res.json({ ...artifact, captureView: 'form' });
+    }
+    res.json(artifact);
   } catch (error) {
     sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');
   }

@@ -76,6 +76,28 @@ function createWebCoreDomainToolDefinitions() {
       }).strict(),
     }),
     definition({
+      canonicalName: 'web.page.capture.dom',
+      consoleName: 'read_.web.page.capture.dom',
+      route: '/page-capture',
+      capabilityName: 'web.page_capture',
+      includeCapabilityAlias: false,
+      access: 'read',
+      description: 'Read bounded visible DOM text and HTTP(S) anchor links from the exact bound browser page without mutation.',
+      inputSchema: z.object({}).strict(),
+      toPayload: () => ({ captureView: 'dom' }),
+    }),
+    definition({
+      canonicalName: 'web.page.capture.form',
+      consoleName: 'read_.web.page.capture.form',
+      route: '/page-capture',
+      capabilityName: 'web.page_capture',
+      includeCapabilityAlias: false,
+      access: 'read',
+      description: 'Read revision-bound semantic fields and submit candidates of the exact bound browser page without mutation.',
+      inputSchema: z.object({}).strict(),
+      toPayload: () => ({ captureView: 'form' }),
+    }),
+    definition({
       canonicalName: 'web.page.wait',
       consoleName: 'read_.web.page.wait',
       route: '/wait-for-ready',
@@ -225,8 +247,8 @@ function registerWebCoreDomainToolDefinitions(mcpServer, registry) {
   }
 }
 
-function definition({ canonicalName, consoleName, route, legacyName = null, capabilityName, access, description, inputSchema, toPayload = identity }) {
-  const aliases = [...new Set([capabilityName, legacyName].filter(Boolean))];
+function definition({ canonicalName, consoleName, route, legacyName = null, capabilityName, includeCapabilityAlias = true, access, description, inputSchema, toPayload = identity }) {
+  const aliases = [...new Set([includeCapabilityAlias ? capabilityName : null, legacyName].filter(Boolean))];
   return Object.freeze({
     canonicalName,
     consoleName,

@@ -16,6 +16,8 @@ export const webCapabilityAliases = Object.freeze({
   'web.job.open': 'web.open_job',
   'web.chatgpt.snapshot': 'web.chatgpt_snapshot',
   'web.page.capture': 'web.page_capture',
+  'web.page.capture.dom': 'web.page_capture',
+  'web.page.capture.form': 'web.page_capture',
   'web.page.wait': 'web.wait_for_ready',
   'web.page.click': 'web.click',
   'web.form.inspect': 'web.inspect',
