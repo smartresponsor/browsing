@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
+import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -1111,30 +1114,13 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
 }
 
 async function listBrowserTargets() {
-  await ensurePage();
-  const pages = browser ? browser.pages() : [];
-  const targets = [];
-
-  for (let index = 0; index < pages.length; index += 1) {
-    const item = pages[index];
-    const closed = item.isClosed();
-    targets.push({
-      index,
-      targetId: closed ? null : await getPageTargetId(item),
-      active: item === page,
-      closed,
-      url: closed ? null : item.url(),
-      title: closed ? null : await item.title().catch(() => null)
-    });
-  }
-
-  const active = targets.find(item => item.active) ?? null;
-  return {
-    ok: true,
-    activeIndex: active?.index ?? null,
-    activeTargetId: active?.targetId ?? null,
-    targets
-  };
+  // Inventory must remain read-only: never launch or attach a browser here.
+  const inventory = await listRawCdpTargets(getPolicy());
+  const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
+  const targets = inventory.targets.filter(item => item.type === 'page').map((item, index) => ({
+    ...item, index, targetId: item.id, active: item.id === activeTargetId, closed: false
+  }));
+  return { ...inventory, targets, activeTargetId, activeIndex: targets.find(item => item.active)?.index ?? null };
 }
 
 async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
@@ -1831,6 +1817,55 @@ app.use((req, res, next) => {
   }
 
   return next();
+});
+
+const visibleRequest = new AsyncLocalStorage();
+let visibleOperationInFlight = false;
+let boundVisibleRuntime;
+const diagnosticRoutes = new Set(['/browser-status', '/health-full', '/shared-browser-status', '/connector-sync-plan', '/browser-cdp-targets', '/browser-targets', '/browser-cdp-verify-chatgpt-home', '/browser-cdp-cleanup-plan-chatgpt-home']);
+app.use(async (req, res, next) => {
+  if (req.path === '/healthz') return next();
+  if (diagnosticRoutes.has(req.path)) {
+    const send = res.json.bind(res);
+    res.json = body => send({ ...body, visibility_verified: false, user_interaction_ready: false });
+    return next();
+  }
+  if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) {
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
+  }
+  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+  visibleOperationInFlight = true;
+  const release = () => { visibleOperationInFlight = false; };
+  res.once('finish', release);
+  try {
+    const correlationId = req.body?.correlation?.invocationId || randomUUID();
+    const port = getPolicy().remoteDebuggingPort;
+    let targetId = req.body?.targetId || req.body?.expectedTargetId;
+    if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
+    const before = boundVisibleRuntime && targetId
+      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime })
+      : await selectVisibleTarget([port], targetId, correlationId);
+    if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
+    if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
+    const send = res.json.bind(res);
+    res.json = body => {
+      void (async () => {
+        let after;
+        try {
+          const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
+          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId });
+        } catch {
+          after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false };
+        }
+        if (after.ok) boundVisibleRuntime = after.evidence;
+        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
+      })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
+      return res;
+    };
+    return visibleRequest.run(before, next);
+  } catch {
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
+  }
 });
 
 app.post('/browser-status', async (_req, res) => {
