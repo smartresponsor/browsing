@@ -1,10 +1,28 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger } from "../playwright-worker/src/human-boundary.js";
+import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from "../playwright-worker/src/human-boundary.js";
 
 assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
+
+// The real Nellis Won page contained this exact reCAPTCHA loader error as
+// ordinary footer text, but no visible challenge widget.
+const loaderFailure = "Could not connect to the reCAPTCHA service. Please check your internet connection and reload to get a reCAPTCHA challenge.";
+assert.equal(classifyChallengeText("My Auctions - Won\\n" + loaderFailure)?.type, "captcha_service_unavailable");
+assert.equal(classifyHumanBoundary({ text: loaderFailure })?.type, "captcha_service_unavailable");
+for (const prompt of ["Verify you are human", "Please solve this CAPTCHA", "I'm not a robot"]) {
+  assert.equal(classifyChallengeText(loaderFailure + " " + prompt)?.type, "captcha", prompt);
+}
+assert.equal(classifyChallengeText(loaderFailure + " Enter your two-factor authentication code.")?.type, "two_factor");
+assert.equal(classifyHumanBoundary({text:loaderFailure,consentText:"Cookie privacy preferences. Accept all or reject."})?.type,"consent_required");
+assert.equal(classifyHumanBoundary({text:loaderFailure,alertDialogText:"You must confirm this action."})?.type,"unexpected_modal");
+assert.equal(classifyHumanBoundary({text:loaderFailure,url:"https://example.test/login",hasPasswordField:true})?.type,"login_required");
+const unavailable = classifyChallengeText(loaderFailure);
+assert.equal(canInspectCaptchaServiceError({boundary:unavailable,readOnlyDomCapture:true,hasVisibleChallengeWidget:false}),true);
+assert.equal(canInspectCaptchaServiceError({boundary:unavailable,readOnlyDomCapture:true,hasVisibleChallengeWidget:true}),false);
+assert.equal(canInspectCaptchaServiceError({boundary:unavailable,readOnlyDomCapture:false,hasVisibleChallengeWidget:false}),false);
+assert.equal(canInspectCaptchaServiceError({boundary:classifyChallengeText("Verify you are human"),readOnlyDomCapture:true,hasVisibleChallengeWidget:false}),false);
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
 assert.equal(classifyChallengeText("The system will create your account after you submit your application. Use a password. Use a one-time code."), null);
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
@@ -92,6 +110,11 @@ for (const token of [
   "sendWebError(res, error, 'WEB_OPEN_FAILED')",
   "sendWebError(res, error, 'WEB_OPEN_JOB_FAILED')",
   "allowLoginInspection: true",
+  "allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true",
+  "readOnlyDomCapture: allowCaptchaServiceErrorInspection",
+  "boundary?.type === 'captcha_service_unavailable' && snapshot.hasVisibleChallengeWidget",
+  "hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget",
+  "canInspectCaptchaServiceError({",
   "allowLoginInspection: googleSso",
   "semanticType === 'password'",
   "isSafeGoogleSsoTrigger({ text, selector, nth })",

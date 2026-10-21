@@ -45,7 +45,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
-import { classifyHumanBoundary, isSafeGoogleSsoTrigger } from './human-boundary.js';
+import { classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
@@ -510,7 +510,7 @@ function describeJobProfile(targetUrl) {
   };
 }
 
-async function ensureNotChallenge(target, { allowLoginInspection = false } = {}) {
+async function ensureNotChallenge(target, { allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
@@ -543,6 +543,21 @@ async function ensureNotChallenge(target, { allowLoginInspection = false } = {})
       .join(' ')
       .slice(0, 2000);
 
+    // An active visible verification widget is never treated as a harmless
+    // loader error. Hidden / inactive script containers are not actionable.
+    const hasVisibleChallengeWidget = Array.from(document.querySelectorAll([
+      'iframe[src*="recaptcha" i]',
+      'iframe[title*="captcha" i]',
+      'iframe[src*="hcaptcha" i]',
+      'iframe[src*="challenges.cloudflare.com" i]',
+      '[class*="h-captcha" i]',
+      '[class*="cf-turnstile" i]',
+      '[id*="captcha" i]',
+      '[class*="captcha" i]',
+      '[data-captcha]',
+      '[data-sitekey]'
+    ].join(', '))).some(isVisible);
+
     return {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
@@ -563,10 +578,11 @@ async function ensureNotChallenge(target, { allowLoginInspection = false } = {})
       ].join(', '))),
       consentText,
       alertDialogText,
+      hasVisibleChallengeWidget,
     };
   });
 
-  const boundary = classifyHumanBoundary({
+  let boundary = classifyHumanBoundary({
     text: snapshot.text,
     url: target.url(),
     hasPasswordField: snapshot.hasPasswordField,
@@ -574,7 +590,18 @@ async function ensureNotChallenge(target, { allowLoginInspection = false } = {})
     consentText: snapshot.consentText,
     alertDialogText: snapshot.alertDialogText,
   });
-  if (boundary && !(allowLoginInspection && boundary.type === 'login_required')) {
+  if (boundary?.type === 'captcha_service_unavailable' && snapshot.hasVisibleChallengeWidget) {
+    boundary = {
+      type: 'captcha',
+      requestedAction: 'Complete the visible human-verification challenge manually in the bound browser target.'
+    };
+  }
+  const safeReadOnlyServiceInspection = canInspectCaptchaServiceError({
+    boundary,
+    hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget,
+    readOnlyDomCapture: allowCaptchaServiceErrorInspection
+  });
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection) {
     throw revisionError(
       'WEB_HUMAN_ACTION_REQUIRED',
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
@@ -1115,8 +1142,8 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   });
 }
 
-async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false } = {}) {
-  await ensureNotChallenge(target, { allowLoginInspection });
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
+  await ensureNotChallenge(target, { allowLoginInspection, allowCaptchaServiceErrorInspection });
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
@@ -2187,7 +2214,13 @@ app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (re
       : req.path === '/page-capture-form' ? 'form' : req.body?.captureView;
     const target = await ensurePage();
     if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront().catch(() => {});
-    const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
+    const artifact = await capturePageArtifact(target, {
+      screenshot: req.body?.screenshot === true,
+      allowLoginInspection: true,
+      // Only bounded DOM observation may inspect a broken loader, never a
+      // live CAPTCHA challenge or any fill/click/submit mutation.
+      allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true
+    });
     if (captureView === 'dom') {
       const dom = await target.evaluate(() => {
         const text = (value, max = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
