@@ -603,8 +603,8 @@ async function ensurePage() {
   if (!browser) {
     const userDataDir = getManagedUserDataDir(policy);
 
-    await mkdir(userDataDir, { recursive: true });
-
+    // CDP attach is read-only with respect to the user-owned Edge profile.
+    // The constrained attachment worker must not attempt to create or write it.
     if (policy.externalVisibleChrome) {
       try {
         const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
@@ -619,6 +619,8 @@ async function ensurePage() {
     }
 
     if (!browser) {
+      // Only a worker that actually owns a managed browser may create its profile.
+      await mkdir(userDataDir, { recursive: true });
       await killManagedBrowserProcesses(policy);
 
       const launchOptions = {
