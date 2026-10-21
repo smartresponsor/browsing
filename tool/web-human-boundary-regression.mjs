@@ -26,6 +26,11 @@ assert.equal(canInspectCaptchaServiceError({boundary:classifyChallengeText("Veri
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
 assert.equal(classifyChallengeText("The system will create your account after you submit your application. Use a password. Use a one-time code."), null);
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
+// A normal Google Careers application can include security/help/legal information.
+// Such text must not be mistaken for a blocking identity challenge.
+assert.equal(classifyHumanBoundary({ text: "Your information — Google Careers\\nApplication details\\nRead our security check guidance before applying.\\nSee the privacy policy." }), null);
+assert.equal(classifyHumanBoundary({ text: "Your information — Google Careers\\nApplication details\\nLearn about unusual activity and account security in Help." }), null);
+assert.equal(classifyHumanBoundary({ text: "Security challenge: Verify your identity to continue." })?.type, "security_challenge");
 assert.equal(classifyChallengeText("Explore Security and Asset Protection careers"), null);
 assert.equal(classifyChallengeText("Assistance programs for life’s challenges"), null);
 

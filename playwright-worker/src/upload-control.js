@@ -28,7 +28,7 @@ export function chooseUploadField(fields, controlId = '') {
   return eligible[0];
 }
 
-export function assertSafeUploadActivator(candidate) {
+export function assertSafeUploadActivator(candidate, { allowLocalComputerMenuItem = false } = {}) {
   const tag = String(candidate?.tag || '').toLowerCase();
   const role = String(candidate?.role || '').toLowerCase();
   const label = String(candidate?.label || '').replace(/\s+/g, ' ').trim().slice(0, 250);
@@ -36,10 +36,11 @@ export function assertSafeUploadActivator(candidate) {
   // Never click a submit/reset button or a link as an upload activator.
   // A button without type=button inside a form defaults to type=submit.
   const type = String(candidate?.type || '').toLowerCase();
-  const semanticTrigger = tag === 'label' || (tag === 'button' && !['submit', 'reset'].includes(type))
+  const localComputerItem = allowLocalComputerMenuItem && tag === 'li' && role === 'menuitem' && label === 'My computer';
+  const semanticTrigger = localComputerItem || tag === 'label' || (tag === 'button' && !['submit', 'reset'].includes(type))
     || (['div', 'span'].includes(tag) && role === 'button')
     || (tag === 'div' && /(?:dropzone|file-upload|upload-trigger)/.test(marker));
-  const uploadIntent = /\b(upload|attach|browse|choose files?|select files?|drop files?|add (?:resume|cv|attachment))\b/i.test(label);
+  const uploadIntent = localComputerItem || /\b(upload|attach|browse|choose files?|select files?|drop files?|add (?:resume|cv|attachment))\b/i.test(label);
   const forbidden = /\b(submit|apply|finish|delete|remove|withdraw|purchase|pay|checkout|confirm|continue|next|save)\b/i.test(label);
   if (!candidate?.visible || !candidate?.enabled || !semanticTrigger || !uploadIntent || forbidden) {
     throw uploadError('WEB_UPLOAD_TRIGGER_UNSAFE',

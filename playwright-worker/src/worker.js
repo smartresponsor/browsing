@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { inspectVisibleTarget, selectVisibleTarget } from '../../../console-mcp/dist/service/visible-browser-session.js';
+import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
 // Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
 // on the extra Console grants module or its runtime permissions.
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
-  ? await import('../../../console-mcp/dist/service/grants-browser-session.js') : null;
+  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -543,8 +543,6 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
       .join(' ')
       .slice(0, 2000);
 
-    // An active visible verification widget is never treated as a harmless
-    // loader error. Hidden / inactive script containers are not actionable.
     const hasVisibleChallengeWidget = Array.from(document.querySelectorAll([
       'iframe[src*="recaptcha" i]',
       'iframe[title*="captcha" i]',
@@ -1756,7 +1754,9 @@ async function resolveUploadControl(target, item, fields) {
     enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
   }));
   if (field.tag !== 'input' || field.type !== 'file') {
-    assertSafeUploadActivator(field);
+    const isGoogleCareersApplication = /^https:\/\/www\.google\.com\/about\/careers\/applications\/apply\/[0-9a-f-]+\/form(?:[?#]|$)/i.test(target.url());
+    const googleResumeMenuVisible = isGoogleCareersApplication && await target.locator('button[aria-label^="Upload résumé"]').isVisible().catch(() => false);
+    assertSafeUploadActivator(field, { allowLocalComputerMenuItem: googleResumeMenuVisible });
     return {
       locator,
       mode: 'filechooser',
@@ -2217,8 +2217,6 @@ app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (re
     const artifact = await capturePageArtifact(target, {
       screenshot: req.body?.screenshot === true,
       allowLoginInspection: true,
-      // Only bounded DOM observation may inspect a broken loader, never a
-      // live CAPTCHA challenge or any fill/click/submit mutation.
       allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true
     });
     if (captureView === 'dom') {
