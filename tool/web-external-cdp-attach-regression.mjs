@@ -19,6 +19,17 @@ assert.equal(
   "Documented shared-browser attach timeout must match the worker default",
 );
 
+// The visible attachment worker runs under a separate low-privilege system account.
+// CDP attach must never mkdir the already-existing, alex-owned Edge profile.
+const ensurePage = worker.slice(worker.indexOf("async function ensurePage()"), worker.indexOf("async function connectToExistingCdpEndpoint("));
+const externalAttach = ensurePage.indexOf("if (policy.externalVisibleChrome) {");
+const managedFallback = ensurePage.indexOf("if (!browser) {", externalAttach);
+const profileMkdir = ensurePage.indexOf("await mkdir(userDataDir, { recursive: true });");
+assert.ok(externalAttach >= 0 && managedFallback > externalAttach, "Existing CDP attach path must run before managed browser setup");
+assert.ok(profileMkdir > managedFallback, "Profile creation may occur only for the locally owned browser fallback");
+assert.equal(ensurePage.slice(0, managedFallback).includes("await mkdir(userDataDir"), false, "External Edge attach must not write the owner's profile");
+assert.ok(ensurePage.includes("connectExternalVisibleChrome(policy, userDataDir)"), "CDP attachment must remain in place");
+
 // An externally owned Edge must not be closed or force a worker restart
 // solely because the worker's observation window elapsed.
 const guard = worker.match(/async function assertSessionWindow\(policy\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
