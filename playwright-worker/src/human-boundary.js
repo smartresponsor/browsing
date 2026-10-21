@@ -1,7 +1,12 @@
 export function classifyChallengeText(text) {
   const normalized = String(text || '');
+  // This exact network-error notice describes a failed reCAPTCHA loader, not an
+  // actionable verification widget. Keep all other CAPTCHA strings fail-closed.
+  const serviceFailure = /could not connect to the recaptcha service\.\s*please check your internet connection and reload to get a recaptcha challenge\.?/gi;
+  const remaining = normalized.replace(serviceFailure, ' ');
+  const recaptchaServiceUnavailable = remaining !== normalized;
 
-  if (/captcha|verify you are human|bot detection|i'm not a robot|not a robot/i.test(normalized)) {
+  if (/captcha|verify you are human|bot detection|i'm not a robot|not a robot/i.test(remaining)) {
     return {
       type: 'captcha',
       requestedAction: 'Complete the human-verification challenge manually in the bound browser target.'
@@ -22,7 +27,18 @@ export function classifyChallengeText(text) {
     };
   }
 
+  if (recaptchaServiceUnavailable) {
+    return {
+      type: 'captcha_service_unavailable',
+      requestedAction: 'The reCAPTCHA service could not load. Check connectivity before attempting a form submission.'
+    };
+  }
+
   return null;
+}
+
+export function canInspectCaptchaServiceError({ boundary, hasVisibleChallengeWidget = false, readOnlyDomCapture = false } = {}) {
+  return readOnlyDomCapture === true && boundary?.type === 'captcha_service_unavailable' && hasVisibleChallengeWidget === false;
 }
 
 // A provider redirect is not a credential operation. It may be initiated only
@@ -43,7 +59,9 @@ export function classifyHumanBoundary({
   unsupportedControl = null,
 } = {}) {
   const challenge = classifyChallengeText(text);
-  if (challenge) {
+  // Unlike an active CAPTCHA or 2FA, a broken loader does not supersede an
+  // independently visible cookie/login/modal boundary.
+  if (challenge && challenge.type !== 'captcha_service_unavailable') {
     return challenge;
   }
 
@@ -83,5 +101,5 @@ export function classifyHumanBoundary({
     };
   }
 
-  return null;
+  return challenge || null;
 }

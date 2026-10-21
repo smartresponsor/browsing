@@ -75,8 +75,8 @@ function NoNewPrivs {
 # Controlled in-place patch release for an already active master checkout.
 # This path never resets Git, drops user files, or restarts any Edge instance.
 if ($Mode -in @('UpgradePreflight','Upgrade')) {
-  $previous='b1c1058c5396e8ea58123590762cffc0f047053a'
-  $requiredFix='1ef022af71c4cafd50f636c831f8e0bd3a4eb235'
+  $previous='fd3d18e23527c3755b2a435c339f2434d2b30997'
+  $requiredFix='ff20d1686d9141239f2b7ae97a1ce812473491fd'
   $releaseJournal=Join-Path $Repo 'var/run/visible-worker-upgrade.json'
   if ((Git @('branch','--show-current')) -ne 'master') { throw 'ACTIVE_BRANCH_NOT_MASTER' }
   if ((Git @('rev-parse','HEAD')) -ne $previous) { throw 'ACTIVE_MASTER_NOT_EXPECTED_PREVIOUS_VERSION' }
@@ -86,12 +86,12 @@ if ($Mode -in @('UpgradePreflight','Upgrade')) {
   & /usr/bin/git -C $Repo merge-base --is-ancestor $previous $remote
   if ($LASTEXITCODE -ne 0) { throw 'REMOTE_NOT_FAST_FORWARD' }
   & /usr/bin/git -C $Repo merge-base --is-ancestor $requiredFix $remote
-  if ($LASTEXITCODE -ne 0) { throw 'REQUIRED_CDP_PROFILE_FIX_ABSENT' }
-  $allowed=@('playwright-worker/src/worker.js','tool/web-external-cdp-attach-regression.mjs','tool/ubuntu-visible-worker-activate.ps1')
+  if ($LASTEXITCODE -ne 0) { throw 'REQUIRED_RECAPTCHA_READONLY_FIX_ABSENT' }
+  $allowed=@('playwright-worker/src/worker.js','playwright-worker/src/human-boundary.js','tool/web-human-boundary-regression.mjs','tool/web-page-capture-regression.mjs','tool/ubuntu-visible-worker-activate.ps1')
   $changed=@(& /usr/bin/git -C $Repo diff --name-only $previous $remote)
   if ($LASTEXITCODE -ne 0) { throw 'UPGRADE_DIFF_AUDIT_FAILED' }
   foreach ($file in $changed) { if ($file -notin $allowed) { throw ('UNREVIEWED_UPGRADE_FILE_'+$file) } }
-  if ('playwright-worker/src/worker.js' -notin $changed) { throw 'VISIBLE_WORKER_FIX_NOT_PRESENT' }
+  if ('playwright-worker/src/worker.js' -notin $changed -or 'playwright-worker/src/human-boundary.js' -notin $changed) { throw 'RECAPTCHA_GUARD_FIX_NOT_PRESENT' }
   $newPaths=@(& /usr/bin/git -C $Repo diff --name-only --diff-filter=A $previous $remote)
   if ($LASTEXITCODE -ne 0) { throw 'UPGRADE_NEW_PATH_AUDIT_FAILED' }
   $untracked=@(& /usr/bin/git -C $Repo ls-files --others --exclude-standard)
@@ -172,7 +172,7 @@ if ($Mode -in @('UpgradePreflight','Upgrade')) {
     if ($pulled) {
       # Restore the previous proven worker source without resetting master or touching user files.
       try {
-        NativeRun '/usr/bin/git' @('-C',$Repo,'restore',('--source='+$previous),'--worktree','--','playwright-worker/src/worker.js')
+        NativeRun '/usr/bin/git' @('-C',$Repo,'restore',('--source='+$previous),'--worktree','--','playwright-worker/src/worker.js','playwright-worker/src/human-boundary.js')
         $steps+='OLD_WORKER_SOURCE_RESTORED'
       } catch { $steps+=('RESTORE_FAILED: '+$_.Exception.Message) }
     }

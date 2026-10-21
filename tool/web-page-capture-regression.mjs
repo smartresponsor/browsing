@@ -12,7 +12,8 @@ for (const token of [
   "import { createHash } from 'node:crypto';",
   "return createHash('sha256').update(String(text || '').replace(/\\r\\n/g, '\\n').trim(), 'utf8').digest('hex');",
   "app.post(['/page-capture', '/page-capture-dom', '/page-capture-form']",
-  "capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true })",
+  "allowLoginInspection: true,",
+  "allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true",
   ".map(item => ({",
   "finalCandidate: classifyFinalActionCandidate(item)",
 ]) {
