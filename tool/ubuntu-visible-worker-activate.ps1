@@ -87,7 +87,17 @@ if ($Mode -in @('UpgradePreflight','Upgrade')) {
   if ($LASTEXITCODE -ne 0) { throw 'REMOTE_NOT_FAST_FORWARD' }
   & /usr/bin/git -C $Repo merge-base --is-ancestor $requiredFix $remote
   if ($LASTEXITCODE -ne 0) { throw 'REQUIRED_RECAPTCHA_READONLY_FIX_ABSENT' }
-  $allowed=@('playwright-worker/src/worker.js','playwright-worker/src/human-boundary.js','tool/web-human-boundary-regression.mjs','tool/web-page-capture-regression.mjs','tool/ubuntu-visible-worker-activate.ps1')
+  # Concurrent master hardening was separately audited: bounded MCP request bodies
+  # and SDK lock update. This worker upgrade does not restart the MCP server.
+  $allowed=@('playwright-worker/src/worker.js','playwright-worker/src/human-boundary.js','tool/web-human-boundary-regression.mjs','tool/web-page-capture-regression.mjs','tool/ubuntu-visible-worker-activate.ps1','mcp-server/src/server.js','mcp-server/package-lock.json')
+  $reviewedBlob=@{
+    'mcp-server/src/server.js'='082360a7ad97ac6d717dc736caf0a9bf88cc83ae'
+    'mcp-server/package-lock.json'='73c047506ccf15b6dffb1a8d32a2a42aa50698ec'
+  }
+  foreach ($file in $reviewedBlob.Keys) {
+    $blob=(& /usr/bin/git -C $Repo rev-parse ($remote+':'+$file)).Trim()
+    if ($LASTEXITCODE -ne 0 -or $blob -ne $reviewedBlob[$file]) { throw ('UNREVIEWED_MCP_SOURCE_'+$file) }
+  }
   $changed=@(& /usr/bin/git -C $Repo diff --name-only $previous $remote)
   if ($LASTEXITCODE -ne 0) { throw 'UPGRADE_DIFF_AUDIT_FAILED' }
   foreach ($file in $changed) { if ($file -notin $allowed) { throw ('UNREVIEWED_UPGRADE_FILE_'+$file) } }
