@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
+// Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
+// on the extra Console grants module or its runtime permissions.
+const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
+  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -440,6 +444,9 @@ async function assertSessionWindow(policy) {
 
 function validateTargetUrl(rawUrl, policy) {
   const targetUrl = new URL(rawUrl);
+  if (grantsPolicy && !grantsPolicy.isGrantsAllowedUrl(targetUrl.toString())) {
+    throw new Error('GRANTS_HOST_NOT_ALLOWED');
+  }
 
   if (!['http:', 'https:'].includes(targetUrl.protocol)) {
     throw new Error(`Unsupported URL scheme: ${targetUrl.protocol}`);
@@ -1873,13 +1880,21 @@ app.use(async (req, res, next) => {
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
+    const grants = grantsPolicy !== null;
+    if (grants && port !== 9230) {
+      return res.status(409).json({ok:false,status:'WEB_GRANTS_SESSION_NOT_READY',reason:'GRANTS_PORT_MISMATCH',mutation_attempted:false});
+    }
     const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
     const preserveActiveTarget = isTargetedReadCapture(req.path, req.body);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
-    const before = boundVisibleRuntime && targetId
-      ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
-      : await selectVisibleTarget([port], targetId, correlationId, background);
+    // An exact read-only observation verifies the requested target independently:
+    // the shared bound target may belong to another concurrently managed consumer.
+    const before = grants
+      ? await grantsPolicy.inspectGrantsTarget({ targetId, expected: preserveActiveTarget ? undefined : boundVisibleRuntime })
+      : boundVisibleRuntime && targetId && !preserveActiveTarget
+        ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
+        : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
@@ -1889,7 +1904,9 @@ app.use(async (req, res, next) => {
         try {
           const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
           const afterId = readPostconditionTargetId(preserveActiveTarget, before.evidence.targetId, activeTargetId);
-          after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
+          after = grants
+            ? await grantsPolicy.inspectGrantsTarget({ targetId: afterId, expected: before.evidence })
+            : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
@@ -2160,12 +2177,16 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
   }
 });
 
-app.post('/page-capture', async (req, res) => {
+// Legacy aliases remain accepted for an already-running Console MCP connector.
+// New canonical definitions route DOM/form capture through /page-capture.
+app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (req, res) => {
   try {
+    const captureView = req.path === '/page-capture-dom' ? 'dom'
+      : req.path === '/page-capture-form' ? 'form' : req.body?.captureView;
     const target = await ensurePage();
     if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront().catch(() => {});
     const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
-    if (req.body?.captureView === 'dom') {
+    if (captureView === 'dom') {
       const dom = await target.evaluate(() => {
         const text = (value, max = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
         const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 350)
@@ -2199,7 +2220,7 @@ app.post('/page-capture', async (req, res) => {
       const { fields: _fields, submitCandidates: _submitCandidates, ...pageIdentity } = artifact;
       return res.json({ ...pageIdentity, captureView: 'dom', dom: { text: artifact.visibleText, ...dom } });
     }
-    if (req.body?.captureView === 'form') {
+    if (captureView === 'form') {
       return res.json({ ...artifact, captureView: 'form' });
     }
     res.json(artifact);

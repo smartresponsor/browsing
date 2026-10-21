@@ -11,7 +11,7 @@ assert.equal(isKnownJobHost("careers.example.com"), false, "Unknown career hosts
 for (const token of [
   "import { createHash } from 'node:crypto';",
   "return createHash('sha256').update(String(text || '').replace(/\\r\\n/g, '\\n').trim(), 'utf8').digest('hex');",
-  "app.post('/page-capture'",
+  "app.post(['/page-capture', '/page-capture-dom', '/page-capture-form']",
   "capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true })",
   ".map(item => ({",
   "finalCandidate: classifyFinalActionCandidate(item)",
@@ -20,8 +20,8 @@ for (const token of [
 }
 
 for (const invariant of [
-  "req.body?.captureView === 'dom'",
-  "req.body?.captureView === 'form'",
+  "captureView === 'dom'",
+  "captureView === 'form'",
   "captureView: 'dom', dom: { text: artifact.visibleText, ...dom }",
   "const identifiers = Array.from(document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id]'))",
   "const findControls = Array.from(document.querySelectorAll('input,button,[role=searchbox]'))",

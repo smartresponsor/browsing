@@ -3,7 +3,8 @@
 const exactCdpTarget = /^[A-Fa-f0-9]{32}$/;
 
 export function isTargetedReadCapture(route, body) {
-  return route === '/page-capture' && exactCdpTarget.test(body?.targetId ?? '');
+  return ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(route)
+    && exactCdpTarget.test(body?.targetId ?? '');
 }
 
 export function readPostconditionTargetId(preserveActiveTarget, verifiedTargetId, activeTargetId) {

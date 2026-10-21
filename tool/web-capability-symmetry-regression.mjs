@@ -15,6 +15,13 @@ const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js
 const workerRoutes = new Set(
   [...workerSource.matchAll(/app\.post\(\s*['"]([^'"]+)['"]/g)].map((match) => match[1]),
 );
+// Two legacy Console connector URLs map to the canonical read-only capture
+// handler, without adding new externally advertised tools or capabilities.
+const captureAliases = ['/page-capture', '/page-capture-dom', '/page-capture-form'];
+const captureRegistration = "app.post([" + captureAliases.map(route => "'" + route + "'").join(', ') + "]";
+assert.ok(workerSource.includes(captureRegistration), 'Bounded legacy capture aliases must share the canonical handler');
+for (const route of captureAliases) workerRoutes.add(route);
+const allowedLegacyRoutes = new Set(['/page-capture-dom', '/page-capture-form']);
 
 const contractTools = webCapabilityContract.tools;
 const contractRoutes = new Set(contractTools.map((tool) => tool.route));
@@ -68,7 +75,7 @@ assert.throws(
 );
 
 for (const route of workerRoutes) {
-  assert.ok(contractRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);
+  assert.ok(contractRoutes.has(route) || allowedLegacyRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);
 }
 
 for (const [toolName, behavior] of [
