@@ -9,6 +9,7 @@ const endpoint = process.env.BROWSER_MCP_SERVER_ENDPOINT || '/mcp';
 const workerUrl = process.env.BROWSER_MCP_BROWSER_WORKER_URL || 'http://127.0.0.1:8791';
 const upstreamToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN || '';
 const upstreamPreviousToken = process.env.BROWSER_MCP_UPSTREAM_TOKEN_PREVIOUS || '';
+const maxRequestBodyBytes = 1024 * 1024;
 
 const webToolBundle = createWebToolBundle({
   workerUrl,
@@ -80,12 +81,13 @@ const server = createServer(async (req, res) => {
     await transport.handleRequest(req, res, body);
   } catch (error) {
     if (!res.headersSent) {
-      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+      const status = error instanceof RequestBodyError ? error.status : 500;
+      res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
         jsonrpc: '2.0',
         error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : String(error)
+          code: status === 413 ? -32000 : status === 400 ? -32700 : -32603,
+          message: status === 500 ? 'Internal server error.' : error.message
         },
         id: null
       }));
@@ -119,8 +121,14 @@ function buildServer() {
 
 async function readJsonBody(req) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maxRequestBodyBytes) {
+      throw new RequestBodyError(413, 'Request body too large.');
+    }
+    chunks.push(buffer);
   }
 
   const raw = Buffer.concat(chunks).toString('utf8').trim();
@@ -128,7 +136,18 @@ async function readJsonBody(req) {
     return undefined;
   }
 
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new RequestBodyError(400, 'Invalid JSON.');
+  }
+}
+
+class RequestBodyError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function ensureStreamableHttpAcceptHeader(req) {

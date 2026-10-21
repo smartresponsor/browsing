@@ -1,10 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
+import { inspectVisibleTarget, selectVisibleTarget } from '../../../console-mcp/dist/service/visible-browser-session.js';
 // Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
 // on the extra Console grants module or its runtime permissions.
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
-  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
+  ? await import('../../../console-mcp/dist/service/grants-browser-session.js') : null;
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
