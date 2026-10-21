@@ -135,7 +135,7 @@ CompareInstances $instances
 $journalData=[ordered]@{status='PREPARED';branch=$currentBranch;head=$currentHead;master=$master;unit=$Unit;createdAt=(Get-Date).ToString('o');browserInstances=$instances}
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Journal) | Out-Null
 ($journalData | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $Journal -Encoding utf8
-$switched=$false; $restarted=$false
+$switched=$false; $restartAttempted=$false
 try {
   NativeRun '/usr/bin/git' @('-C',$Repo,'switch','master')
   $switched=$true
@@ -151,8 +151,10 @@ try {
   NativeRun '/usr/bin/npm' @('--prefix',$Repo,'test')
   NoWorkerConnections
   CompareInstances $instances
+  # Refresh sudo authorization before entering the service-restart boundary.
+  NativeRun '/usr/bin/sudo' @('-n','-v')
+  $restartAttempted=$true
   NativeRun '/usr/bin/sudo' @('-n','/usr/bin/systemctl','restart',$Unit)
-  $restarted=$true
   $started=$false
   for ($attempt=0;$attempt -lt 20;$attempt++) {
     Start-Sleep -Seconds 1
@@ -180,7 +182,8 @@ try {
       $rollback+='GIT_RESTORED'
     } catch { $rollback+=('GIT_ROLLBACK_FAILED: '+$_.Exception.Message) }
   }
-  if ($restarted) {
+  # Even a failed restart command can leave the unit partially stopped.
+  if ($restartAttempted) {
     try {
       NativeRun '/usr/bin/sudo' @('-n','/usr/bin/systemctl','restart',$Unit)
       $rollback+='WORKER_RESTARTED_ON_OLD_SOURCE'
