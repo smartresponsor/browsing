@@ -173,6 +173,8 @@ for (const safe of [
 ]) {
   assert.ok(assertSafeUploadActivator(safe).label, "Recognized upload activator must be allowed");
 }
+assert.ok(assertSafeUploadActivator({tag:'li',role:'menuitem',label:'My computer',visible:true,enabled:true},{allowLocalComputerMenuItem:true}).label);
+assert.throws(() => assertSafeUploadActivator({tag:'li',role:'menuitem',label:'My computer',visible:true,enabled:true}), e => e?.webStatus === 'WEB_UPLOAD_TRIGGER_UNSAFE');
 for (const unsafe of [
   { tag: "button", label: "Submit Application", visible: true, enabled: true },
   { tag: "button", label: "Upload CV and Submit", visible: true, enabled: true },
@@ -201,7 +203,7 @@ assert.equal(chooserInput.dispatched, 1);
 assert.equal(chooserResult.selectionVerified, true);
 assert.equal(chooserResult.serverAcceptanceVerified, false);
 for (const invariant of [
-  "assertSafeUploadActivator(field)",
+  "assertSafeUploadActivator(field, { allowLocalComputerMenuItem: googleResumeMenuVisible })",
   "target.waitForEvent('filechooser'",
   "performSelection: filePath => chooser.setFiles(filePath)",
   "selectionMechanism: resolvedControl.mode === 'filechooser'",

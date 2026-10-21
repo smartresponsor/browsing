@@ -43,5 +43,16 @@ for (const required of [
   assert.ok(definitions.some((tool) => tool.consoleName === required), `Required Console Web domain definition missing: ${required}`);
 }
 
+const proposal = definitions.find(tool => tool.consoleName === 'write.web.form.proposal.preview');
+assert.equal(proposal.inputSchema.safeParse({fields: [], browserSession: 'visible', targetId: 'A'.repeat(32)}).success, true,
+  'Proposal must accept explicit visible session and exact target to avoid isolated fallback');
+assert.equal(proposal.inputSchema.safeParse({fields: [], browserSession: 'visible', targetId: 'invalid'}).success, false,
+  'Invalid target IDs must fail schema validation');
+for (const name of ['write.web.form.fill','write.web.form.upload','write.web.form.review.snapshot','write.web.form.submit']) {
+  const definition = definitions.find(tool => tool.consoleName === name);
+  assert.equal(definition.inputSchema.shape.browserSession.safeParse('visible').success, true,
+    `${name} must explicitly select the visible worker`);
+}
+
 console.log(`Web core domain definitions regression passed: ${definitions.length} Console-consumable tools.`);
 

@@ -1,9 +1,8 @@
 export function classifyChallengeText(text) {
   const normalized = String(text || '');
-  // This exact network-error notice describes a failed reCAPTCHA loader, not an
-  // actionable verification widget. Keep all other CAPTCHA strings fail-closed.
-  const serviceFailure = /could not connect to the recaptcha service\.\s*please check your internet connection and reload to get a recaptcha challenge\.?/gi;
-  const remaining = normalized.replace(serviceFailure, ' ');
+  // A failed reCAPTCHA loader is not proof of an active verification widget.
+  const loaderError = /could not connect to the recaptcha service\.\s*please check your internet connection and reload to get a recaptcha challenge\.?/gi;
+  const remaining = normalized.replace(loaderError, ' ');
   const recaptchaServiceUnavailable = remaining !== normalized;
 
   if (/captcha|verify you are human|bot detection|i'm not a robot|not a robot/i.test(remaining)) {
@@ -20,7 +19,10 @@ export function classifyChallengeText(text) {
     };
   }
 
-  if (/security check|security challenge|unusual activity|suspicious activity|access denied|verify (?:your )?identity|complete (?:the )?challenge|challenge (?:required|verification)/i.test(normalized)) {
+  // Only treat a standalone security alert as a blocking challenge. Ordinary
+  // application/help text may discuss security without requesting user action.
+  const strongSecurityChallenge = /(?:^|\n)\s*(?:(?:security (?:check|challenge)|access denied|verify (?:your )?identity|complete (?:the )?challenge|challenge (?:required|verification))\s*(?::|[.!?]|$)|(?:unusual|suspicious) activity(?: detected| has been detected|\s*[:.!?])(?:\s|$))/im;
+  if (strongSecurityChallenge.test(normalized)) {
     return {
       type: 'security_challenge',
       requestedAction: 'Resolve the security challenge manually in the bound browser target.'
@@ -59,8 +61,7 @@ export function classifyHumanBoundary({
   unsupportedControl = null,
 } = {}) {
   const challenge = classifyChallengeText(text);
-  // Unlike an active CAPTCHA or 2FA, a broken loader does not supersede an
-  // independently visible cookie/login/modal boundary.
+  // A broken CAPTCHA service does not mask a distinct login/consent/modal boundary.
   if (challenge && challenge.type !== 'captcha_service_unavailable') {
     return challenge;
   }

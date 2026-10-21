@@ -157,6 +157,8 @@ function createWebCoreDomainToolDefinitions() {
       description: 'Build normalized answer proposals and mint a revision-bound one-time fill approval receipt.',
       inputSchema: z.object({
         fields: z.array(z.record(z.unknown())),
+        browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional(),
+        targetId: z.string().regex(/^[A-Fa-f0-9]{32}$/).optional(),
       }).strict(),
     }),
     definition({
@@ -176,6 +178,7 @@ function createWebCoreDomainToolDefinitions() {
         expectedFormRevision: z.string().optional(),
         correlation: webExecutionCorrelationSchema.optional(),
         fields: z.array(z.record(z.unknown())),
+        browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional(),
       }).strict(),
     }),
     definition({
@@ -197,6 +200,7 @@ function createWebCoreDomainToolDefinitions() {
         selector: z.string().optional(),
         artifactRef: z.string().min(1),
         expectedSha256: z.string().regex(/^[A-Fa-f0-9]{64}$/).optional(),
+        browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional(),
       }).strict(),
     }),
     definition({
@@ -207,7 +211,7 @@ function createWebCoreDomainToolDefinitions() {
       capabilityName: 'web.review_before_submit',
       access: 'write',
       description: 'Capture the exact pre-submit review revision and mint its one-time submit approval receipt.',
-      inputSchema: z.object({}).strict(),
+      inputSchema: z.object({ browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional() }).strict(),
     }),
     definition({
       canonicalName: 'web.form.submit',
@@ -225,6 +229,7 @@ function createWebCoreDomainToolDefinitions() {
         expectedFormRevision: z.string().optional(),
         correlation: webExecutionCorrelationSchema.optional(),
         reviewHash: z.string().optional(),
+        browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional(),
         text: z.string().optional(),
         selector: z.string().optional(),
         nth: z.number().int().nonnegative().optional(),
