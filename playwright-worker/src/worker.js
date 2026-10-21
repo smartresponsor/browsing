@@ -23,6 +23,7 @@ import {
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
+import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
 import {
   buildChatGptHomeCleanupPlan,
@@ -586,6 +587,11 @@ async function ensureNotChallenge(target, { allowLoginInspection = false } = {})
 async function ensurePage() {
   const policy = getPolicy();
   await assertSessionWindow(policy);
+  const guard = visibleRequest.getStore();
+  // An explicitly verified Console-owned target must never trigger an independent browser launch.
+  if (guard?.ok && !policy.externalVisibleChrome) {
+    throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment required; competing browser launch denied.');
+  }
 
   if (!browser) {
     const userDataDir = getManagedUserDataDir(policy);
@@ -641,6 +647,20 @@ async function ensurePage() {
         });
       }
     }
+  }
+
+  if (guard?.evidence?.targetId) {
+    const verifiedTargetId = guard.evidence.targetId;
+    let selected = null;
+    for (const candidate of browser.pages()) {
+      if (!candidate.isClosed() && await getPageTargetId(candidate) === verifiedTargetId) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (!selected) throw revisionError('WEB_TARGET_STALE', 'Native-verified CDP target no longer belongs to the attached browser.');
+    if (!guard.preserveActiveTarget) page = selected;
+    return selected;
   }
 
   if (!page) {
@@ -1854,6 +1874,7 @@ app.use(async (req, res, next) => {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
     const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
+    const preserveActiveTarget = isTargetedReadCapture(req.path, req.body);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
     const before = boundVisibleRuntime && targetId
@@ -1866,15 +1887,16 @@ app.use(async (req, res, next) => {
       void (async () => {
         let after;
         try {
-          const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
+          const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
+          const afterId = readPostconditionTargetId(preserveActiveTarget, before.evidence.targetId, activeTargetId);
           after = await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
-        if (after.ok) boundVisibleRuntime = after.evidence;
+        if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
       })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
       return res;
     };
-    return visibleRequest.run(before, next);
+    return visibleRequest.run({ ...before, preserveActiveTarget }, next);
   } catch {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
   }
@@ -2141,7 +2163,7 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
 app.post('/page-capture', async (req, res) => {
   try {
     const target = await ensurePage();
-    await target.bringToFront().catch(() => {});
+    if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront().catch(() => {});
     const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
     if (req.body?.captureView === 'dom') {
       const dom = await target.evaluate(() => {
