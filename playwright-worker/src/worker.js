@@ -1,17 +1,38 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
-// Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
-// on the extra Console grants module or its runtime permissions.
+
+async function resolveConsoleService(name) {
+  const configuredRoot = process.env.BROWSER_MCP_CONSOLE_ROOT?.trim();
+  const roots = configuredRoot
+    ? [path.resolve(configuredRoot)]
+    : [
+        fileURLToPath(new URL('../../../console-mcp/', import.meta.url)),
+        fileURLToPath(new URL('../../../../console-mcp/', import.meta.url)),
+        fileURLToPath(new URL('../../../../mcp/console-mcp/', import.meta.url))
+      ];
+  for (const root of roots) {
+    const file = path.join(root, 'dist', 'service', name);
+    try {
+      await access(file);
+      return pathToFileURL(file).href;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error(`Console MCP service ${name} unavailable; build Console MCP or set BROWSER_MCP_CONSOLE_ROOT.`);
+}
+
+const { inspectVisibleTarget, selectVisibleTarget } = await import(await resolveConsoleService('visible-browser-session.js'));
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
-  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
+  ? await import(await resolveConsoleService('grants-browser-session.js')) : null;
+
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   DEFAULT_WORKER_PORT,
