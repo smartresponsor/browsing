@@ -26,6 +26,7 @@ import {
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
+import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
 import {
   buildChatGptHomeCleanupPlan,
@@ -574,9 +575,11 @@ async function ensurePage() {
     if (!candidate.isClosed() && await getPageTargetId(candidate) === selectedId) selected = candidate;
   }
   if (!selected) throw revisionError('WEB_TARGET_STALE', 'The verified target no longer exists.');
-  page = selected;
+  // Captures with exact native-verified target identity are read-only and must
+  // not overwrite the shared worker's previously active page.
+  if (!session.preserveActiveTarget) page = selected;
 
-  return page;
+  return selected;
 }
 
 async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
@@ -1742,6 +1745,7 @@ app.use(async (req, res, next) => {
     const grants = process.env.BROWSER_MCP_GRANTS_WORKER === 'true';
     if (grants && port !== 9230) return res.status(409).json({ok:false,status:'WEB_GRANTS_SESSION_NOT_READY',reason:'GRANTS_PORT_MISMATCH'});
     const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
+    const preserveActiveTarget = isTargetedReadCapture(req.path, req.body);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
     if (!targetId && (req.body?.index !== undefined || req.body?.urlContains || (req.path === '/browser-bind' && req.body?.url))) {
       const inventory = await listRawCdpTargets(getPolicy());
@@ -1762,17 +1766,18 @@ app.use(async (req, res, next) => {
       void (async () => {
         let after;
         try {
-          const afterId = page && !page.isClosed() ? await getPageTargetId(page) : before.evidence.targetId;
+          const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
+          const afterId = readPostconditionTargetId(preserveActiveTarget, before.evidence.targetId, activeTargetId);
           after = grants
             ? await grantsPolicy.inspectGrantsTarget({ targetId: afterId, expected: before.evidence })
             : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
-        if (after.ok) boundVisibleRuntime = after.evidence;
+        if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
         send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after, browser_telemetry: { correlation_id: correlationId, cdp_success: after.states.includes('CDP_CONNECTED'), operation_success: body.ok === true, navigation_success: ['/open', '/open-job'].includes(req.path) ? body.ok === true : null, target_binding_success: after.ok, visibility_verification_success: after.visibility_verified, user_interaction_ready: after.user_interaction_ready } });
       })().catch(() => { send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false }); }).finally(release);
       return res;
     };
-    return visibleRequest.run(before, next);
+    return visibleRequest.run({ ...before, preserveActiveTarget }, next);
   } catch { return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false }); }
 });
 
@@ -2037,7 +2042,7 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
 app.post('/page-capture', async (req, res) => {
   try {
     const target = await ensurePage();
-    await target.bringToFront().catch(() => {});
+    if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront().catch(() => {});
     res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
   } catch (error) {
     sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');

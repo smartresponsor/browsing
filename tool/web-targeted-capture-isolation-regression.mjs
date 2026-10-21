@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { isTargetedReadCapture, readPostconditionTargetId } from '../playwright-worker/src/targeted-capture-policy.js';
+
+const target='A'.repeat(32), other='B'.repeat(32);
+for(const route of ['/page-capture','/page-capture-dom','/page-capture-form'])assert.equal(isTargetedReadCapture(route,{targetId:target}),true,route);
+for(const route of ['/click','/open','/browser-bind','/submit-after-approval','/fill-after-approval'])assert.equal(isTargetedReadCapture(route,{targetId:target}),false,route);
+for(const value of [null,undefined,'','other-target','A'.repeat(31)])assert.equal(isTargetedReadCapture('/page-capture-dom',{targetId:value}),false);
+assert.equal(readPostconditionTargetId(true,target,other),target);
+assert.equal(readPostconditionTargetId(false,target,other),other);
+assert.equal(readPostconditionTargetId(false,target,null),target);
+const worker=fs.readFileSync(new URL('../playwright-worker/src/worker.js',import.meta.url),'utf8');
+const ensure=worker.slice(worker.indexOf('async function ensurePage()'),worker.indexOf('async function connectToExistingCdpEndpoint'));
+assert.ok(ensure.includes('const selectedId = session.evidence.targetId'), 'Must select native-verified target');
+assert.ok(ensure.includes('if (!session.preserveActiveTarget) page = selected'), 'Read must not overwrite shared active tab');
+assert.ok(ensure.includes('if (!policy.externalVisibleChrome) throw revisionError('), 'Must prohibit independent browser launch');
+assert.ok(worker.includes('const preserveActiveTarget = isTargetedReadCapture(req.path, req.body)'), 'Exact-target read policy required');
+assert.ok(worker.includes('readPostconditionTargetId(preserveActiveTarget'), 'Postcondition must bind requested read target');
+assert.ok(worker.includes('if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence'), 'Read cannot mutate shared session evidence');
+assert.ok(worker.includes('if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront()'), 'Page capture cannot steal foreground');
+assert.ok(worker.includes('return visibleRequest.run({ ...before, preserveActiveTarget }, next)'), 'Request-local verified read context required');
+console.log('Active-worker targeted DOM, form and page capture isolation PASS.');
