@@ -2,7 +2,7 @@
 # Run Activate only in alex's interactive terminal; MCP NoNewPrivileges cannot restart systemd.
 [CmdletBinding()]
 param(
-  [ValidateSet('Preflight','Activate')][string]$Mode='Preflight',
+  [ValidateSet('Preflight','Activate','UpgradePreflight','Upgrade')][string]$Mode='Preflight',
   [switch]$ConfirmDeploy
 )
 $ErrorActionPreference='Stop'
@@ -70,6 +70,126 @@ function NoNewPrivs {
   $line=Get-Content '/proc/self/status' | Where-Object { $_ -match '^NoNewPrivs:' } | Select-Object -First 1
   if ($line -match 'NoNewPrivs:\s*(\d+)') { return [int]$Matches[1] }
   throw 'PRIVILEGE_BOUNDARY_UNKNOWN'
+}
+
+# Controlled in-place patch release for an already active master checkout.
+# This path never resets Git, drops user files, or restarts any Edge instance.
+if ($Mode -in @('UpgradePreflight','Upgrade')) {
+  $previous='b1c1058c5396e8ea58123590762cffc0f047053a'
+  $requiredFix='1ef022af71c4cafd50f636c831f8e0bd3a4eb235'
+  $releaseJournal=Join-Path $Repo 'var/run/visible-worker-upgrade.json'
+  if ((Git @('branch','--show-current')) -ne 'master') { throw 'ACTIVE_BRANCH_NOT_MASTER' }
+  if ((Git @('rev-parse','HEAD')) -ne $previous) { throw 'ACTIVE_MASTER_NOT_EXPECTED_PREVIOUS_VERSION' }
+  if ((Git @('status','--porcelain=v1','--untracked-files=no')) -ne '') { throw 'TRACKED_CHANGES_PRESENT' }
+  if ((Git @('remote','get-url','origin')) -ne 'https://github.com/smartresponsor/browsing.git') { throw 'UNEXPECTED_REMOTE' }
+  $remote=Git @('rev-parse','refs/remotes/origin/master')
+  & /usr/bin/git -C $Repo merge-base --is-ancestor $previous $remote
+  if ($LASTEXITCODE -ne 0) { throw 'REMOTE_NOT_FAST_FORWARD' }
+  & /usr/bin/git -C $Repo merge-base --is-ancestor $requiredFix $remote
+  if ($LASTEXITCODE -ne 0) { throw 'REQUIRED_CDP_PROFILE_FIX_ABSENT' }
+  $allowed=@('playwright-worker/src/worker.js','tool/web-external-cdp-attach-regression.mjs','tool/ubuntu-visible-worker-activate.ps1')
+  $changed=@(& /usr/bin/git -C $Repo diff --name-only $previous $remote)
+  if ($LASTEXITCODE -ne 0) { throw 'UPGRADE_DIFF_AUDIT_FAILED' }
+  foreach ($file in $changed) { if ($file -notin $allowed) { throw ('UNREVIEWED_UPGRADE_FILE_'+$file) } }
+  if ('playwright-worker/src/worker.js' -notin $changed) { throw 'VISIBLE_WORKER_FIX_NOT_PRESENT' }
+  $newPaths=@(& /usr/bin/git -C $Repo diff --name-only --diff-filter=A $previous $remote)
+  if ($LASTEXITCODE -ne 0) { throw 'UPGRADE_NEW_PATH_AUDIT_FAILED' }
+  $untracked=@(& /usr/bin/git -C $Repo ls-files --others --exclude-standard)
+  if ($LASTEXITCODE -ne 0) { throw 'UNTRACKED_INVENTORY_FAILED' }
+  $untrackedHashes=@{}
+  foreach ($file in $untracked) {
+    if ($file -in $newPaths) { throw ('UPGRADE_WOULD_OVERWRITE_UNTRACKED_'+$file) }
+    $full=Join-Path $Repo $file
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw ('UNTRACKED_PATH_INACCESSIBLE_'+$file) }
+    $untrackedHashes[$file]=(Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash
+  }
+  $unitProps=UnitProps
+  if ($unitProps.ActiveState -ne 'active' -or [int]$unitProps.MainPID -lt 1) { throw 'VISIBLE_WORKER_NOT_ACTIVE' }
+  if ($unitProps.FragmentPath -ne '/etc/systemd/system/console-mcp-visible-worker.service') { throw 'UNEXPECTED_SYSTEMD_UNIT' }
+  if (-not $unitProps.ExecStart.Contains($Supervisor)) { throw 'UNEXPECTED_WORKER_SUPERVISOR' }
+  $baseline=BrowserInstances
+  $live=LiveWorker
+  if ($null -eq $live -or $live.browserMode -ne 'external-browser-cdp') { throw 'VISIBLE_WORKER_HEALTH_NOT_READY' }
+  NoWorkerConnections
+  $boundary=NoNewPrivs
+  $summary=[ordered]@{ok=$true;status='VISIBLE_WORKER_HOTFIX_PREFLIGHT_GREEN';old=$previous;new=$remote;
+    permittedPaths=$changed;untrackedFiles=$untracked.Count;workerPid=[int]$unitProps.MainPID;
+    cdpPorts=@(9223,9224,9230);noNewPrivileges=$boundary}
+  if ($Mode -eq 'UpgradePreflight') {
+    $summary | ConvertTo-Json -Compress -Depth 5
+    exit 0
+  }
+  if (-not $ConfirmDeploy) { throw 'CONFIRM_DEPLOY_SWITCH_REQUIRED' }
+  if ((& /usr/bin/id -un).Trim() -ne 'alex') { throw 'RUN_FROM_ALEX_INTERACTIVE_TERMINAL' }
+  if ($boundary -ne 0) { throw 'MCP_SANDBOX_CANNOT_ADMINISTER_SYSTEMD' }
+  # Operator enters credentials only in their own terminal; never in Console MCP.
+  NativeRun '/usr/bin/sudo' @('-v')
+  NoWorkerConnections
+  CompareInstances $baseline
+  $journalData=[ordered]@{status='PREPARED';old=$previous;new=$remote;
+    at=(Get-Date).ToString('o');browserInstances=$baseline}
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $releaseJournal) | Out-Null
+  ($journalData | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $releaseJournal -Encoding utf8
+  $pulled=$false
+  $restartAttempted=$false
+  try {
+    NativeRun '/usr/bin/git' @('-C',$Repo,'pull','--ff-only','origin','master')
+    $pulled=$true
+    if ((Git @('rev-parse','HEAD')) -ne $remote) { throw 'MASTER_UPGRADE_SHA_MISMATCH' }
+    foreach ($file in $untracked) {
+      $full=Join-Path $Repo $file
+      if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw ('UNTRACKED_REMOVED_'+$file) }
+      if ((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash -ne $untrackedHashes[$file]) { throw ('UNTRACKED_CHANGED_'+$file) }
+    }
+    NativeRun '/usr/bin/npm' @('--prefix',$Repo,'run','typecheck')
+    NativeRun '/usr/bin/npm' @('--prefix',$Repo,'test')
+    NoWorkerConnections
+    CompareInstances $baseline
+    # Tests may outlast sudo's cached authorization; renew explicitly in the attended terminal.
+    NativeRun '/usr/bin/sudo' @('-v')
+    $restartAttempted=$true
+    NativeRun '/usr/bin/sudo' @('-n','/usr/bin/systemctl','restart',$Unit)
+    $restarted=$false
+    for($i=0;$i -lt 20;$i++) {
+      Start-Sleep -Seconds 1
+      $after=UnitProps
+      $ready=LiveWorker
+      if ($after.ActiveState -eq 'active' -and [int]$after.MainPID -gt 0 -and
+          [int]$after.MainPID -ne [int]$unitProps.MainPID -and $ready -and
+          $ready.browserMode -eq 'external-browser-cdp') { $restarted=$true;break }
+    }
+    if (-not $restarted) { throw 'NEW_WORKER_HEALTH_UNVERIFIED' }
+    CompareInstances $baseline
+    $journalData.status='UPGRADE_COMMITTED'
+    $journalData.finishedAt=(Get-Date).ToString('o')
+    $journalData.workerPid=[int]$after.MainPID
+    ($journalData | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $releaseJournal -Encoding utf8
+    [pscustomobject]@{ok=$true;status='UPGRADE_COMMITTED';head=$remote;pid=[int]$after.MainPID;
+      browserInstancesPreserved=$true;next='NELLIS_EXACT_TARGET_READ_ONLY_ACCEPTANCE'} | ConvertTo-Json -Compress
+  } catch {
+    $failure=$_.Exception.Message
+    $steps=@()
+    if ($pulled) {
+      # Restore the previous proven worker source without resetting master or touching user files.
+      try {
+        NativeRun '/usr/bin/git' @('-C',$Repo,'restore',('--source='+$previous),'--worktree','--','playwright-worker/src/worker.js')
+        $steps+='OLD_WORKER_SOURCE_RESTORED'
+      } catch { $steps+=('RESTORE_FAILED: '+$_.Exception.Message) }
+    }
+    if ($restartAttempted) {
+      try {
+        NativeRun '/usr/bin/sudo' @('-n','/usr/bin/systemctl','restart',$Unit)
+        $steps+='OLD_WORKER_RESTARTED'
+      } catch { $steps+=('WORKER_RESTART_ROLLBACK_FAILED: '+$_.Exception.Message) }
+    }
+    try { CompareInstances $baseline;$steps+='CDP_INSTANCES_PRESERVED' } catch { $steps+=('CDP_CHECK_FAILED: '+$_.Exception.Message) }
+    $journalData.status='ROLLBACK_ATTEMPTED'
+    $journalData.error=$failure
+    $journalData.steps=$steps
+    ($journalData | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $releaseJournal -Encoding utf8
+    throw ('VISIBLE_WORKER_UPGRADE_ABORTED: '+$failure+'; '+($steps -join '; '))
+  }
+  exit 0
 }
 
 if (-not (Test-Path -LiteralPath $Worker) -or -not (Test-Path -LiteralPath $Supervisor)) { throw 'CANONICAL_SOURCE_MISSING' }
