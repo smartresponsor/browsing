@@ -78,20 +78,24 @@ function createWebCoreDomainToolDefinitions() {
     definition({
       canonicalName: 'web.page.capture.dom',
       consoleName: 'read_.web.page.capture.dom',
-      route: '/page-capture-dom',
-      capabilityName: 'web.page_capture_dom',
+      route: '/page-capture',
+      capabilityName: 'web.page_capture',
+      includeCapabilityAlias: false,
       access: 'read',
-      description: 'Capture bounded page DOM semantics: visible text, links and item summaries, without form state or page mutations.',
+      description: 'Read bounded visible DOM text and HTTP(S) anchor links from an explicitly verified page without changing the shared active target.',
       inputSchema: z.object({ targetId: z.string().regex(/^[A-Fa-f0-9]{32}$/).optional() }).strict(),
+      toPayload: (input) => ({ captureView: 'dom', ...(input.targetId ? { targetId: input.targetId } : {}) }),
     }),
     definition({
       canonicalName: 'web.page.capture.form',
       consoleName: 'read_.web.page.capture.form',
-      route: '/page-capture-form',
-      capabilityName: 'web.page_capture_form',
+      route: '/page-capture',
+      capabilityName: 'web.page_capture',
+      includeCapabilityAlias: false,
       access: 'read',
-      description: 'Capture semantic form controls, validation, revisions and submission candidates without navigation.',
+      description: 'Read revision-bound semantic fields on an explicitly verified page without changing the shared active target.',
       inputSchema: z.object({ targetId: z.string().regex(/^[A-Fa-f0-9]{32}$/).optional() }).strict(),
+      toPayload: (input) => ({ captureView: 'form', ...(input.targetId ? { targetId: input.targetId } : {}) }),
     }),
     definition({
       canonicalName: 'web.page.wait',
@@ -181,7 +185,7 @@ function createWebCoreDomainToolDefinitions() {
       legacyName: 'web.upload_artifact',
       capabilityName: 'web.upload_artifact',
       access: 'write',
-      description: 'Upload one approved guarded artifact reference to an exact semantic file control.',
+      description: 'Select one approved file using an exact or unique native input (including hidden/iframe) or a safe upload/dropzone selector with a guarded file chooser. Verifies browser file selection, not server acceptance; never retries uncertain uploads.',
       inputSchema: z.object({
         approved: z.boolean(),
         approvalText: z.string(),
@@ -243,8 +247,8 @@ function registerWebCoreDomainToolDefinitions(mcpServer, registry) {
   }
 }
 
-function definition({ canonicalName, consoleName, route, legacyName = null, capabilityName, access, description, inputSchema, toPayload = identity }) {
-  const aliases = [...new Set([capabilityName, legacyName].filter(Boolean))];
+function definition({ canonicalName, consoleName, route, legacyName = null, capabilityName, includeCapabilityAlias = true, access, description, inputSchema, toPayload = identity }) {
+  const aliases = [...new Set([includeCapabilityAlias ? capabilityName : null, legacyName].filter(Boolean))];
   return Object.freeze({
     canonicalName,
     consoleName,

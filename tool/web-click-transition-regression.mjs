@@ -62,7 +62,7 @@ assert.equal(captureCount, 2, "settling must poll read-only evidence without rep
 for (const token of [
   "settleClickTransition({",
   "observedDelayedTransition: settled.settled",
-  "capture: () => capturePageArtifact(target, { screenshot: false })",
+  "capture: () => capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso })",
 ]) {
   assert.equal(worker.includes(token), true, `web.click settling invariant missing: ${token}`);
 }

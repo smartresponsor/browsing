@@ -11,12 +11,24 @@ assert.equal(isKnownJobHost("careers.example.com"), false, "Unknown career hosts
 for (const token of [
   "import { createHash } from 'node:crypto';",
   "return createHash('sha256').update(String(text || '').replace(/\\r\\n/g, '\\n').trim(), 'utf8').digest('hex');",
-  "app.post('/page-capture'",
-  "capturePageArtifact(target, { screenshot: req.body?.screenshot === true })",
+  "app.post(['/page-capture', '/page-capture-dom', '/page-capture-form']",
+  "capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true })",
   ".map(item => ({",
   "finalCandidate: classifyFinalActionCandidate(item)",
 ]) {
   assert.equal(worker.includes(token), true, `Page capture hashing invariant missing: ${token}`);
+}
+
+for (const invariant of [
+  "captureView === 'dom'",
+  "captureView === 'form'",
+  "captureView: 'dom', dom: { text: artifact.visibleText, ...dom }",
+  "const identifiers = Array.from(document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id]'))",
+  "const findControls = Array.from(document.querySelectorAll('input,button,[role=searchbox]'))",
+  "const items = Array.from(document.querySelectorAll('article,[data-testid],li'))",
+  "Array.from(document.querySelectorAll('a[href]')).slice(0, 350)",
+]) {
+  assert.ok(worker.includes(invariant), `Read-only DOM/form projection missing: ${invariant}`);
 }
 
 for (const text of ["Apply", "Apply now", "Apply to 1 role", "Apply manually", "Start application", "Continue application"]) {

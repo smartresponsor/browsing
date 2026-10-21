@@ -1,7 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
-// Load new grants proof only for the opt-in dedicated worker. Legacy workers never depend on an un-deployed Console build.
+// Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
+// on the extra Console grants module or its runtime permissions.
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
   ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
 import express from 'express';
@@ -43,9 +44,10 @@ import {
   revisionError
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
-import { classifyHumanBoundary } from './human-boundary.js';
+import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
+import { classifyHumanBoundary, isSafeGoogleSsoTrigger } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
-import { classifySubmitPostcondition } from './submit-postcondition.js';
+import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
   approvalPayloadHash,
   consumeApprovalReceipt,
@@ -166,7 +168,7 @@ function getPolicy() {
     externalVisibleBrowser,
     externalVisibleChrome: externalVisibleBrowser,
     remoteDebuggingPort: Number(process.env.BROWSER_MCP_REMOTE_DEBUGGING_PORT || 9223),
-    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 15000)
+    externalAttachTimeoutMs: Number(process.env.BROWSER_MCP_EXTERNAL_ATTACH_TIMEOUT_MS || 45000)
   };
 }
 
@@ -257,8 +259,11 @@ async function getBrowserStatus() {
   const policy = getPolicy();
   const runtime = buildBrowserRuntimeStatus(policy);
   const managedProcesses = await listManagedBrowserProcesses(policy);
-  // HWND/title presence is diagnostic only; the canonical verifier owns visibility.
-  const detectedVisibleWindow = null;
+  const detectedVisibleWindow = Boolean(
+    managedProcesses?.ok &&
+      Array.isArray(managedProcesses.processes) &&
+      managedProcesses.processes.some(item => Number(item.mainWindowHandle || 0) > 0 || String(item.mainWindowTitle || '').trim() !== '')
+  );
   return {
     ok: true,
     service: 'browser-mcp-browser-worker',
@@ -346,17 +351,37 @@ function planWebConnectorRefresh({ connectorName, connectorId, timeoutMs } = {})
   };
 }
 
-async function resolveConnectorRefreshTarget(policy, _targetUrl, _connectorId, _timeoutMs) {
-  const session = visibleRequest.getStore();
-  if (!session?.ok) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Connector refresh requires the verified bound target.');
+async function createRawCdpTarget(policy, targetUrl, timeoutMs) {
+  const endpoint = `http://127.0.0.1:${policy.remoteDebuggingPort}`;
+  const response = await fetch(`${endpoint}/json/new?${encodeURIComponent(targetUrl)}`, {
+    method: 'PUT',
+    signal: AbortSignal.timeout(Math.max(250, timeoutMs))
+  });
+  if (!response.ok) throw new Error(`DevTools target create failed with HTTP ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
+async function resolveConnectorRefreshTarget(policy, targetUrl, connectorId, timeoutMs) {
   const inventory = await listRawCdpTargets(policy);
-  const target = inventory.targets.find(t => t.id === session.evidence.targetId && t.type === 'page' && t.webSocketDebuggerUrl);
-  if (!target) throw revisionError('WEB_TARGET_STALE', 'The bound connector target no longer exists.');
-  return { ...target, reused: true };
+  const targets = inventory.targets.filter(target => target.type === 'page' && typeof target.webSocketDebuggerUrl === 'string');
+  const existing = targets.find(target => connectorId && String(target.url || '').includes(connectorId))
+    || targets.find(target => String(target.url || '').includes('#settings/Connectors'))
+    || targets.find(target => String(target.url || '').includes('#settings/Apps'));
+  if (existing) return { ...existing, reused: true };
+  const created = await createRawCdpTarget(policy, targetUrl, timeoutMs);
+  const deadline = Date.now() + Math.min(timeoutMs, 15000);
+  while (Date.now() <= deadline) {
+    const refreshed = await listRawCdpTargets(policy);
+    const createdTarget = refreshed.targets.find(target => target.id === created.id && target.webSocketDebuggerUrl);
+    if (createdTarget) return { ...createdTarget, reused: false };
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
+  return { ...created, reused: false };
 }
 
 function buildWebConnectorRefreshExpression(connectorName, connectorId, targetUrl) {
   return `(async () => { const connectorName = ${JSON.stringify(connectorName)}; const connectorId = ${JSON.stringify(connectorId)}; const targetUrl = ${JSON.stringify(targetUrl)}; const deadline = Date.now() + 60000; const events = []; const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)); const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim(); const visible = (node) => { if (!node || !(node instanceof Element)) return false; const style = getComputedStyle(node); const rect = node.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const textOf = (node) => clean([node.getAttribute?.('aria-label'), node.getAttribute?.('title'), node.getAttribute?.('data-testid'), node.innerText, node.textContent].filter(Boolean).join(' ')); const nodes = () => Array.from(document.querySelectorAll('button,a,[role="button"],[role="menuitem"],[aria-label],[data-testid],div,span,p,h1,h2,h3')).filter(visible); const bodyText = () => clean(document.body?.innerText || document.documentElement?.innerText || ''); const actionNodes = () => nodes().filter((node) => node.matches?.('button,a,[role="button"],[role="menuitem"]') || (getComputedStyle(node).cursor === 'pointer' && node.getBoundingClientRect().width <= 400)); const findAction = (patterns) => actionNodes().find((node) => patterns.some((pattern) => pattern.test(textOf(node)))); const waitFor = async (probe, label) => { while (Date.now() <= deadline) { const value = probe(); if (value) return value; await sleep(250); } events.push({ action: 'timeout', label, href: location.href }); return null; }; const click = async (node, label) => { node.scrollIntoView?.({ block: 'center', inline: 'center' }); await sleep(250); node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); node.dispatchEvent(new MouseEvent('click', { bubbles: true })); node.click?.(); events.push({ action: 'click', label, text: textOf(node).slice(0, 180), href: location.href, at: new Date().toISOString() }); await sleep(700); }; await waitFor(() => document.readyState === 'interactive' || document.readyState === 'complete', 'document-ready'); if (!location.href.includes('#settings') || (connectorId && !location.href.includes(connectorId))) { location.href = targetUrl; events.push({ action: 'navigate', targetUrl, href: location.href }); await sleep(1500); } const settingsReady = await waitFor(() => /Settings|General|Connectors|Apps|Applications/i.test(bodyText()), 'settings-ready'); if (!settingsReady) return { ok: false, status: 'SETTINGS_NOT_READY', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 1200) }; const escaped = connectorName.replace(/[.*+?^$(){}|[\\]\\\\]/g, '\\\\$&'); const namePattern = new RegExp(escaped, 'i'); const connectorSeen = () => namePattern.test(bodyText()) || (connectorId && bodyText().includes(connectorId)) || (connectorId && location.href.includes(connectorId)); const ready = await waitFor(() => connectorSeen() && findAction([/^refresh$/i, /\\brefresh\\b/i]), 'refresh-ready'); if (!ready) return { ok: false, status: 'REFRESH_CONTROL_NOT_FOUND', connectorName, connectorId: connectorId || null, href: location.href, events, bodySample: bodyText().slice(0, 2000) }; await click(ready, 'refresh'); const result = await waitFor(() => { const text = bodyText(); const success = text.match(/.{0,80}(actions refreshed|refreshed).{0,120}/i)?.[0] || null; if (success) return { ok: true, status: 'ACTIONS_REFRESHED', message: clean(success) }; const failure = text.match(/.{0,80}(failed to refresh|error refreshing actions|something went wrong|could not refresh).{0,120}/i)?.[0] || null; if (failure) return { ok: false, status: 'ACTIONS_REFRESH_FAILED', message: clean(failure) }; return null; }, 'refresh-result'); const pageText = bodyText().slice(0, 20000); const webToolsVisible = /web\./.test(pageText); if (!result && webToolsVisible) return { ok: true, status: 'REFRESH_CLICKED_WEB_TOOLS_VISIBLE', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; if (!result) return { ok: false, status: 'REFRESH_CLICKED_RESULT_NOT_SEEN', connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; return { ...result, connectorName, connectorId: connectorId || null, href: location.href, events, pageText }; })()`;
+
 }
 
 async function executeWebConnectorRefresh({ confirmRefresh = false, connectorName, connectorId, timeoutMs } = {}) {
@@ -406,6 +431,12 @@ async function assertSessionWindow(policy) {
 
   const elapsedSeconds = (Date.now() - sessionStartedAt) / 1000;
   if (elapsedSeconds > policy.maxSessionSeconds) {
+    // External visible Edge is owned by Console, not this worker. Rotate only
+    // the observation window; never close tabs or reset usage counters.
+    if (policy.externalVisibleBrowser) {
+      sessionStartedAt = Date.now();
+      return;
+    }
     await closeSession();
     throw new Error(`Browser session exceeded ${policy.maxSessionSeconds} seconds. Restart the worker.`);
   }
@@ -413,7 +444,7 @@ async function assertSessionWindow(policy) {
 
 function validateTargetUrl(rawUrl, policy) {
   const targetUrl = new URL(rawUrl);
-  if (process.env.BROWSER_MCP_GRANTS_WORKER === 'true' && !grantsPolicy.isGrantsAllowedUrl(targetUrl.toString())) {
+  if (grantsPolicy && !grantsPolicy.isGrantsAllowedUrl(targetUrl.toString())) {
     throw new Error('GRANTS_HOST_NOT_ALLOWED');
   }
 
@@ -479,7 +510,7 @@ function describeJobProfile(targetUrl) {
   };
 }
 
-async function ensureNotChallenge(target) {
+async function ensureNotChallenge(target, { allowLoginInspection = false } = {}) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
@@ -515,7 +546,12 @@ async function ensureNotChallenge(target) {
     return {
       title,
       text: `${title}\n${body}`.slice(0, 4000),
-      hasPasswordField: Boolean(document.querySelector('input[type="password"]')),
+      hasPasswordField: Array.from(document.querySelectorAll('input[type="password"]')).some(element => {
+        if (!isVisible(element)) return false;
+        const context = normalize((element.closest('form, [role="dialog"], [aria-modal="true"]') || element.parentElement)?.innerText || '');
+        const routeLooksLikeLogin = /\/(?:login|log-in|signin|sign-in|auth)(?:[/?#]|$)/i.test(location.href);
+        return routeLooksLikeLogin || /\b(sign[ -]?in|log[ -]?in|login)\b/i.test(context);
+      }),
       hasCredentialIdentifierField: Boolean(document.querySelector([
         'input[autocomplete="username"]',
         'input[name*="username" i]',
@@ -538,7 +574,7 @@ async function ensureNotChallenge(target) {
     consentText: snapshot.consentText,
     alertDialogText: snapshot.alertDialogText,
   });
-  if (boundary) {
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required')) {
     throw revisionError(
       'WEB_HUMAN_ACTION_REQUIRED',
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
@@ -558,28 +594,94 @@ async function ensureNotChallenge(target) {
 async function ensurePage() {
   const policy = getPolicy();
   await assertSessionWindow(policy);
+  const guard = visibleRequest.getStore();
+  // An explicitly verified Console-owned target must never trigger an independent browser launch.
+  if (guard?.ok && !policy.externalVisibleChrome) {
+    throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment required; competing browser launch denied.');
+  }
 
   if (!browser) {
-    // Browser execution remains Console-owned: attachment never creates profiles or contexts.
-    if (!policy.externalVisibleChrome) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment is required; competing runtime launch is prohibited.');
-    const externalRuntime = await connectExternalVisibleChrome(policy);
-    connectedBrowser = externalRuntime.connectedBrowser;
-    browser = externalRuntime.context;
+    const userDataDir = getManagedUserDataDir(policy);
+
+    await mkdir(userDataDir, { recursive: true });
+
+    if (policy.externalVisibleChrome) {
+      try {
+        const externalRuntime = await connectExternalVisibleChrome(policy, userDataDir);
+        connectedBrowser = externalRuntime.connectedBrowser;
+        browser = externalRuntime.context;
+        lastExternalAttachError = '';
+      } catch (error) {
+        connectedBrowser = undefined;
+        lastExternalAttachError = normalizeError(error);
+        throw new Error(`Shared browser CDP attach failed. ${lastExternalAttachError}`);
+      }
+    }
+
+    if (!browser) {
+      await killManagedBrowserProcesses(policy);
+
+      const launchOptions = {
+        headless: policy.headless,
+        args: [
+          '--new-window',
+          '--start-maximized',
+          '--window-position=80,80',
+          '--window-size=1400,1000'
+        ]
+      };
+
+      if (policy.browserChannel !== 'chromium') {
+        launchOptions.channel = policy.browserChannel;
+      }
+
+      try {
+        browser = await chromium.launchPersistentContext(userDataDir, launchOptions);
+      } catch (error) {
+        if (policy.browserChannel === 'chromium') {
+          throw error;
+        }
+
+        console.warn(`Failed to launch browser channel ${policy.browserChannel}; retrying with bundled Chromium. ${error.message}`);
+        browser = await chromium.launchPersistentContext(userDataDir, {
+          headless: policy.headless,
+          args: [
+            '--new-window',
+            '--start-maximized',
+            '--window-position=80,80',
+            '--window-size=1400,1000'
+          ]
+        });
+      }
+    }
   }
 
-  const session = visibleRequest.getStore();
-  if (!session?.ok) throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'A verified visible-session lease is required.');
-  const selectedId = session.evidence.targetId;
-  let selected;
-  for (const candidate of browser.pages()) {
-    if (!candidate.isClosed() && await getPageTargetId(candidate) === selectedId) selected = candidate;
+  if (guard?.evidence?.targetId) {
+    const verifiedTargetId = guard.evidence.targetId;
+    let selected = null;
+    for (const candidate of browser.pages()) {
+      if (!candidate.isClosed() && await getPageTargetId(candidate) === verifiedTargetId) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (!selected) throw revisionError('WEB_TARGET_STALE', 'Native-verified CDP target no longer belongs to the attached browser.');
+    if (!guard.preserveActiveTarget) page = selected;
+    return selected;
   }
-  if (!selected) throw revisionError('WEB_TARGET_STALE', 'The verified target no longer exists.');
-  // Captures with exact native-verified target identity are read-only and must
-  // not overwrite the shared worker's previously active page.
-  if (!session.preserveActiveTarget) page = selected;
 
-  return selected;
+  if (!page) {
+    const existingPages = browser.pages();
+    page = existingPages.length > 0 ? existingPages[0] : await browser.newPage();
+    await page.bringToFront().catch(() => {});
+    if (page.url() === 'about:blank') {
+      await page.goto(getStartupUrl(), { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(error => {
+        console.warn(`Startup page open failed. ${normalizeError(error)}`);
+      });
+    }
+  }
+
+  return page;
 }
 
 async function connectToExistingCdpEndpoint(endpoint, timeoutMs = 15000) {
@@ -824,6 +926,8 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
         ? Array.from(node.selectedOptions || []).map(option => String(option.value ?? ''))
         : node.getAttribute('contenteditable') === 'true'
           ? normalize(node.innerText || node.textContent || '')
+          : semanticType === 'password'
+          ? '[redacted]'
           : String(node.value ?? '');
 
     const validity = typeof node.checkValidity === 'function'
@@ -969,7 +1073,10 @@ async function getPageTargetId(target) {
     await session?.detach().catch(() => {});
   }
 
-  throw revisionError('WEB_TARGET_STALE', 'Native CDP target identity is unavailable; synthetic identity is prohibited.');
+  return `fallback:${hashStableJson({
+    url: target.url(),
+    title: await target.title().catch(() => ''),
+  })}`;
 }
 
 function expectedRevisionsFromBody(body) {
@@ -1006,8 +1113,8 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   });
 }
 
-async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture' } = {}) {
-  await ensureNotChallenge(target);
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false } = {}) {
+  await ensureNotChallenge(target, { allowLoginInspection });
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
@@ -1021,6 +1128,7 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
     url,
     title,
     textHash,
+    visibleText,
     fields,
     ...revisions,
     submitCandidates
@@ -1043,10 +1151,11 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
 }
 
 async function listBrowserTargets() {
+  // Inventory must remain read-only: never launch or attach a browser here.
   const inventory = await listRawCdpTargets(getPolicy());
   const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
   const targets = inventory.targets.filter(item => item.type === 'page').map((item, index) => ({
-    ...item, index, targetId: item.id, active: item.id === activeTargetId, closed: false,
+    ...item, index, targetId: item.id, active: item.id === activeTargetId, closed: false
   }));
   return { ...inventory, targets, activeTargetId, activeIndex: targets.find(item => item.active)?.index ?? null };
 }
@@ -1379,12 +1488,39 @@ async function writeField(target, locator, value, field = {}) {
   }
 
   const desired = String(value ?? '');
-  await locator.fill(desired);
+  // Workday-style controlled month/year segments require keyboard events.
+  // Verify only after blur; the framework may re-render the input on change.
+  const dateSegment = await locator.evaluate(node => {
+    if (node.tagName.toLowerCase() !== 'input') return null;
+    const marker = [
+      node.getAttribute('data-automation-id') || '',
+      node.getAttribute('aria-label') || '',
+    ].join(' ');
+    if (!/(dateSection|date[-_ ]?segment|month[-_ ]?input|year[-_ ]?input)/i.test(marker)) return null;
+    if (/month/i.test(marker)) return 'month';
+    if (/year/i.test(marker)) return 'year';
+    return null;
+  });
+  if (dateSegment && desired) {
+    const expected = dateSegment === 'month' ? /^\d{1,2}$/ : /^\d{4}$/;
+    if (!expected.test(desired) || (dateSegment === 'month' && (+desired < 1 || +desired > 12))) {
+      throw revisionError('WEB_VALIDATION_FAILED', 'Invalid composite date segment.', {
+        dateSegment, desired, controlId: field.controlId || null
+      });
+    }
+    await locator.click();
+    await locator.press('ControlOrMeta+A');
+    await locator.pressSequentially(desired, { delay: 35 });
+    await locator.press('Tab');
+  } else {
+    await locator.fill(desired);
+  }
   const actual = await locator.inputValue();
   if (actual !== desired) {
-    throw revisionError('WEB_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, controlId: field.controlId || null });
+    throw revisionError('WEB_VALIDATION_FAILED', 'Text-field postcondition did not match the requested value.', { desired, actual, dateSegment, controlId: field.controlId || null });
+
   }
-  return { semanticType, requested: desired, actual };
+  return { semanticType, requested: desired, actual, ...(dateSegment ? { dateSegment, verifiedAfterBlur: true } : {}) };
 }
 
 function normalizeBooleanMutationValue(value, defaultValue = false) {
@@ -1559,20 +1695,12 @@ async function resolveRequestedFieldLocator(target, item, fields) {
 
 async function resolveUploadControl(target, item, fields) {
   const controlId = getRequestedControlId(item);
-  if (controlId) {
-    const field = fields.find(candidate => candidate.controlId === controlId);
-    if (!field) {
-      throw revisionError('WEB_FIELD_NOT_FOUND', 'Upload control identity is stale or missing from the current form revision.', { controlId });
-    }
-    if (field.semanticType !== 'file') {
-      throw revisionError('WEB_CONTROL_UNSUPPORTED', 'The requested upload control is not a file input.', { controlId, semanticType: field.semanticType });
-    }
-    return { locator: await locatorForFieldSnapshot(target, field), field };
-  }
-
   const selector = typeof item?.selector === 'string' ? item.selector.trim() : '';
-  if (!selector) {
-    throw revisionError('WEB_UPLOAD_CONTROL_REQUIRED', 'Upload requires an exact file controlId or selector.');
+  if (controlId || !selector) {
+    // A hidden file input still has a stable semantic controlId, including in
+    // an iframe or open shadow root. Choose automatically only if unique.
+    const field = chooseUploadField(fields, controlId);
+    return { locator: await locatorForFieldSnapshot(target, field), field };
   }
 
   const locator = target.locator(selector);
@@ -1587,7 +1715,10 @@ async function resolveUploadControl(target, item, fields) {
 
   const field = await locator.evaluate(node => ({
     tag: node.tagName.toLowerCase(),
-    type: String(node.getAttribute('type') || '').toLowerCase(),
+    type: String(node.type || node.getAttribute('type') || '').toLowerCase(),
+    role: String(node.getAttribute('role') || '').toLowerCase(),
+    label: String(node.getAttribute('aria-label') || node.innerText || node.textContent || '').trim().slice(0, 250),
+    marker: [node.getAttribute('data-testid'), node.getAttribute('data-automation-id'), node.getAttribute('class')].filter(Boolean).join(' ').slice(0, 250),
     visible: (() => {
       const style = window.getComputedStyle(node);
       const rect = node.getBoundingClientRect();
@@ -1596,7 +1727,16 @@ async function resolveUploadControl(target, item, fields) {
     enabled: !node.disabled && node.getAttribute('aria-disabled') !== 'true'
   }));
   if (field.tag !== 'input' || field.type !== 'file') {
-    throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload selector must resolve to input[type=file].', { selector, tag: field.tag, type: field.type });
+    assertSafeUploadActivator(field);
+    return {
+      locator,
+      mode: 'filechooser',
+      field: {
+        ...field,
+        semanticType: 'filechooser',
+        controlId: `selector:${hashStableJson({ selector, type: 'filechooser' })}`
+      }
+    };
   }
   if (!field.enabled) {
     throw revisionError('WEB_CONTROL_UNSUPPORTED', 'Upload file control is disabled.', { selector });
@@ -1698,9 +1838,7 @@ app.get('/healthz', (_req, res) => {
     ok: true,
     service: 'browser-mcp',
     configuredVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
-    browserVisible: null,
-    visibility_verified: false,
-    user_interaction_ready: false,
+    browserVisible: String(process.env.BROWSER_MCP_HEADLESS || 'false').toLowerCase() !== 'true',
     browserChannel: policy.browserChannel,
     browserMode: getBrowserMode(policy),
     persistentProfile: true,
@@ -1721,7 +1859,6 @@ app.use((req, res, next) => {
   return next();
 });
 
-// All automation routes share the same native visibility policy. Diagnostics never imply readiness.
 const visibleRequest = new AsyncLocalStorage();
 let visibleOperationInFlight = false;
 let boundVisibleRuntime;
@@ -1733,30 +1870,29 @@ app.use(async (req, res, next) => {
     res.json = body => send({ ...body, visibility_verified: false, user_interaction_ready: false });
     return next();
   }
-  if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
-  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY' });
+  if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) {
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
+  }
+  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
   visibleOperationInFlight = true;
   const release = () => { visibleOperationInFlight = false; };
   res.once('finish', release);
-  // A disconnected client must not release the lease while automation is still running.
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
-    const grants = process.env.BROWSER_MCP_GRANTS_WORKER === 'true';
-    if (grants && port !== 9230) return res.status(409).json({ok:false,status:'WEB_GRANTS_SESSION_NOT_READY',reason:'GRANTS_PORT_MISMATCH'});
+    const grants = grantsPolicy !== null;
+    if (grants && port !== 9230) {
+      return res.status(409).json({ok:false,status:'WEB_GRANTS_SESSION_NOT_READY',reason:'GRANTS_PORT_MISMATCH',mutation_attempted:false});
+    }
     const background = port === 9224 && ['/page-capture', '/page-capture-dom', '/page-capture-form'].includes(req.path);
     const preserveActiveTarget = isTargetedReadCapture(req.path, req.body);
     let targetId = req.body?.targetId || req.body?.expectedTargetId;
-    if (!targetId && (req.body?.index !== undefined || req.body?.urlContains || (req.path === '/browser-bind' && req.body?.url))) {
-      const inventory = await listRawCdpTargets(getPolicy());
-      const candidates = inventory.targets.filter(t => t.type === 'page').filter((t, i) => req.body.index === undefined || i === req.body.index).filter(t => !req.body.urlContains || String(t.url).includes(req.body.urlContains)).filter(t => req.path !== '/browser-bind' || !req.body.url || t.url === req.body.url);
-      if (candidates.length !== 1) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'AMBIGUOUS_VISIBLE_SESSIONS' });
-      targetId = candidates[0].id;
-    }
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
+    // An exact read-only observation verifies the requested target independently:
+    // the shared bound target may belong to another concurrently managed consumer.
     const before = grants
-      ? await grantsPolicy.inspectGrantsTarget({ targetId, expected: boundVisibleRuntime })
-      : boundVisibleRuntime && targetId
+      ? await grantsPolicy.inspectGrantsTarget({ targetId, expected: preserveActiveTarget ? undefined : boundVisibleRuntime })
+      : boundVisibleRuntime && targetId && !preserveActiveTarget
         ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
         : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
@@ -1773,12 +1909,14 @@ app.use(async (req, res, next) => {
             : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
-        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after, browser_telemetry: { correlation_id: correlationId, cdp_success: after.states.includes('CDP_CONNECTED'), operation_success: body.ok === true, navigation_success: ['/open', '/open-job'].includes(req.path) ? body.ok === true : null, target_binding_success: after.ok, visibility_verification_success: after.visibility_verified, user_interaction_ready: after.user_interaction_ready } });
-      })().catch(() => { send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false }); }).finally(release);
+        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
+      })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
       return res;
     };
     return visibleRequest.run({ ...before, preserveActiveTarget }, next);
-  } catch { return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false }); }
+  } catch {
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
+  }
 });
 
 app.post('/browser-status', async (_req, res) => {
@@ -2039,47 +2177,55 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
   }
 });
 
-app.post('/page-capture', async (req, res) => {
+// Legacy aliases remain accepted for an already-running Console MCP connector.
+// New canonical definitions route DOM/form capture through /page-capture.
+app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (req, res) => {
   try {
+    const captureView = req.path === '/page-capture-dom' ? 'dom'
+      : req.path === '/page-capture-form' ? 'form' : req.body?.captureView;
     const target = await ensurePage();
     if (!visibleRequest.getStore()?.preserveActiveTarget) await target.bringToFront().catch(() => {});
-    res.json(await capturePageArtifact(target, { screenshot: req.body?.screenshot === true }));
+    const artifact = await capturePageArtifact(target, { screenshot: req.body?.screenshot === true, allowLoginInspection: true });
+    if (captureView === 'dom') {
+      const dom = await target.evaluate(() => {
+        const text = (value, max = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+        const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 350)
+          .map(a => ({ text: text(a.innerText || a.textContent), href: String(a.href || '') }))
+          .filter(link => link.href.startsWith('https://') || link.href.startsWith('http://'));
+        const identifiers = Array.from(document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id]')).slice(0, 250)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            values: Object.fromEntries(['data-id', 'data-item-id', 'data-auction-id', 'data-lot-id']
+              .filter(name => element.hasAttribute(name))
+              .map(name => [name, text(element.getAttribute(name), 160)]))
+          }));
+        const findControls = Array.from(document.querySelectorAll('input,button,[role=searchbox]')).slice(0, 80)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            type: element.getAttribute('type'),
+            placeholder: text(element.getAttribute('placeholder')),
+            ariaLabel: text(element.getAttribute('aria-label')),
+            label: text(element.innerText || element.textContent)
+          }));
+        const items = Array.from(document.querySelectorAll('article,[data-testid],li')).slice(0, 160)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            testId: text(element.getAttribute('data-testid'), 120),
+            text: text(element.innerText || element.textContent, 650),
+            links: Array.from(element.querySelectorAll('a[href]')).slice(0, 5)
+              .map(a => String(a.href || '')).filter(href => /^https?:\/\//.test(href))
+          })).filter(item => item.text);
+        return { links, identifiers, findControls, items };
+      });
+      const { fields: _fields, submitCandidates: _submitCandidates, ...pageIdentity } = artifact;
+      return res.json({ ...pageIdentity, captureView: 'dom', dom: { text: artifact.visibleText, ...dom } });
+    }
+    if (captureView === 'form') {
+      return res.json({ ...artifact, captureView: 'form' });
+    }
+    res.json(artifact);
   } catch (error) {
     sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');
-  }
-});
-
-app.post('/page-capture-dom', async (_req, res) => {
-  try {
-    const target = await ensurePage();
-    await ensureNotChallenge(target);
-    const dom = await target.evaluate(() => ({
-      text: String(document.body?.innerText || '').slice(0, 24000),
-      links: [...document.querySelectorAll('a[href]')].slice(0, 250).map(a => ({
-        text: String(a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 200),
-        href: a.href
-      })),
-      identifiers: [...document.querySelectorAll('[data-id],[data-item-id],[data-auction-id],[data-lot-id],a[href],input[type=hidden]')].slice(0, 500).map(e => ({tag:e.tagName.toLowerCase(),attributes:[...e.attributes].filter(a=>/^(data-|href$|name$|value$)/.test(a.name)).map(a=>[a.name,a.value.slice(0,200)])})).filter(e=>e.attributes.length),
-      findControls: [...document.querySelectorAll('input,button,[role=searchbox]')].slice(0, 100).map(e=>({tag:e.tagName.toLowerCase(),type:e.getAttribute('type'),placeholder:e.getAttribute('placeholder'),ariaLabel:e.getAttribute('aria-label'),outer:e.outerHTML.slice(0,400)})),
-      items: [...document.querySelectorAll('article,[data-testid],li')].slice(0, 250).map(e => ({
-        tag: e.tagName.toLowerCase(),
-        testId: e.getAttribute('data-testid'),
-        text: String(e.innerText || '').trim().slice(0, 650),
-        links: [...e.querySelectorAll('a[href]')].slice(0, 5).map(a => a.href)
-      })).filter(e => e.text),
-    }));
-    res.json({ ok: true, url: target.url(), title: await target.title(), targetId: await getPageTargetId(target), dom });
-  } catch (error) {
-    sendWebError(res, error, 'WEB_PAGE_CAPTURE_DOM_FAILED');
-  }
-});
-
-app.post('/page-capture-form', async (_req, res) => {
-  try {
-    const target = await ensurePage();
-    res.json(await capturePageArtifact(target, { screenshot: false }));
-  } catch (error) {
-    sendWebError(res, error, 'WEB_PAGE_CAPTURE_FORM_FAILED');
   }
 });
 
@@ -2102,7 +2248,7 @@ app.post('/wait-for-ready', async (req, res) => {
 app.post('/inspect', async (_req, res) => {
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
+    await ensureNotChallenge(target, { allowLoginInspection: true });
     const fields = await snapshotFields(target);
     res.json({
       ok: true,
@@ -2118,7 +2264,7 @@ app.post('/inspect', async (_req, res) => {
 app.post('/extract-form', async (_req, res) => {
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
+    await ensureNotChallenge(target, { allowLoginInspection: true });
     const fields = await snapshotFields(target);
     res.json({
       ok: true,
@@ -2278,27 +2424,32 @@ app.post('/upload-artifact', async (req, res) => {
       maxBytes: policy.maxUploadBytes
     });
 
-    await resolvedControl.locator.setInputFiles(guarded.filePath);
-    const uploaded = await resolvedControl.locator.evaluate(node => Array.from(node.files || []).map(file => ({
-      name: String(file.name || ''),
-      size: Number(file.size || 0),
-      type: String(file.type || '')
-    })));
-
-    const matched = uploaded.find(file => file.name === guarded.artifact.filename && file.size === guarded.artifact.size);
-    if (!matched) {
-      throw revisionError(
-        'WEB_VALIDATION_FAILED',
-        'File upload postcondition did not confirm the expected file name and size.',
-        {
-          controlId: resolvedControl.field.controlId || null,
-          expectedFilename: guarded.artifact.filename,
-          expectedSize: guarded.artifact.size,
-          uploaded
-        }
-      );
+    let selection;
+    if (resolvedControl.mode === 'filechooser') {
+      // A dropzone may create its native file input only on activation.
+      // Arm the chooser event before the single approved upload click.
+      try {
+        const [chooser] = await Promise.all([
+          target.waitForEvent('filechooser', { timeout: 12000 }),
+          resolvedControl.locator.click()
+        ]);
+        selection = await selectGuardedUploadFile({
+          locator: await chooser.element(),
+          artifact: guarded,
+          performSelection: filePath => chooser.setFiles(filePath)
+        });
+      } catch (error) {
+        if (error?.webStatus) throw error;
+        throw revisionError('WEB_UPLOAD_CHOOSER_UNVERIFIED',
+          'Upload trigger was activated but the file chooser outcome was not verified. Do not automatically retry.',
+          { externalActionMayHaveOccurred: true, automaticRetryAllowed: false, lastError: normalizeError(error).slice(0, 300) });
+      }
+    } else {
+      selection = await selectGuardedUploadFile({
+        locator: resolvedControl.locator,
+        artifact: guarded
+      });
     }
-
     const after = await capturePageArtifact(target, { screenshot: false });
     res.json({
       ok: true,
@@ -2306,11 +2457,12 @@ app.post('/upload-artifact', async (req, res) => {
       correlation,
       controlId: resolvedControl.field.controlId || null,
       artifact: guarded.artifact,
-      uploaded: {
-        filename: matched.name,
-        size: matched.size,
-        type: matched.type
-      },
+      uploadStage: 'input-file-selected',
+      selectionMechanism: resolvedControl.mode === 'filechooser' ? 'filechooser' : 'native-input',
+      selectionVerified: selection.selectionVerified,
+      serverAcceptanceVerified: selection.serverAcceptanceVerified,
+      observationAttempts: selection.observationAttempts,
+      uploaded: selection.uploaded,
       before: {
         targetId: before.targetId,
         pageRevision: before.pageRevision,
@@ -2331,12 +2483,13 @@ app.post('/click', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const target = await ensurePage();
-    await ensureNotChallenge(target);
-    const before = await capturePageArtifact(target, { screenshot: false });
-    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const text = String(req.body?.text || '').trim();
     const selector = String(req.body?.selector || '').trim();
     const nth = Number.isInteger(req.body?.nth) && req.body.nth >= 0 ? req.body.nth : 0;
+    const googleSso = isSafeGoogleSsoTrigger({ text, selector, nth });
+    await ensureNotChallenge(target, { allowLoginInspection: googleSso });
+    const before = await capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso });
+    assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     if (!text && !selector) {
       throw revisionError('WEB_CLICK_TARGET_REQUIRED', 'Either text or selector is required for click.');
     }
@@ -2358,12 +2511,12 @@ app.post('/click', async (req, res) => {
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
     await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-    await ensureNotChallenge(target);
-    const initialAfter = await capturePageArtifact(target, { screenshot: false });
+    await ensureNotChallenge(target, { allowLoginInspection: googleSso });
+    const initialAfter = await capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso });
     const settled = await settleClickTransition({
       before,
       initialAfter,
-      capture: () => capturePageArtifact(target, { screenshot: false })
+      capture: () => capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso })
     });
     const { after, transition } = settled;
     const verified = Object.values(transition).some(Boolean);
@@ -2437,6 +2590,7 @@ app.post('/submit-after-approval', async (req, res) => {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
+
     if (policy.requireApprovalForSubmit && (!approved || approvalText !== 'SUBMIT')) {
       throw revisionError('WEB_APPROVAL_REQUIRED', 'Explicit approvalText=SUBMIT is required for final submit actions.');
     }
@@ -2488,9 +2642,17 @@ app.post('/submit-after-approval', async (req, res) => {
     await locator.nth(nth).click();
     await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
     await ensureNotChallenge(target);
-    const after = await capturePageArtifact(target, { screenshot: false });
-    const postSubmitText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 20000));
-    const postcondition = classifySubmitPostcondition({ before, after, visibleText: postSubmitText });
+    const postcondition = await settleSubmitPostcondition({
+      before,
+      readSnapshot: async () => {
+        // Capture the URL, form and visible text together. A delayed SPA
+        // redirect must not mix a pre-navigation artifact with post-navigation
+        // confirmation text from a different document.
+        const after = await capturePageArtifact(target, { screenshot: false });
+        return { after, visibleText: after.visibleText };
+      }
+    });
+    const after = postcondition.after ?? null;
     res.json({
       ...postcondition,
       action: 'submit_after_approval',

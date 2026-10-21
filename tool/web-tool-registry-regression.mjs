@@ -30,7 +30,7 @@ const expectedMergedCapabilities = [
   "web.submit_after_approval",
 ];
 
-assert.equal(workerCapabilities.length, 30, "worker capability contract should preserve all merged worker routes");
+assert.equal(workerCapabilities.length, 28, "worker capability contract should preserve all canonical worker routes without duplicate capture endpoints");
 assert.equal(publicTools.length > workerCapabilities.length, true, "public Browsing surface should expose canonical Web aliases in addition to worker ABI capability names");
 for (const name of ["web.browser.targets", "web.browser.bind", "web.target.open", "web.page.capture", "web.page.wait", "web.page.click", "web.form.inspect", "web.form.fill", "web.form.upload", "web.form.submit", "web.job.open"]) {
   assert.equal(publicTools.includes(name), true, `public Browser MCP surface must include canonical tool: ${name}`);

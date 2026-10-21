@@ -8,7 +8,7 @@ export function classifyChallengeText(text) {
     };
   }
 
-  if (/2fa|two-factor|two factor|authentication code|authenticator|verification code|one-time code|one time code/i.test(normalized)) {
+  if (/(?:enter|provide|type|verify with|use your|we sent|sent you|check your)[\s\S]{0,120}(?:2fa|two-factor|two factor|authentication code|authenticator code|verification code|one-time code|one time code)|(?:2fa|two-factor|two factor)[\s\S]{0,80}(?:code|verification|authentication)/i.test(normalized)) {
     return {
       type: 'two_factor',
       requestedAction: 'Complete the second-factor verification manually in the bound browser target.'
@@ -23,6 +23,14 @@ export function classifyChallengeText(text) {
   }
 
   return null;
+}
+
+// A provider redirect is not a credential operation. It may be initiated only
+// through an exact, user-approved, text-labelled provider entry point; never
+// through arbitrary selectors, nth matches, passwords or submit controls.
+export function isSafeGoogleSsoTrigger({ text = '', selector = '', nth = 0 } = {}) {
+  return !String(selector || '').trim() && nth === 0
+    && /^(?:continue|sign\s?in|log\s?in|register|create account) (?:with|using) google$/i.test(String(text || '').trim());
 }
 
 export function classifyHumanBoundary({

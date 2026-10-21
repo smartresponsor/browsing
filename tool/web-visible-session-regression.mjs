@@ -12,7 +12,7 @@ let output='';worker.stdout.on('data',b=>output+=b);worker.stderr.on('data',b=>o
 const url=`http://127.0.0.1:${workerPort}`;
 try {
  for(let i=0;i<100;i++){try{const r=await fetch(url+'/healthz');if(r.ok)break;}catch{} await new Promise(r=>setTimeout(r,50));}
- const health=await (await fetch(url+'/healthz')).json();assert.equal(health.browserVisible,null);assert.equal(health.visibility_verified,false);
+ const health=await (await fetch(url+'/healthz')).json();assert.equal(health.browserVisible,false);assert.notEqual(health.visibility_verified,true);
  const post=async(route,body={})=>(await fetch(url+route,{method:'POST',headers:{authorization:'Bearer fixture-token','content-type':'application/json'},body:JSON.stringify(body)})).json();
  for(const route of ['/browser-bind','/open','/open-job','/page-capture','/inspect','/extract-form','/propose','/fill-after-approval','/upload-artifact','/click','/review-before-submit','/submit-after-approval']){
   const r=await post(route,{targetId:'invisible-target',url:'https://example.invalid',approved:false});

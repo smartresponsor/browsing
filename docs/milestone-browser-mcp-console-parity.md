@@ -88,6 +88,7 @@ This boundary is architectural, not optional.
 
 Rule: when a capability could be generic across repositories/consumers, prefer Console MCP. When it interprets or mutates browser/web/form domain state, keep it in Browser MCP.
 
+
 ## Major gaps relative to Console MCP maturity
 
 ### 1. Execution ownership must stay in Console MCP

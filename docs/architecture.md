@@ -2,6 +2,7 @@
 
 `browser-mcp` is the supervised browser/web capability consumer in the MCP workspace.
 
+
 Its canonical role is to provide browser/form semantics on top of Console-owned execution infrastructure.
 
 ## Ownership boundary
@@ -17,6 +18,7 @@ Console MCP owns:
 Browser MCP owns:
 
 - browser/web domain semantics;
+
 - target identity and page/form revisions;
 - semantic form extraction;
 - type-specific field mutations and postcondition verification;

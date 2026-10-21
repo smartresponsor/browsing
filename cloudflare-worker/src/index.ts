@@ -212,6 +212,7 @@ const MCP_TOOLS: McpTool[] = [
   {
     name: 'web.wait_for_ready',
     description: 'Wait for event-driven browser readiness such as DOM content, selector visibility, web idle, or mutation quietness.',
+
     route: '/wait-for-ready',
     inputSchema: {
       type: 'object',

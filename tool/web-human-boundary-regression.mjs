@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { classifyChallengeText, classifyHumanBoundary } from "../playwright-worker/src/human-boundary.js";
+import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger } from "../playwright-worker/src/human-boundary.js";
 
 assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
 assert.equal(classifyChallengeText("Enter your two-factor authentication code")?.type, "two_factor");
+assert.equal(classifyChallengeText("The system will create your account after you submit your application. Use a password. Use a one-time code."), null);
 assert.equal(classifyChallengeText("Security check: unusual activity detected")?.type, "security_challenge");
 assert.equal(classifyChallengeText("Explore Security and Asset Protection careers"), null);
 assert.equal(classifyChallengeText("Assistance programs for life’s challenges"), null);
@@ -56,11 +57,24 @@ assert.equal(
   "unsupported_control",
 );
 
+for (const text of ["Continue with Google", "Sign in with Google", "Log in using Google", "Create account with Google"]) {
+  assert.equal(isSafeGoogleSsoTrigger({ text }), true, text);
+}
+for (const input of [
+  { text: "Continue" }, { text: "Google" }, { text: "Submit with Google" },
+  { text: "Continue with Microsoft" }, { text: "Continue with Google", selector: ".button" },
+  { text: "Continue with Google", nth: 1 }, { text: "Continue with Google and submit" }
+]) assert.equal(isSafeGoogleSsoTrigger(input), false, JSON.stringify(input));
+
+// Login UI may be inspected, but the original boundary must still be recognized.
+assert.equal(classifyHumanBoundary({ text: "Sign in with your password", url: "https://example.test/login", hasPasswordField: true })?.type, "login_required");
+assert.equal(classifyHumanBoundary({ text: "Enter verification code", url: "https://example.test/login" })?.type, "two_factor");
+
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 for (const token of [
   "'WEB_HUMAN_ACTION_REQUIRED'",
   "requestedAction: boundary.requestedAction",
-  "hasPasswordField: Boolean(document.querySelector('input[type=\"password\"]'))",
+  "hasPasswordField: Array.from(document.querySelectorAll('input[type=\"password\"]')).some(element => {",
   "hasCredentialIdentifierField: Boolean(document.querySelector([",
   "consentText,",
   "alertDialogText,",
@@ -77,6 +91,10 @@ for (const token of [
   "sendWebError(res, error, 'WEB_REVIEW_CAPTURE_FAILED')",
   "sendWebError(res, error, 'WEB_OPEN_FAILED')",
   "sendWebError(res, error, 'WEB_OPEN_JOB_FAILED')",
+  "allowLoginInspection: true",
+  "allowLoginInspection: googleSso",
+  "semanticType === 'password'",
+  "isSafeGoogleSsoTrigger({ text, selector, nth })",
 ]) {
   assert.equal(workerSource.includes(token), true, `Human-boundary propagation invariant missing: ${token}`);
 }

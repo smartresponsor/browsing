@@ -16,8 +16,8 @@ export const webCapabilityAliases = Object.freeze({
   'web.job.open': 'web.open_job',
   'web.chatgpt.snapshot': 'web.chatgpt_snapshot',
   'web.page.capture': 'web.page_capture',
-  'web.page.capture.dom': 'web.page_capture_dom',
-  'web.page.capture.form': 'web.page_capture_form',
+  'web.page.capture.dom': 'web.page_capture',
+  'web.page.capture.form': 'web.page_capture',
   'web.page.wait': 'web.wait_for_ready',
   'web.page.click': 'web.click',
   'web.form.inspect': 'web.inspect',
@@ -114,8 +114,6 @@ export const webCapabilityContract = Object.freeze({
       riskClass: 'observation', binding: 'required', artifactBehavior: 'optional-screenshot',
       postcondition: 'page-revision-snapshot'
     }),
-    tool('web.page_capture_dom', '/page-capture-dom', 'read', { riskClass: 'observation', binding: 'required', postcondition: 'dom-snapshot' }),
-    tool('web.page_capture_form', '/page-capture-form', 'read', { riskClass: 'observation', binding: 'required', postcondition: 'form-snapshot' }),
     tool('web.wait_for_ready', '/wait-for-ready', 'read', {
       riskClass: 'observation', binding: 'required', timeoutClass: 'bounded-wait', postcondition: 'readiness-evidence'
     }),

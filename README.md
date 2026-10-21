@@ -2,6 +2,7 @@
 
 `Browsing` is the repository for the supervised browser/web capability consumer in the canonical MCP workspace. The runtime/service compatibility identifier remains `browser-mcp`.
 
+
 It provides browser/form domain semantics while Console MCP remains the ChatGPT-facing connector and generic execution/runtime owner.
 
 ## Canonical role

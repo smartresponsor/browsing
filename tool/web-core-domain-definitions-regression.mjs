@@ -30,6 +30,8 @@ for (const required of [
   "read_.web.browser.targets",
   "write.web.browser.bind",
   "read_.web.page.capture",
+  "read_.web.page.capture.dom",
+  "read_.web.page.capture.form",
   "read_.web.form.inspect",
   "write.web.page.click",
   "write.web.form.proposal.preview",
