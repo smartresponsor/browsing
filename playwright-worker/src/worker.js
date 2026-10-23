@@ -599,7 +599,11 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
     hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget,
     readOnlyDomCapture: allowCaptchaServiceErrorInspection
   });
-  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection) {
+  // A reCAPTCHA loader warning without a visible verification widget is not
+  // a human challenge. Preserve the guard for visible CAPTCHA, login, 2FA,
+  // consent and modal boundaries; do not block ordinary navigation on a footer warning.
+  const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
     throw revisionError(
       'WEB_HUMAN_ACTION_REQUIRED',
       'A human-action boundary was detected. Resolve it manually before Web resumes.',

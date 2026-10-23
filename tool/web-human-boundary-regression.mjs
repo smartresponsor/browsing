@@ -120,6 +120,8 @@ for (const token of [
   "boundary?.type === 'captcha_service_unavailable' && snapshot.hasVisibleChallengeWidget",
   "hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget",
   "canInspectCaptchaServiceError({",
+  "const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;",
+  "!safeReadOnlyServiceInspection && !nonBlockingLoaderWarning",
   "allowLoginInspection: googleSso",
   "semanticType === 'password'",
   "isSafeGoogleSsoTrigger({ text, selector, nth })",
