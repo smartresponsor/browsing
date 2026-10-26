@@ -9,11 +9,19 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      BROWSER_MCP_CONSOLE_ROOT: ${{ github.workspace }}/.ci-console
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/checkout@v4
+        with:
+          repository: smartresponsor/console-mcp
+          path: .ci-console
+      - run: npm ci --prefix .ci-console
+      - run: npm run build --prefix .ci-console
       - run: npm ci --prefix mcp-server
       - run: npm ci --prefix playwright-worker
       - run: npm exec --prefix playwright-worker -- playwright install --with-deps chromium
