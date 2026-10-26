@@ -37,7 +37,7 @@ assert.equal(
 
 let captureCount = 0;
 const before = {
-  targetId: "target-1",
+  targetId: "target-1", targetIdentityVerified: true, browserSessionId: "session-1",
   url: "https://example.test/results",
   pageRevision: "page-a",
   formRevision: "form-a",
@@ -52,7 +52,7 @@ const settled = await settleClickTransition({
     captureCount += 1;
     return captureCount < 2
       ? { ...before }
-      : { ...before, pageRevision: "page-b" };
+      : { ...before, pageRevision: "page-b", url: "https://example.test/details" };
   },
 });
 assert.equal(settled.settled, true, "delayed SPA revision change must be observed within the bounded settling window");
@@ -62,7 +62,7 @@ assert.equal(captureCount, 2, "settling must poll read-only evidence without rep
 for (const token of [
   "settleClickTransition({",
   "observedDelayedTransition: settled.settled",
-  "capture: () => capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso })",
+  "capture: () => captureActionArtifact(target, { screenshot: false, allowLoginInspection: googleSso, controlLocator })",
 ]) {
   assert.equal(worker.includes(token), true, `web.click settling invariant missing: ${token}`);
 }

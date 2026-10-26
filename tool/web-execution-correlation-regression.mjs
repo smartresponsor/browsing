@@ -24,8 +24,8 @@ for (const token of [
   "action: 'submit_after_approval'",
   "sendWebError(res, error, 'WEB_FORM_MUTATION_FAILED', correlation)",
   "sendWebError(res, error, 'WEB_UPLOAD_FAILED', correlation)",
-  "sendWebError(res, error, 'WEB_CLICK_FAILED', correlation)",
-  "sendWebError(res, error, 'WEB_SUBMIT_FAILED', correlation)",
+  "sendActionError(res, error, 'WEB_CLICK_FAILED', correlation, actionAttempted)",
+  "sendActionError(res, error, 'WEB_SUBMIT_FAILED', correlation, actionAttempted)",
 ]) {
   assert.equal(worker.includes(token), true, `Web worker correlation invariant missing: ${token}`);
 }

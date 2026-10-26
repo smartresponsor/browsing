@@ -110,7 +110,7 @@ for (const token of [
   "sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED')",
   "sendWebError(res, error, 'WEB_INSPECT_FAILED')",
   "sendWebError(res, error, 'WEB_FORM_EXTRACT_FAILED')",
-  "sendWebError(res, error, 'WEB_CLICK_FAILED', correlation)",
+  "sendActionError(res, error, 'WEB_CLICK_FAILED', correlation, actionAttempted)",
   "sendWebError(res, error, 'WEB_REVIEW_CAPTURE_FAILED')",
   "sendWebError(res, error, 'WEB_OPEN_FAILED')",
   "sendWebError(res, error, 'WEB_OPEN_JOB_FAILED')",
