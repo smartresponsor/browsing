@@ -4,13 +4,14 @@ import fs from "node:fs";
 import { classifySubmitPostcondition, settleSubmitPostcondition } from "../playwright-worker/src/submit-postcondition.js";
 
 const before = {
+  targetId: "target-1", targetIdentityVerified: true, browserSessionId: "session-1",
   url: "https://example.test/apply",
   pageRevision: "before-revision",
 };
 
 const verified = classifySubmitPostcondition({
   before,
-  after: {
+  after: { ...before,
     url: "https://example.test/confirmation",
     pageRevision: "after-revision",
   },
@@ -34,7 +35,7 @@ assert.equal(validation.retrySafe, false);
 
 const conflicting = classifySubmitPostcondition({
   before,
-  after: {
+  after: { ...before,
     url: "https://example.test/confirmation",
     pageRevision: "after-revision",
   },
@@ -47,7 +48,7 @@ assert.equal(conflicting.retrySafe, false);
 
 const unverified = classifySubmitPostcondition({
   before,
-  after: {
+  after: { ...before,
     url: "https://example.test/next-step",
     pageRevision: "after-revision",
   },
@@ -67,7 +68,7 @@ const delayed = await settleSubmitPostcondition({
   readSnapshot: async () => {
     observations++;
     return {
-      after: { url: observations === 3 ? 'https://example.test/confirmation' : before.url, pageRevision: String(observations) },
+      after: { ...before, url: observations === 3 ? 'https://example.test/confirmation' : before.url, pageRevision: String(observations) },
       visibleText: observations === 3 ? 'Your application has been received.' : 'Submitting...'
     };
   },
@@ -98,13 +99,13 @@ const evergreenThanks = {
 };
 const evergreenClassified = classifySubmitPostcondition({
   before: evergreenThanks,
-  after: { url: before.url, pageRevision: 'changed' },
+  after: { ...before, url: before.url, pageRevision: 'changed' },
   visibleText: evergreenThanks.visibleText
 });
 assert.equal(evergreenClassified.status, 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED');
 const newConfirmationRoute = classifySubmitPostcondition({
   before: evergreenThanks,
-  after: { url: 'https://example.test/apply/confirmation', pageRevision: 'confirmed' },
+  after: { ...before, url: 'https://example.test/apply/confirmation', pageRevision: 'confirmed' },
   visibleText: 'Thank you for applying. Your application has been received.'
 });
 assert.equal(newConfirmationRoute.status, 'WEB_SUBMIT_VERIFIED');
@@ -132,11 +133,11 @@ const greenhouseDelayed = await settleSubmitPostcondition({
     greenhouseReads++;
     return greenhouseReads === 4
       ? {
-          after: { url: 'https://job-boards.greenhouse.io/syllo/jobs/4374366009/confirmation', pageRevision: 'confirmed' },
+          after: { ...before, url: 'https://job-boards.greenhouse.io/syllo/jobs/4374366009/confirmation', pageRevision: 'confirmed' },
           visibleText: 'Thank you for applying. Your application has been received.'
         }
       : {
-          after: { url: greenhouseBefore.url, pageRevision: 'still-pending' },
+          after: { ...before, url: greenhouseBefore.url, pageRevision: 'still-pending' },
           visibleText: `Apply for this job ${greenhouseHint} Resume/CV Submit application`
         };
   }
@@ -154,7 +155,7 @@ const transitionalValidation = await settleSubmitPostcondition({
     transitionalValidationReads++;
     return transitionalValidationReads === 1
       ? { after: before, visibleText: 'Please correct the errors below.' }
-      : { after: { url: 'https://example.test/confirmation' }, visibleText: 'Your application has been received.' };
+      : { after: { ...before, url: 'https://example.test/confirmation' }, visibleText: 'Your application has been received.' };
   }
 });
 assert.equal(transitionalValidation.status, 'WEB_SUBMIT_VERIFIED');

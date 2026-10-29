@@ -1,3 +1,5 @@
+import { expectedOutcomeMatches, identityFailure, observationSummary } from './action-postcondition.js';
+
 /**
  * Observe a single already-triggered submit without ever repeating its mutation.
  * A transient SPA transition may reveal the confirmation several moments later.
@@ -6,6 +8,8 @@
 export async function settleSubmitPostcondition({
   before,
   readSnapshot,
+  expectedOutcome,
+  timeoutMs = 12000,
   maxAttempts = 12,
   intervalMs = 750,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -13,40 +17,64 @@ export async function settleSubmitPostcondition({
   if (typeof readSnapshot !== 'function') throw new TypeError('readSnapshot is required');
   const attempts = Math.min(16, Math.max(1, Number.isInteger(maxAttempts) ? maxAttempts : 12));
   const pause = Math.min(1500, Math.max(0, Number.isFinite(intervalMs) ? intervalMs : 750));
+  const startedAt = Date.now();
+  const budgetMs = Math.min(12000, Math.max(1, timeoutMs));
+  const observations = [];
   let latest = null;
   let lastError = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    if (attempt > 1) await sleep(pause);
+    if (attempt > 1) await sleep(Math.min(pause, Math.max(0, budgetMs - (Date.now() - startedAt))));
     try {
-      const snapshot = await readSnapshot();
+      const remaining = budgetMs - (Date.now() - startedAt);
+      if (remaining <= 0) break;
+      let timer;
+      const snapshot = await Promise.race([
+        Promise.resolve().then(readSnapshot),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Observation deadline exceeded')), remaining); })
+      ]).finally(() => clearTimeout(timer));
       if (!snapshot?.after) throw new Error('No page evidence');
+      const identityError = identityFailure(before, snapshot.after);
+      if (identityError) return {
+        ok: false, status: 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED', verified: false,
+        retrySafe: false, externalActionMayHaveOccurred: true, outcome: 'unresolved',
+        after: snapshot.after, observationAttempts: attempt,
+        evidence: { kind: identityError }, observations,
+        elapsedMs: Date.now() - startedAt
+      };
       const result = classifySubmitPostcondition({
         before,
         after: snapshot.after,
-        visibleText: snapshot.visibleText
+        visibleText: snapshot.visibleText,
+        expectedOutcome
       });
-      latest = { ...result, after: snapshot.after, observationAttempts: attempt };
+      observations.push(observationSummary(before, snapshot.after, attempt, Date.now() - startedAt, result));
+      latest = { ...result, after: snapshot.after, observationAttempts: attempt, observations,
+        elapsedMs: Date.now() - startedAt, externalActionMayHaveOccurred: true,
+        outcome: result.verified ? 'success' : result.status === 'WEB_SUBMIT_VALIDATION_FAILED' ? 'rejected' : 'unresolved' };
       // A form may display stale validation text while the accepted submission
       // is still navigating to its confirmation screen. Only success is final.
       if (result.verified) return latest;
     } catch (error) {
+      latest = null;
       lastError = String(error?.message || error).slice(0, 300);
+      observations.push({ attempt, elapsedMs: Date.now() - startedAt, kind: 'observation-error', error: lastError });
     }
   }
   return latest
-    ? { ...latest, observationAttempts: attempts, ...(lastError ? { lastObservationError: lastError } : {}) }
+    ? { ...latest, observationAttempts: observations.length, elapsedMs: Date.now() - startedAt, ...(lastError ? { lastObservationError: lastError } : {}) }
     : {
         ok: false,
         status: 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED',
         verified: false,
         retrySafe: false,
         externalActionMayHaveOccurred: true,
-        observationAttempts: attempts,
+        observationAttempts: observations.length,
+        elapsedMs: Date.now() - startedAt, observations, outcome: 'unresolved',
         evidence: { kind: 'observation-unavailable', lastObservationError: lastError }
       };
 }
 
-export function classifySubmitPostcondition({ before, after, visibleText }) {
+export function classifySubmitPostcondition({ before, after, visibleText, expectedOutcome }) {
   const text = normalize(visibleText);
   const lower = text.toLowerCase();
 
@@ -91,6 +119,19 @@ export function classifySubmitPostcondition({ before, after, visibleText }) {
         kind: 'validation-text',
         text: extractEvidence(text, validationMatch)
       }
+    };
+  }
+
+  if (expectedOutcome) {
+    const matched = expectedOutcomeMatches(expectedOutcome, after?.expectedObservation, after?.url);
+    const existedBefore = expectedOutcomeMatches({ ...expectedOutcome, url: undefined },
+      before?.expectedObservation, before?.url);
+    return {
+      ok: matched && !existedBefore,
+      status: matched && !existedBefore ? 'WEB_SUBMIT_VERIFIED' : 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED',
+      verified: matched && !existedBefore, retrySafe: false, externalActionMayHaveOccurred: true,
+      evidence: { kind: 'expected-outcome', matched, existedBefore,
+        expectedOutcome, observation: after?.expectedObservation ?? null }
     };
   }
 

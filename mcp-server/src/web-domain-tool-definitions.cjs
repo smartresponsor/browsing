@@ -6,7 +6,14 @@ const webExecutionCorrelationSchema = z.object({
   invocationId: z.string().min(1).max(200).optional(),
 }).strict();
 
-function createWebCoreDomainToolDefinitions() {
+function createWebCoreDomainToolDefinitions(schemaZod = z) {
+  // Consumers extend these objects: construct every nested schema with their Zod.
+  const z = schemaZod;
+  const webExecutionCorrelationSchema = z.object({
+    taskId: z.string().min(1).max(200).optional(),
+    runId: z.string().min(1).max(200).optional(),
+    invocationId: z.string().min(1).max(200).optional(),
+  }).strict();
   return Object.freeze([
     definition({
       canonicalName: 'web.browser.targets',
@@ -229,6 +236,16 @@ function createWebCoreDomainToolDefinitions() {
         expectedFormRevision: z.string().optional(),
         correlation: webExecutionCorrelationSchema.optional(),
         reviewHash: z.string().optional(),
+        expectedOutcome: z.object({
+          url: z.string().url().max(2048).refine(value => {
+            const url = new URL(value);
+            return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password;
+          }).optional(),
+          element: z.object({
+            selector: z.string().trim().min(1).max(500),
+            text: z.string().trim().min(1).max(500),
+          }).strict(),
+        }).strict().optional(),
         browserSession: z.enum(['isolated', 'visible', 'background', 'grants']).optional(),
         text: z.string().optional(),
         selector: z.string().optional(),

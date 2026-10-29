@@ -46,6 +46,7 @@ import {
   normalizeBrowserChannel,
   parseList
 } from './browser-policy.js';
+import { assertActionIdentity, validateExpectedOutcome, observeExpectedOutcome, readControlState, writeActionEvidence } from './action-postcondition.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
@@ -81,6 +82,7 @@ const execFileAsync = promisify(execFile);
 
 let browser;
 let connectedBrowser;
+const browserSessionIds = new WeakMap();
 let page;
 let sessionStartedAt = null;
 let pageVisitCount = 0;
@@ -848,7 +850,7 @@ async function snapshotChatGptPage(target) {
   };
 }
 
-const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list], [role="slider"], [role="spinbutton"]';
+const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list], [role="slider"], [role="spinbutton"], [role="checkbox"], [role="radio"], [aria-pressed], [aria-selected]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
   const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
@@ -1016,6 +1018,12 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       blockedReason,
       sensitive: semanticType === 'password',
       checked: semanticType === 'switch' ? node.getAttribute('aria-checked') === 'true' : semanticType === 'checkbox' || semanticType === 'radio' ? Boolean(node.checked) : null,
+      accessibleState: {
+        checked: node.getAttribute('aria-checked'),
+        pressed: node.getAttribute('aria-pressed'),
+        selected: node.getAttribute('aria-selected'),
+        expanded: node.getAttribute('aria-expanded')
+      },
       multiple: Boolean(node.multiple),
       autocompleteMode: semanticType === 'autocomplete' ? (tag === 'input' && node.list ? 'native-datalist' : 'aria') : null,
       radioGroup: semanticType === 'radio' ? {
@@ -1155,6 +1163,19 @@ function normalizeExecutionCorrelation(body) {
   };
 }
 
+function sendActionError(res, error, fallbackStatus, correlation, attempted) {
+  const submit = fallbackStatus === 'WEB_SUBMIT_FAILED';
+  res.status(409).json({
+    ok: false, verified: false, correlation,
+    status: attempted ? (submit ? 'WEB_SUBMIT_POSTCONDITION_UNVERIFIED' : 'WEB_CLICK_POSTCONDITION_UNVERIFIED')
+      : (error?.webStatus || fallbackStatus),
+    outcome: attempted ? 'unresolved' : 'not_executed',
+    retrySafe: !attempted, externalActionMayHaveOccurred: attempted,
+    mutation_attempted: attempted, automatic_retry_allowed: false,
+    evidence: { kind: 'action-error', error: normalizeError(error).slice(0, 300) }
+  });
+}
+
 function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', correlation = null) {
   res.status(409).json({
     ok: false,
@@ -1163,6 +1184,24 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
   });
+}
+
+async function captureActionArtifact(target, options = {}) {
+  const documentBefore = await target.evaluate(() => ({ url: location.href, timeOrigin: performance.timeOrigin }));
+  const artifact = await capturePageArtifact(target, options);
+  // Bind DOM observations to one document URL and real CDP target identity.
+  const url = artifact.url;
+  artifact.expectedObservation = await observeExpectedOutcome(target, options.expectedOutcome);
+  if (options.controlLocator && await options.controlLocator.count() === 1) {
+    artifact.controlState = await options.controlLocator.evaluate(readControlState);
+  }
+  const documentAfter = await target.evaluate(() => ({ url: location.href, timeOrigin: performance.timeOrigin }));
+  if (documentBefore.url !== url || documentAfter.url !== url ||
+      documentBefore.timeOrigin !== documentAfter.timeOrigin ||
+      target.url() !== url || await getPageTargetId(target) !== artifact.targetId) {
+    throw revisionError('WEB_TARGET_STALE', 'Document changed during action evidence capture.');
+  }
+  return artifact;
 }
 
 async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
@@ -1174,6 +1213,10 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
   const title = await target.title();
   const textHash = hashChatGptSnapshotText(visibleText);
   const targetId = await getPageTargetId(target);
+  const context = target.context();
+  if (!browserSessionIds.has(context)) browserSessionIds.set(context, randomUUID());
+  const browserSessionId = browserSessionIds.get(context);
+  const targetIdentityVerified = !targetId.startsWith('fallback:');
   const revisions = buildRevisionEnvelope({ targetId, url, title, textHash, fields });
   const artifact = {
     ok: true,
@@ -1183,7 +1226,9 @@ async function capturePageArtifact(target, { screenshot = false, screenshotPrefi
     visibleText,
     fields,
     ...revisions,
-    submitCandidates
+    submitCandidates,
+    browserSessionId,
+    targetIdentityVerified
   };
   const reviewHash = hashStableJson({
     targetId: artifact.targetId,
@@ -1963,8 +2008,13 @@ app.use(async (req, res, next) => {
             : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
         if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
-        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
-      })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
+        const result = { ...body, ...(after.ok ? {} : { ok: false, verified: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome: 'unresolved', retrySafe: false, externalActionMayHaveOccurred: req.method === 'POST' && !req.path.startsWith('/page-capture'), outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after };
+        if (['/click', '/submit-after-approval'].includes(req.path)) {
+          try { result.evidenceArtifact = await writeActionEvidence(req.path, result); }
+          catch { result.evidencePersistenceError = 'ACTION_EVIDENCE_WRITE_FAILED'; }
+        }
+        send(result);
+      })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', verified: false, outcome: 'unresolved', retrySafe: false, externalActionMayHaveOccurred: true, outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
       return res;
     };
     return visibleRequest.run({ ...before, preserveActiveTarget }, next);
@@ -2539,6 +2589,7 @@ app.post('/upload-artifact', async (req, res) => {
 
 app.post('/click', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
+  let actionAttempted = false;
   try {
     const target = await ensurePage();
     const text = String(req.body?.text || '').trim();
@@ -2566,18 +2617,19 @@ app.post('/click', async (req, res) => {
       throw revisionError('WEB_FIELD_NOT_FOUND', 'Click target was not found at the requested index.', { count, nth, selector: selector || null, text: text || null });
     }
     await locator.nth(nth).evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+    const controlLocator = locator.nth(nth);
+    before.controlState = await controlLocator.evaluate(readControlState);
+    assertActionIdentity(before);
+    actionAttempted = true;
     await locator.nth(nth).click();
     await target.bringToFront().catch(() => {});
-    await target.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
-    await ensureNotChallenge(target, { allowLoginInspection: googleSso });
-    const initialAfter = await capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso });
     const settled = await settleClickTransition({
       before,
-      initialAfter,
-      capture: () => capturePageArtifact(target, { screenshot: false, allowLoginInspection: googleSso })
+      capture: () => captureActionArtifact(target, { screenshot: false, allowLoginInspection: googleSso, controlLocator })
     });
-    const { after, transition } = settled;
-    const verified = Object.values(transition).some(Boolean);
+    const { transition } = settled;
+    const after = settled.after ?? {};
+    const verified = !settled.identityError && (transition.urlChanged || transition.controlStateChanged) === true;
     res.json({
       ok: verified,
       status: verified ? 'WEB_CLICK_TRANSITION_VERIFIED' : 'WEB_CLICK_POSTCONDITION_UNVERIFIED',
@@ -2585,6 +2637,8 @@ app.post('/click', async (req, res) => {
       retrySafe: false,
       externalActionMayHaveOccurred: true,
       correlation,
+      outcome: verified ? 'success' : 'unresolved',
+      evidence: { kind: settled.identityError || 'action-transition', observations: settled.observations },
       clicked: selector || text,
       nth,
       settling: {
@@ -2596,21 +2650,25 @@ app.post('/click', async (req, res) => {
         targetId: before.targetId,
         pageRevision: before.pageRevision,
         formRevision: before.formRevision,
-        url: before.url
+        url: before.url,
+        browserSessionId: before.browserSessionId,
+        controlState: before.controlState
       },
       after: {
         targetId: after.targetId,
         pageRevision: after.pageRevision,
         formRevision: after.formRevision,
         url: after.url,
-        title: after.title
+        title: after.title,
+        browserSessionId: after.browserSessionId,
+        controlState: after.controlState
       },
       recommendedAction: verified
         ? 'Continue from the returned target/page/form revisions.'
         : 'Inspect the current page before deciding the next action. Do not automatically repeat the click.'
     });
   } catch (error) {
-    sendWebError(res, error, 'WEB_CLICK_FAILED', correlation);
+    sendActionError(res, error, 'WEB_CLICK_FAILED', correlation, actionAttempted);
   }
 });
 
@@ -2644,7 +2702,9 @@ app.post('/review-before-submit', async (_req, res) => {
 
 app.post('/submit-after-approval', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
+  let actionAttempted = false;
   try {
+    const expectedOutcome = validateExpectedOutcome(req.body?.expectedOutcome);
     const policy = getPolicy();
     const approved = req.body?.approved === true;
     const approvalText = String(req.body?.approvalText || '');
@@ -2655,7 +2715,8 @@ app.post('/submit-after-approval', async (req, res) => {
 
     const target = await ensurePage();
     await ensureNotChallenge(target);
-    const before = await capturePageArtifact(target, { screenshot: false });
+    const before = await captureActionArtifact(target, { screenshot: false, expectedOutcome });
+    assertActionIdentity(before);
     assertExpectedRevisions(expectedRevisionsFromBody(req.body), before);
     const expectedReviewHash = String(req.body?.reviewHash || '').trim();
     if (expectedReviewHash && expectedReviewHash !== before.reviewHash) {
@@ -2697,16 +2758,16 @@ app.post('/submit-after-approval', async (req, res) => {
       throw new Error(`Submit target not found. Matches: ${count}. Requested index: ${nth}.`);
     }
 
+    actionAttempted = true;
     await locator.nth(nth).click();
-    await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-    await ensureNotChallenge(target);
     const postcondition = await settleSubmitPostcondition({
       before,
+      expectedOutcome,
       readSnapshot: async () => {
         // Capture the URL, form and visible text together. A delayed SPA
         // redirect must not mix a pre-navigation artifact with post-navigation
         // confirmation text from a different document.
-        const after = await capturePageArtifact(target, { screenshot: false });
+        const after = await captureActionArtifact(target, { screenshot: false, expectedOutcome });
         return { after, visibleText: after.visibleText };
       }
     });
@@ -2720,13 +2781,16 @@ app.post('/submit-after-approval', async (req, res) => {
       clicked: selector || text || 'default-submit',
       nth,
       beforeReviewHash: before.reviewHash,
+      before: { targetId: before.targetId, browserSessionId: before.browserSessionId,
+        url: before.url, pageRevision: before.pageRevision, formRevision: before.formRevision,
+        expectedObservation: before.expectedObservation },
       after,
       recommendedAction: postcondition.verified
         ? 'Submission confirmation was detected. Preserve the returned evidence.'
         : 'Inspect the current page and resolve validation or confirmation uncertainty. Do not automatically repeat submit.'
     });
   } catch (error) {
-    sendWebError(res, error, 'WEB_SUBMIT_FAILED', correlation);
+    sendActionError(res, error, 'WEB_SUBMIT_FAILED', correlation, actionAttempted);
   }
 });
 
