@@ -66,7 +66,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
-import { classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
+import { classifyHumanBoundary, humanBoundaryErrorCode, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
@@ -626,7 +626,7 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
   const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;
   if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !(allowConsentInspection && boundary.type === 'consent_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
     throw revisionError(
-      'WEB_HUMAN_ACTION_REQUIRED',
+      humanBoundaryErrorCode(boundary),
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
       {
         boundary: {

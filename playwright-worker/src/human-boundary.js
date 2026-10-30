@@ -1,3 +1,15 @@
+export function humanBoundaryErrorCode(boundary) {
+  switch (boundary?.type) {
+    case 'consent_required': return 'WEB_COOKIE_ACTION_REQUIRED';
+    case 'captcha':
+    case 'captcha_service_unavailable': return 'WEB_CAPTCHA_ACTION_REQUIRED';
+    case 'login_required':
+    case 'security_challenge': return 'WEB_AUTH_ACTION_REQUIRED';
+    case 'two_factor': return 'WEB_MFA_ACTION_REQUIRED';
+    default: return 'WEB_HUMAN_ACTION_REQUIRED';
+  }
+}
+
 export function classifyChallengeText(text) {
   const normalized = String(text || '');
   // A failed reCAPTCHA loader is not proof of an active verification widget.

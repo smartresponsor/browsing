@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from "../playwright-worker/src/human-boundary.js";
+import { classifyChallengeText, classifyHumanBoundary, humanBoundaryErrorCode, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from "../playwright-worker/src/human-boundary.js";
+
+for (const [type, expected] of Object.entries({
+  consent_required: 'WEB_COOKIE_ACTION_REQUIRED',
+  captcha: 'WEB_CAPTCHA_ACTION_REQUIRED',
+  captcha_service_unavailable: 'WEB_CAPTCHA_ACTION_REQUIRED',
+  login_required: 'WEB_AUTH_ACTION_REQUIRED',
+  security_challenge: 'WEB_AUTH_ACTION_REQUIRED',
+  two_factor: 'WEB_MFA_ACTION_REQUIRED',
+  unexpected_modal: 'WEB_HUMAN_ACTION_REQUIRED',
+  unsupported_control: 'WEB_HUMAN_ACTION_REQUIRED',
+  constructor: 'WEB_HUMAN_ACTION_REQUIRED',
+})) assert.equal(humanBoundaryErrorCode({type}), expected, type);
+assert.equal(humanBoundaryErrorCode(null), 'WEB_HUMAN_ACTION_REQUIRED');
+assert.equal(humanBoundaryErrorCode(undefined), 'WEB_HUMAN_ACTION_REQUIRED');
+assert.equal(humanBoundaryErrorCode({type:'__proto__'}), 'WEB_HUMAN_ACTION_REQUIRED');
+assert.equal(humanBoundaryErrorCode(classifyHumanBoundary({consentText:'Accept all cookies or reject.'})), 'WEB_COOKIE_ACTION_REQUIRED');
+assert.equal(humanBoundaryErrorCode(classifyHumanBoundary({text:'Please verify you are human.'})), 'WEB_CAPTCHA_ACTION_REQUIRED');
 
 assert.equal(classifyChallengeText("Welcome to the application"), null);
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
