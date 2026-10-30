@@ -44,6 +44,13 @@ for (const required of [
 }
 
 const proposal = definitions.find(tool => tool.consoleName === 'write.web.form.proposal.preview');
+const nonemptyFields=[{fieldId:'fixture-field',proposedValue:'synthetic fixture value',checked:false}];
+assert.equal(proposal.inputSchema.safeParse({fields:nonemptyFields,browserSession:'visible',targetId:'A'.repeat(32)}).success,true,
+  'Nonempty field records must parse under the installed Zod version; empty arrays hide record API incompatibility');
+const fill=definitions.find(tool=>tool.consoleName==='write.web.form.fill');
+assert.equal(fill.inputSchema.shape.fields.safeParse(nonemptyFields).success,true,
+  'Fill must preserve typed values in nonempty field records');
+assert.equal(fill.inputSchema.shape.fields.safeParse(['invalid-field-record']).success,false);
 assert.equal(proposal.inputSchema.safeParse({fields: [], browserSession: 'visible', targetId: 'A'.repeat(32)}).success, true,
   'Proposal must accept explicit visible session and exact target to avoid isolated fallback');
 assert.equal(proposal.inputSchema.safeParse({fields: [], browserSession: 'visible', targetId: 'invalid'}).success, false,
