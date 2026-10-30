@@ -531,7 +531,7 @@ function describeJobProfile(targetUrl) {
   };
 }
 
-async function ensureNotChallenge(target, { allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
+async function ensureNotChallenge(target, { allowLoginInspection = false, allowCaptchaServiceErrorInspection = false, allowConsentInspection = false } = {}) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
@@ -624,7 +624,7 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
   // a human challenge. Preserve the guard for visible CAPTCHA, login, 2FA,
   // consent and modal boundaries; do not block ordinary navigation on a footer warning.
   const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;
-  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !(allowConsentInspection && boundary.type === 'consent_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
     throw revisionError(
       'WEB_HUMAN_ACTION_REQUIRED',
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
@@ -1165,8 +1165,8 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   });
 }
 
-async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
-  await ensureNotChallenge(target, { allowLoginInspection, allowCaptchaServiceErrorInspection });
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false, allowConsentInspection = false } = {}) {
+  await ensureNotChallenge(target, { allowLoginInspection, allowCaptchaServiceErrorInspection, allowConsentInspection });
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
@@ -2242,7 +2242,8 @@ app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (re
     const artifact = await capturePageArtifact(target, {
       screenshot: req.body?.screenshot === true,
       allowLoginInspection: true,
-      allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true
+      allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true,
+      allowConsentInspection: captureView === 'dom' && req.body?.screenshot !== true
     });
     if (captureView === 'dom') {
       const dom = await target.evaluate(() => {
