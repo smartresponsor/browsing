@@ -49,6 +49,7 @@ import {
   parseList
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
+import { createFillRateLimiter } from './fill-rate-limiter.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
@@ -88,6 +89,7 @@ let sessionStartedAt = null;
 let pageVisitCount = 0;
 let formFillCount = 0;
 let fieldWriteCount = 0;
+const fillRateLimiter = createFillRateLimiter();
 let lastExternalAttachError = '';
 function parseBrowserWorkerToken() {
   return String(process.env.BROWSER_MCP_BROWSER_WORKER_TOKEN || '').trim();
@@ -183,6 +185,8 @@ function getPolicy() {
     maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
     maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
     maxFieldWrites: Number(process.env.BROWSER_MCP_MAX_FIELD_WRITES || 80),
+    maxFieldsPerOperation: Number(process.env.BROWSER_MCP_MAX_FIELDS_PER_OPERATION || 20),
+    fillRateWindowMs: Number(process.env.BROWSER_MCP_FILL_RATE_WINDOW_SECONDS || 60) * 1000,
     allowedHosts: parseList(process.env.BROWSER_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.BROWSER_MCP_DENIED_HOSTS),
     browserChannel,
@@ -226,6 +230,7 @@ async function closeSession() {
   pageVisitCount = 0;
   formFillCount = 0;
   fieldWriteCount = 0;
+  fillRateLimiter.reset();
 }
 
 async function closeSessionWithTimeout(timeoutMs = 10000) {
@@ -256,6 +261,8 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       maxPageVisits: policy.maxPageVisits,
       maxFormFills: policy.maxFormFills,
       maxFieldWrites: policy.maxFieldWrites,
+      maxFieldsPerOperation: policy.maxFieldsPerOperation,
+      fillRateWindowSeconds: policy.fillRateWindowMs / 1000,
       externalVisibleBrowser: policy.externalVisibleBrowser,
       externalVisibleChrome: policy.externalVisibleChrome,
       remoteDebuggingPort: policy.remoteDebuggingPort,
@@ -266,7 +273,8 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       elapsedSeconds: sessionStartedAt ? Math.round((Date.now() - sessionStartedAt) / 1000) : null,
       pageVisitCount,
       formFillCount,
-      fieldWriteCount
+      fieldWriteCount,
+      fillRate: fillRateLimiter.snapshot({ windowMs: policy.fillRateWindowMs })
     },
     browser: {
       contextOpen: Boolean(browser),
@@ -1174,6 +1182,8 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   res.status(409).json({
     ok: false,
     status: typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus,
+    ...(['WEB_RATE_LIMITED', 'WEB_OPERATION_SIZE_LIMIT'].includes(error?.webStatus)
+      ? { automatic_retry_allowed: false, mutation_attempted: false } : {}),
     error: normalizeError(error),
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
@@ -2419,6 +2429,8 @@ app.post('/propose', async (req, res) => {
 
 app.post('/fill-after-approval', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
+  let quotaReservation = null;
+  let fillMutationAttempted = false;
   try {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
@@ -2428,13 +2440,13 @@ app.post('/fill-after-approval', async (req, res) => {
     }
 
     const requestedFields = Array.isArray(req.body?.fields) ? req.body.fields : [];
-    if (formFillCount >= policy.maxFormFills) {
-      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Form fill limit reached for this supervised session.', { limit: policy.maxFormFills, kind: 'form-fill' });
-    }
-
-    if (fieldWriteCount + requestedFields.length > policy.maxFieldWrites) {
-      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Field write limit would be exceeded for this supervised session.', { limit: policy.maxFieldWrites, kind: 'field-write', requestedWrites: requestedFields.length });
-    }
+    quotaReservation = fillRateLimiter.reserve({
+      requestedWrites: requestedFields.length,
+      maxFieldsPerOperation: policy.maxFieldsPerOperation,
+      maxFormFills: policy.maxFormFills,
+      maxFieldWrites: policy.maxFieldWrites,
+      windowMs: policy.fillRateWindowMs,
+    });
 
     const target = await ensurePage();
     await ensureNotChallenge(target);
@@ -2461,6 +2473,7 @@ app.post('/fill-after-approval', async (req, res) => {
     const filled = [];
     for (const item of requestedFields) {
       const resolved = await resolveRequestedFieldLocator(target, item, fields);
+      fillMutationAttempted = true;
       const evidence = await writeField(target, resolved.locator, item.value, resolved.field);
       filled.push({
         controlId: resolved.field.controlId || item.controlId || null,
@@ -2469,6 +2482,8 @@ app.post('/fill-after-approval', async (req, res) => {
       });
     }
 
+    fillRateLimiter.commit(quotaReservation);
+    quotaReservation = null;
     formFillCount += 1;
     fieldWriteCount += requestedFields.length;
     const after = await capturePageArtifact(target, { screenshot: false });
@@ -2492,6 +2507,11 @@ app.post('/fill-after-approval', async (req, res) => {
       },
     });
   } catch (error) {
+    // A write that started may have partially completed: retain its rate budget.
+    if (quotaReservation !== null) {
+      if (fillMutationAttempted) fillRateLimiter.commit(quotaReservation);
+      else fillRateLimiter.release(quotaReservation);
+    }
     sendWebError(res, error, 'WEB_FORM_MUTATION_FAILED', correlation);
   }
 });
