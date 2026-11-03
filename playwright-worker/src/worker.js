@@ -650,6 +650,19 @@ async function ensurePage() {
     throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment required; competing browser launch denied.');
   }
 
+  // CDP detach can leave a truthy but unusable Playwright context. Reattach only;
+  // never launch, navigate or replay a user operation on the shared Edge profile.
+  if (policy.externalVisibleChrome && connectedBrowser && !connectedBrowser.isConnected()) {
+    connectedBrowser = undefined;
+    browser = undefined;
+    page = undefined;
+    lastExternalAttachError = 'Stale CDP connection invalidated';
+  }
+  if (policy.externalVisibleChrome && browser && !connectedBrowser) {
+    browser = undefined;
+    page = undefined;
+  }
+
   if (!browser) {
     const userDataDir = getManagedUserDataDir(policy);
 
