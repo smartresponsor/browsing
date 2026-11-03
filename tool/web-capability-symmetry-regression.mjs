@@ -22,6 +22,14 @@ const captureRegistration = "app.post([" + captureAliases.map(route => "'" + rou
 assert.ok(workerSource.includes(captureRegistration), 'Bounded legacy capture aliases must share the canonical handler');
 for (const route of captureAliases) workerRoutes.add(route);
 const allowedLegacyRoutes = new Set(['/page-capture-dom', '/page-capture-form']);
+// Maintenance-only worker control is not a user-facing Web capability.
+// The administrative route requires both the worker bearer credential and a
+// separate high-entropy drain token and must never be registered via MCP.
+const adminRoutes = new Set(['/worker-drain-status']);
+assert.ok(workerSource.includes("app.post('/worker-drain-status'"));
+assert.ok(workerSource.includes("['/worker-drain', 'drain']"));
+assert.ok(workerSource.includes("['/worker-resume', 'resume']"));
+assert.ok(workerSource.includes("authorizedDrainRequest(req)"));
 
 const contractTools = webCapabilityContract.tools;
 const contractRoutes = new Set(contractTools.map((tool) => tool.route));
@@ -75,7 +83,7 @@ assert.throws(
 );
 
 for (const route of workerRoutes) {
-  assert.ok(contractRoutes.has(route) || allowedLegacyRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);
+  assert.ok(contractRoutes.has(route) || allowedLegacyRoutes.has(route) || adminRoutes.has(route), `worker POST route is undocumented by the capability contract: ${route}`);
 }
 
 for (const [toolName, behavior] of [

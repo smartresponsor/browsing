@@ -30,6 +30,8 @@ import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { createWorkerDrainController } from './worker-drain.js';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -1926,6 +1928,26 @@ app.use((req, res, next) => {
   return next();
 });
 
+const drainController = createWorkerDrainController();
+const requiredDrainToken = String(process.env.BROWSER_MCP_WORKER_DRAIN_TOKEN || '');
+function authorizedDrainRequest(req) {
+  if (requiredDrainToken.length < 32) return false;
+  const provided = String(req.get('x-browser-worker-drain-token') || '');
+  const expectedDigest = createHash('sha256').update(requiredDrainToken).digest();
+  const suppliedDigest = createHash('sha256').update(provided).digest();
+  return timingSafeEqual(expectedDigest, suppliedDigest);
+}
+for (const [route, method] of [['/worker-drain', 'drain'], ['/worker-resume', 'resume']]) {
+  app.post(route, (req, res) => {
+    if (!authorizedDrainRequest(req)) return res.status(403).json({ ok: false, status: 'WORKER_DRAIN_CONTROL_UNAVAILABLE' });
+    return res.json({ ok: true, ...drainController[method](), mutation_attempted: false, browser_mutated: false });
+  });
+}
+app.post('/worker-drain-status', (req, res) => {
+  if (!authorizedDrainRequest(req)) return res.status(403).json({ ok: false, status: 'WORKER_DRAIN_CONTROL_UNAVAILABLE' });
+  return res.json({ ok: true, ...drainController.snapshot(), mutation_attempted: false, browser_mutated: false });
+});
+
 const visibleRequest = new AsyncLocalStorage();
 let visibleOperationInFlight = false;
 let boundVisibleRuntime;
@@ -1940,9 +1962,14 @@ app.use(async (req, res, next) => {
   if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
   }
-  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+  const releaseDrainOperation = drainController.beginOperation();
+  if (!releaseDrainOperation) return res.status(409).json({ ok: false, status: 'WORKER_DRAINING', mutation_attempted: false });
+  if (visibleOperationInFlight) {
+    releaseDrainOperation();
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+  }
   visibleOperationInFlight = true;
-  const release = () => { visibleOperationInFlight = false; };
+  const release = () => { visibleOperationInFlight = false; releaseDrainOperation(); };
   res.once('finish', release);
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
