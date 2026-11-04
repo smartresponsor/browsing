@@ -1258,6 +1258,23 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
     selected = pages.find(item => !item.isClosed() && item.url().includes(String(urlContains))) ?? null;
   }
 
+  if (!selected && targetId && getPolicy().externalVisibleChrome) {
+    // Attach-only recovery: do not launch or navigate a browser.
+    const recovered = await connectExternalVisibleChrome(getPolicy(), getManagedUserDataDir(getPolicy()));
+    for (const candidate of recovered.context.pages()) {
+      if (!candidate.isClosed() && await getPageTargetId(candidate) === String(targetId)) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (selected) {
+      connectedBrowser = recovered.connectedBrowser;
+      browser = recovered.context;
+    } else {
+      await recovered.connectedBrowser.close().catch(() => {});
+    }
+  }
+
   if (!selected || selected.isClosed()) {
     throw revisionError('WEB_TARGET_STALE', 'Requested browser target was not found or is closed.', {
       targetId: targetId ? String(targetId) : null,
@@ -1274,7 +1291,7 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
     status: 'WEB_TARGET_BOUND',
     bound: {
       targetId: await getPageTargetId(page),
-      index: pages.findIndex(item => item === page),
+      index: browser.pages().findIndex(item => item === page),
       url: page.url(),
       title: await page.title().catch(() => '')
     }
