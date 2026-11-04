@@ -1057,7 +1057,7 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       value: semanticValue,
     };
     }, offset + localIndex))),
-    { staleCode: 'WEB_DOM_CAPTURE_STALE_FIELDS' });
+    { batchSize: 16, staleCode: 'WEB_DOM_CAPTURE_STALE_FIELDS' });
 
   const occurrenceByFingerprint = new Map();
   return rawFields.map(field => {
@@ -1133,7 +1133,7 @@ async function snapshotSubmitCandidates(target) {
       enabled: !node.disabled
     };
     }, offset + localIndex))),
-    { staleCode: 'WEB_DOM_CAPTURE_STALE_ACTIONS' });
+    { batchSize: 16, staleCode: 'WEB_DOM_CAPTURE_STALE_ACTIONS' });
   return candidates
     .filter(item => item.visible && item.enabled && item.text)
     .map(item => ({
