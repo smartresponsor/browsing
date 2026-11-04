@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { classifyVisibleFailure, failureEnvelope } from "../playwright-worker/src/failure-envelope.js";
 
 const source = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 const rateLimiter = fs.readFileSync(new URL("../playwright-worker/src/fill-rate-limiter.js", import.meta.url), "utf8");
@@ -20,6 +21,13 @@ for (const code of ["WEB_RATE_LIMITED", "WEB_OPERATION_SIZE_LIMIT", "WEB_RATE_PO
   assert.ok(rateLimiter.includes(code), `Bounded Web quota status missing: ${code}`);
 }
 assert.equal(source.includes("revisionError('WEB_OPERATION_LIMIT_REACHED'"), false, "Lifetime worker quota must not return");
+
+assert.equal(classifyVisibleFailure({ reason: "VISIBLE_BROWSER_WINDOW_NOT_DETECTED" }), "WEB_VISIBLE_DESKTOP_MISSING");
+assert.equal(classifyVisibleFailure({ reason: "WRONG_FOREGROUND_TARGET" }), "WEB_FOREGROUND_TARGET_MISMATCH");
+const attachFailure = failureEnvelope({ code: "WEB_CDP_ATTACH_TIMEOUT", message: "timeout", targetId: "private-target" });
+assert.equal(attachFailure.failed_gate, "cdp_attach");
+assert.equal(attachFailure.retryable, true);
+assert.equal(JSON.stringify(attachFailure).includes("private-target"), false);
 
 for (const legacy of [
   "throw new Error('Explicit approvalText=APPLY is required for fill actions.')",

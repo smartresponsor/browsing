@@ -51,6 +51,7 @@ import {
 import { settleClickTransition } from './click-transition-settle.js';
 import { createFillRateLimiter } from './fill-rate-limiter.js';
 import { evaluateLocatorBatches } from './dom-capture-batches.js';
+import { classifyVisibleFailure, failureEnvelope } from './failure-envelope.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
@@ -795,7 +796,11 @@ async function connectExternalVisibleChrome(policy, _userDataDir) {
   try {
     return await connectToExistingCdpEndpoint(endpoint, timeoutMs);
   } catch (error) {
-    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint} within ${timeoutMs} ms. ${normalizeError(error)}`);
+    throw revisionError('WEB_CDP_ATTACH_TIMEOUT', 'Unable to attach to the shared browser within the bounded deadline.', {
+      endpoint: `127.0.0.1:${policy.remoteDebuggingPort}`,
+      timeoutMs,
+      observed: normalizeError(error).slice(0, 300),
+    });
   }
 }
 
@@ -1188,12 +1193,11 @@ function normalizeExecutionCorrelation(body) {
 }
 
 function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', correlation = null) {
+  const status = typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus;
   res.status(409).json({
-    ok: false,
-    status: typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus,
+    ...failureEnvelope({ code: status, message: normalizeError(error), targetId: error?.evidence?.targetId, evidence: error?.evidence }),
     ...(['WEB_RATE_LIMITED', 'WEB_OPERATION_SIZE_LIMIT'].includes(error?.webStatus)
       ? { automatic_retry_allowed: false, mutation_attempted: false } : {}),
-    error: normalizeError(error),
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
   });
@@ -1999,10 +2003,10 @@ app.use(async (req, res, next) => {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
   }
   const releaseDrainOperation = drainController.beginOperation();
-  if (!releaseDrainOperation) return res.status(409).json({ ok: false, status: 'WORKER_DRAINING', mutation_attempted: false });
+  if (!releaseDrainOperation) return res.status(409).json({ ...failureEnvelope({ code: 'WEB_WORKER_DRAINING', message: 'Worker is draining.' }), mutation_attempted: false });
   if (visibleOperationInFlight) {
     releaseDrainOperation();
-    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+    return res.status(409).json({ ...failureEnvelope({ code: 'WEB_VISIBLE_SESSION_BUSY', message: 'Visible session is owned by another operation.' }), mutation_attempted: false });
   }
   visibleOperationInFlight = true;
   const release = () => { visibleOperationInFlight = false; releaseDrainOperation(); };
@@ -2025,7 +2029,7 @@ app.use(async (req, res, next) => {
       : boundVisibleRuntime && targetId && !preserveActiveTarget
         ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
         : await selectVisibleTarget([port], targetId, correlationId, background);
-    if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
+    if (!before.ok) return res.status(409).json({ ...before, ...failureEnvelope({ code: classifyVisibleFailure(before), message: before.reason || before.status, targetId, evidence: before }), mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
     res.json = body => {
@@ -2044,8 +2048,8 @@ app.use(async (req, res, next) => {
       return res;
     };
     return visibleRequest.run({ ...before, preserveActiveTarget }, next);
-  } catch {
-    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
+  } catch (error) {
+    return res.status(409).json({ ...failureEnvelope({ code: 'WEB_VISIBLE_SESSION_REQUIRED', message: normalizeError(error), evidence: { reason: 'VISIBILITY_UNKNOWN' } }), mutation_attempted: false });
   }
 });
 
