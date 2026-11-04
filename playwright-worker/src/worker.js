@@ -50,6 +50,7 @@ import {
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { evaluateLocatorBatches } from './dom-capture-batches.js';
+import { summarizeAttachTargets } from './attach-target-policy.js';
 import { createFillRateLimiter } from './fill-rate-limiter.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
@@ -2109,6 +2110,22 @@ app.post('/browser-cdp-targets', async (_req, res) => {
     res.json(await listRawCdpTargets(getPolicy()));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
+  }
+});
+
+app.post('/browser-cdp-attach-admission', async (_req, res) => {
+  try {
+    const inventory = await listRawCdpTargets(getPolicy());
+    res.json({
+      ok: true,
+      status: 'CDP_ATTACH_INVENTORY_ONLY',
+      attachAttempted: false,
+      playwrightConnected: false,
+      inventory: summarizeAttachTargets(inventory.targets),
+      note: 'Classification does not filter Playwright connectOverCDP auto-attach.'
+    });
+  } catch (error) {
+    res.status(409).json({ ok: false, status: 'CDP_ATTACH_INVENTORY_FAILED', error: normalizeError(error) });
   }
 });
 
