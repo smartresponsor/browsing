@@ -26,6 +26,7 @@ import {
   parseList
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
+import { evaluateLocatorBatches } from './dom-capture-batches.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
@@ -830,7 +831,10 @@ async function snapshotChatGptPage(target) {
 const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list], [role="slider"], [role="spinbutton"]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
-  const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
+  const locator = frame.locator(SEMANTIC_FIELD_SELECTOR);
+  const rawFields = await evaluateLocatorBatches(locator, (offset, batchSize) =>
+    Promise.all(Array.from({ length: batchSize }, (_, localIndex) =>
+      locator.nth(offset + localIndex).evaluate((node, index) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
     const tag = node.tagName.toLowerCase();
     const type = String(node.getAttribute('type') || '').toLowerCase();
@@ -1008,7 +1012,8 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       validation: validity,
       value: semanticValue,
     };
-  }));
+    }, offset + localIndex))),
+    { staleCode: 'WEB_DOM_CAPTURE_STALE_FIELDS' });
 
   const occurrenceByFingerprint = new Map();
   return rawFields.map(field => {
@@ -1061,7 +1066,10 @@ async function snapshotFields(target) {
 }
 
 async function snapshotSubmitCandidates(target) {
-  return target.locator('button, input[type="submit"], input[type="button"], a').evaluateAll(nodes => nodes.map((node, index) => {
+  const locator = target.locator('button, input[type="submit"], input[type="button"], a');
+  const candidates = await evaluateLocatorBatches(locator, (offset, batchSize) =>
+    Promise.all(Array.from({ length: batchSize }, (_, localIndex) =>
+      locator.nth(offset + localIndex).evaluate((node, index) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
     const style = window.getComputedStyle(node);
     const rect = node.getBoundingClientRect();
@@ -1080,13 +1088,14 @@ async function snapshotSubmitCandidates(target) {
       visible: isVisible,
       enabled: !node.disabled
     };
-  })).then(items => items
+    }, offset + localIndex))),
+    { staleCode: 'WEB_DOM_CAPTURE_STALE_ACTIONS' });
+  return candidates
     .filter(item => item.visible && item.enabled && item.text)
     .map(item => ({
       ...item,
       finalCandidate: classifyFinalActionCandidate(item)
-    }))
-  );
+    }));
 }
 
 async function getPageTargetId(target) {
