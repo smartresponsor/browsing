@@ -50,6 +50,8 @@ import {
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { createFillRateLimiter } from './fill-rate-limiter.js';
+import { evaluateLocatorBatches } from './dom-capture-batches.js';
+import { classifyVisibleFailure, failureEnvelope } from './failure-envelope.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
@@ -794,7 +796,11 @@ async function connectExternalVisibleChrome(policy, _userDataDir) {
   try {
     return await connectToExistingCdpEndpoint(endpoint, timeoutMs);
   } catch (error) {
-    throw new Error(`Unable to attach to shared browser CDP endpoint ${endpoint} within ${timeoutMs} ms. ${normalizeError(error)}`);
+    throw revisionError('WEB_CDP_ATTACH_TIMEOUT', 'Unable to attach to the shared browser within the bounded deadline.', {
+      endpoint: `127.0.0.1:${policy.remoteDebuggingPort}`,
+      timeoutMs,
+      observed: normalizeError(error).slice(0, 300),
+    });
   }
 }
 
@@ -874,7 +880,10 @@ async function snapshotChatGptPage(target) {
 const SEMANTIC_FIELD_SELECTOR = 'input, textarea, select, [contenteditable="true"], [role="combobox"], [role="switch"], [aria-autocomplete], input[list], [role="slider"], [role="spinbutton"]';
 
 async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
-  const rawFields = await frame.locator(SEMANTIC_FIELD_SELECTOR).evaluateAll(nodes => nodes.map((node, index) => {
+  const locator = frame.locator(SEMANTIC_FIELD_SELECTOR);
+  const rawFields = await evaluateLocatorBatches(locator, (offset, batchSize) =>
+    Promise.all(Array.from({ length: batchSize }, (_, localIndex) =>
+      locator.nth(offset + localIndex).evaluate((node, index) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
     const tag = node.tagName.toLowerCase();
     const type = String(node.getAttribute('type') || '').toLowerCase();
@@ -1052,7 +1061,8 @@ async function snapshotFieldsInFrame(frame, framePath, frameUrl, frameName) {
       validation: validity,
       value: semanticValue,
     };
-  }));
+    }, offset + localIndex))),
+    { batchSize: 16, staleCode: 'WEB_DOM_CAPTURE_STALE_FIELDS' });
 
   const occurrenceByFingerprint = new Map();
   return rawFields.map(field => {
@@ -1105,7 +1115,10 @@ async function snapshotFields(target) {
 }
 
 async function snapshotSubmitCandidates(target) {
-  return target.locator('button, input[type="submit"], input[type="button"], a').evaluateAll(nodes => nodes.map((node, index) => {
+  const locator = target.locator('button, input[type="submit"], input[type="button"], a');
+  const candidates = await evaluateLocatorBatches(locator, (offset, batchSize) =>
+    Promise.all(Array.from({ length: batchSize }, (_, localIndex) =>
+      locator.nth(offset + localIndex).evaluate((node, index) => {
     const normalize = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 500);
     const style = window.getComputedStyle(node);
     const rect = node.getBoundingClientRect();
@@ -1124,13 +1137,14 @@ async function snapshotSubmitCandidates(target) {
       visible: isVisible,
       enabled: !node.disabled
     };
-  })).then(items => items
+    }, offset + localIndex))),
+    { batchSize: 16, staleCode: 'WEB_DOM_CAPTURE_STALE_ACTIONS' });
+  return candidates
     .filter(item => item.visible && item.enabled && item.text)
     .map(item => ({
       ...item,
       finalCandidate: classifyFinalActionCandidate(item)
-    }))
-  );
+    }));
 }
 
 async function getPageTargetId(target) {
@@ -1179,12 +1193,11 @@ function normalizeExecutionCorrelation(body) {
 }
 
 function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', correlation = null) {
+  const status = typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus;
   res.status(409).json({
-    ok: false,
-    status: typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus,
+    ...failureEnvelope({ code: status, message: normalizeError(error), targetId: error?.evidence?.targetId, evidence: error?.evidence }),
     ...(['WEB_RATE_LIMITED', 'WEB_OPERATION_SIZE_LIMIT'].includes(error?.webStatus)
       ? { automatic_retry_allowed: false, mutation_attempted: false } : {}),
-    error: normalizeError(error),
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
   });
@@ -1258,6 +1271,23 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
     selected = pages.find(item => !item.isClosed() && item.url().includes(String(urlContains))) ?? null;
   }
 
+  if (!selected && targetId && getPolicy().externalVisibleChrome) {
+    // Attach-only recovery: do not launch or navigate a browser.
+    const recovered = await connectExternalVisibleChrome(getPolicy(), getManagedUserDataDir(getPolicy()));
+    for (const candidate of recovered.context.pages()) {
+      if (!candidate.isClosed() && await getPageTargetId(candidate) === String(targetId)) {
+        selected = candidate;
+        break;
+      }
+    }
+    if (selected) {
+      connectedBrowser = recovered.connectedBrowser;
+      browser = recovered.context;
+    } else {
+      await recovered.connectedBrowser.close().catch(() => {});
+    }
+  }
+
   if (!selected || selected.isClosed()) {
     throw revisionError('WEB_TARGET_STALE', 'Requested browser target was not found or is closed.', {
       targetId: targetId ? String(targetId) : null,
@@ -1274,7 +1304,7 @@ async function bindBrowserTarget({ targetId, index, url, urlContains } = {}) {
     status: 'WEB_TARGET_BOUND',
     bound: {
       targetId: await getPageTargetId(page),
-      index: pages.findIndex(item => item === page),
+      index: browser.pages().findIndex(item => item === page),
       url: page.url(),
       title: await page.title().catch(() => '')
     }
@@ -1973,10 +2003,10 @@ app.use(async (req, res, next) => {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
   }
   const releaseDrainOperation = drainController.beginOperation();
-  if (!releaseDrainOperation) return res.status(409).json({ ok: false, status: 'WORKER_DRAINING', mutation_attempted: false });
+  if (!releaseDrainOperation) return res.status(409).json({ ...failureEnvelope({ code: 'WEB_WORKER_DRAINING', message: 'Worker is draining.' }), mutation_attempted: false });
   if (visibleOperationInFlight) {
     releaseDrainOperation();
-    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+    return res.status(409).json({ ...failureEnvelope({ code: 'WEB_VISIBLE_SESSION_BUSY', message: 'Visible session is owned by another operation.' }), mutation_attempted: false });
   }
   visibleOperationInFlight = true;
   const release = () => { visibleOperationInFlight = false; releaseDrainOperation(); };
@@ -1999,7 +2029,7 @@ app.use(async (req, res, next) => {
       : boundVisibleRuntime && targetId && !preserveActiveTarget
         ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
         : await selectVisibleTarget([port], targetId, correlationId, background);
-    if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
+    if (!before.ok) return res.status(409).json({ ...before, ...failureEnvelope({ code: classifyVisibleFailure(before), message: before.reason || before.status, targetId, evidence: before }), mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
     res.json = body => {
@@ -2018,8 +2048,8 @@ app.use(async (req, res, next) => {
       return res;
     };
     return visibleRequest.run({ ...before, preserveActiveTarget }, next);
-  } catch {
-    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
+  } catch (error) {
+    return res.status(409).json({ ...failureEnvelope({ code: 'WEB_VISIBLE_SESSION_REQUIRED', message: normalizeError(error), evidence: { reason: 'VISIBILITY_UNKNOWN' } }), mutation_attempted: false });
   }
 });
 

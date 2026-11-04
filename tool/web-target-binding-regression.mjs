@@ -29,5 +29,40 @@ for (const token of [
 const inventoryFunction = worker.slice(worker.indexOf("async function listBrowserTargets()"), worker.indexOf("async function bindBrowserTarget("));
 assert.equal(inventoryFunction.includes("await ensurePage()"), false, "Read-only target inventory must never attach, navigate or launch a browser");
 assert.equal(inventoryFunction.includes("listRawCdpTargets(getPolicy())"), true, "Inventory must retain native target identity even without an automation binding");
+const bindFunction = worker.slice(worker.indexOf("async function bindBrowserTarget("), worker.indexOf("async function waitForReadiness("));
+assert.ok(bindFunction.includes("if (!selected && targetId && getPolicy().externalVisibleChrome)"));
+assert.ok(bindFunction.includes("await connectExternalVisibleChrome("));
+assert.ok(bindFunction.includes("await recovered.connectedBrowser.close().catch(() => {})"));
+assert.equal(bindFunction.includes("launchPersistentContext"), false);
+const targetId = "A".repeat(32);
+const events = [];
+const mockPage = id => ({ id, isClosed: () => false, url: () => "https://example.test/", title: async () => "Test", bringToFront: async () => events.push("foreground") });
+const recoveredPage = mockPage(targetId);
+const oldConnection = { close: async () => events.push("old-closed") };
+const recoveredConnection = { close: async () => events.push("recovered-closed") };
+const sandbox = {
+  browser: { pages: () => [mockPage("B".repeat(32))] },
+  connectedBrowser: oldConnection, page: null,
+  ensurePage: async () => {},
+  getPolicy: () => ({ externalVisibleChrome: true }),
+  getManagedUserDataDir: () => "unused",
+  connectExternalVisibleChrome: async () => ({ connectedBrowser: recoveredConnection, context: { pages: () => [recoveredPage] } }),
+  getPageTargetId: async page => page.id,
+  revisionError: (status, message) => Object.assign(new Error(message), { webStatus: status }),
+};
+const { runInNewContext } = await import("node:vm");
+runInNewContext(bindFunction + "\nthis.runBind = bindBrowserTarget;", sandbox);
+const result = await sandbox.runBind({ targetId });
+assert.equal(result.status, "WEB_TARGET_BOUND");
+assert.equal(result.bound.targetId, targetId);
+assert.equal(result.bound.index, 0, "Recovered target index must reflect recovered context");
+assert.equal(sandbox.connectedBrowser, recoveredConnection);
+assert.equal(events.includes("old-closed"), false);
+sandbox.browser = { pages: () => [mockPage("B".repeat(32))] };
+sandbox.connectedBrowser = oldConnection;
+sandbox.connectExternalVisibleChrome = async () => ({ connectedBrowser: recoveredConnection, context: { pages: () => [mockPage("C".repeat(32))] } });
+await assert.rejects(sandbox.runBind({ targetId }), error => error.webStatus === "WEB_TARGET_STALE");
+assert.equal(events.includes("recovered-closed"), true);
+assert.equal(sandbox.connectedBrowser, oldConnection);
 console.log("Web exact target binding regression passed.");
 
