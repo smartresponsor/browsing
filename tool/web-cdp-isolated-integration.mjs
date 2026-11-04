@@ -8,7 +8,7 @@ import { chromium } from '../playwright-worker/node_modules/playwright/index.mjs
 const profile = await mkdtemp(join(tmpdir(), 'cdp-recovery-isolated-'));
 let owner;
 try {
-  owner = await chromium.launchPersistentContext(profile, { headless: true, args: ['--remote-debugging-port=0'] });
+  owner = await chromium.launchPersistentContext(profile, { channel: 'msedge', headless: true, args: ['--remote-debugging-port=0'] });
   const page = owner.pages()[0] ?? await owner.newPage();
   await page.goto('data:text/html,<title>isolated-cdp</title>');
   let port;
