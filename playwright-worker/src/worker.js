@@ -1,17 +1,40 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
-// Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
-// on the extra Console grants module or its runtime permissions.
+
+async function resolveConsoleService(name) {
+  const configuredRoot = process.env.BROWSER_MCP_CONSOLE_ROOT?.trim();
+  const roots = configuredRoot
+    ? [path.resolve(configuredRoot)]
+    : [
+        fileURLToPath(new URL('../../../console-mcp/', import.meta.url)),
+        fileURLToPath(new URL('../../../../console-mcp/', import.meta.url)),
+        fileURLToPath(new URL('../../../../mcp/console-mcp/', import.meta.url))
+      ];
+  for (const root of roots) {
+    const file = path.join(root, 'dist', 'service', name);
+    try {
+      await access(file);
+      return pathToFileURL(file).href;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error(`Console MCP service ${name} unavailable; build Console MCP or set BROWSER_MCP_CONSOLE_ROOT.`);
+}
+
+const { inspectVisibleTarget, selectVisibleTarget } = await import(await resolveConsoleService('visible-browser-session.js'));
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
-  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
+  ? await import(await resolveConsoleService('grants-browser-session.js')) : null;
+
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
+import { createWorkerDrainController } from './worker-drain.js';
 import { access, mkdir, readFile } from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   DEFAULT_WORKER_PORT,
@@ -27,6 +50,7 @@ import {
 } from './browser-policy.js';
 import { settleClickTransition } from './click-transition-settle.js';
 import { evaluateLocatorBatches } from './dom-capture-batches.js';
+import { createFillRateLimiter } from './fill-rate-limiter.js';
 import { classifyFinalActionCandidate } from './final-action-classifier.js';
 import { isTargetedReadCapture, readPostconditionTargetId } from './targeted-capture-policy.js';
 
@@ -46,7 +70,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
-import { classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
+import { classifyHumanBoundary, humanBoundaryErrorCode, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
@@ -66,6 +90,7 @@ let sessionStartedAt = null;
 let pageVisitCount = 0;
 let formFillCount = 0;
 let fieldWriteCount = 0;
+const fillRateLimiter = createFillRateLimiter();
 let lastExternalAttachError = '';
 function parseBrowserWorkerToken() {
   return String(process.env.BROWSER_MCP_BROWSER_WORKER_TOKEN || '').trim();
@@ -161,6 +186,8 @@ function getPolicy() {
     maxPageVisits: Number(process.env.BROWSER_MCP_MAX_PAGE_VISITS || 100),
     maxFormFills: Number(process.env.BROWSER_MCP_MAX_FORM_FILLS || 20),
     maxFieldWrites: Number(process.env.BROWSER_MCP_MAX_FIELD_WRITES || 80),
+    maxFieldsPerOperation: Number(process.env.BROWSER_MCP_MAX_FIELDS_PER_OPERATION || 20),
+    fillRateWindowMs: Number(process.env.BROWSER_MCP_FILL_RATE_WINDOW_SECONDS || 60) * 1000,
     allowedHosts: parseList(process.env.BROWSER_MCP_ALLOWED_HOSTS),
     deniedHosts: parseList(process.env.BROWSER_MCP_DENIED_HOSTS),
     browserChannel,
@@ -204,6 +231,7 @@ async function closeSession() {
   pageVisitCount = 0;
   formFillCount = 0;
   fieldWriteCount = 0;
+  fillRateLimiter.reset();
 }
 
 async function closeSessionWithTimeout(timeoutMs = 10000) {
@@ -234,6 +262,8 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       maxPageVisits: policy.maxPageVisits,
       maxFormFills: policy.maxFormFills,
       maxFieldWrites: policy.maxFieldWrites,
+      maxFieldsPerOperation: policy.maxFieldsPerOperation,
+      fillRateWindowSeconds: policy.fillRateWindowMs / 1000,
       externalVisibleBrowser: policy.externalVisibleBrowser,
       externalVisibleChrome: policy.externalVisibleChrome,
       remoteDebuggingPort: policy.remoteDebuggingPort,
@@ -244,7 +274,8 @@ function buildBrowserRuntimeStatus(policy = getPolicy()) {
       elapsedSeconds: sessionStartedAt ? Math.round((Date.now() - sessionStartedAt) / 1000) : null,
       pageVisitCount,
       formFillCount,
-      fieldWriteCount
+      fieldWriteCount,
+      fillRate: fillRateLimiter.snapshot({ windowMs: policy.fillRateWindowMs })
     },
     browser: {
       contextOpen: Boolean(browser),
@@ -511,7 +542,7 @@ function describeJobProfile(targetUrl) {
   };
 }
 
-async function ensureNotChallenge(target, { allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
+async function ensureNotChallenge(target, { allowLoginInspection = false, allowCaptchaServiceErrorInspection = false, allowConsentInspection = false } = {}) {
   const snapshot = await target.evaluate(() => {
     const title = document.title || '';
     const body = document.body?.innerText || '';
@@ -604,9 +635,9 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
   // a human challenge. Preserve the guard for visible CAPTCHA, login, 2FA,
   // consent and modal boundaries; do not block ordinary navigation on a footer warning.
   const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;
-  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
+  if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !(allowConsentInspection && boundary.type === 'consent_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
     throw revisionError(
-      'WEB_HUMAN_ACTION_REQUIRED',
+      humanBoundaryErrorCode(boundary),
       'A human-action boundary was detected. Resolve it manually before Web resumes.',
       {
         boundary: {
@@ -628,6 +659,19 @@ async function ensurePage() {
   // An explicitly verified Console-owned target must never trigger an independent browser launch.
   if (guard?.ok && !policy.externalVisibleChrome) {
     throw revisionError('WEB_VISIBLE_SESSION_REQUIRED', 'Console-owned CDP attachment required; competing browser launch denied.');
+  }
+
+  // CDP detach can leave a truthy but unusable Playwright context. Reattach only;
+  // never launch, navigate or replay a user operation on the shared Edge profile.
+  if (policy.externalVisibleChrome && connectedBrowser && !connectedBrowser.isConnected()) {
+    connectedBrowser = undefined;
+    browser = undefined;
+    page = undefined;
+    lastExternalAttachError = 'Stale CDP connection invalidated';
+  }
+  if (policy.externalVisibleChrome && browser && !connectedBrowser) {
+    browser = undefined;
+    page = undefined;
   }
 
   if (!browser) {
@@ -1147,14 +1191,16 @@ function sendWebError(res, error, fallbackStatus = 'WEB_OPERATION_FAILED', corre
   res.status(409).json({
     ok: false,
     status: typeof error?.webStatus === 'string' ? error.webStatus : fallbackStatus,
+    ...(['WEB_RATE_LIMITED', 'WEB_OPERATION_SIZE_LIMIT'].includes(error?.webStatus)
+      ? { automatic_retry_allowed: false, mutation_attempted: false } : {}),
     error: normalizeError(error),
     correlation,
     evidence: error?.evidence && typeof error.evidence === 'object' ? error.evidence : undefined,
   });
 }
 
-async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false } = {}) {
-  await ensureNotChallenge(target, { allowLoginInspection, allowCaptchaServiceErrorInspection });
+async function capturePageArtifact(target, { screenshot = false, screenshotPrefix = 'capture', allowLoginInspection = false, allowCaptchaServiceErrorInspection = false, allowConsentInspection = false } = {}) {
+  await ensureNotChallenge(target, { allowLoginInspection, allowCaptchaServiceErrorInspection, allowConsentInspection });
   const fields = await snapshotFields(target);
   const submitCandidates = await snapshotSubmitCandidates(target);
   const visibleText = await target.evaluate(() => String(document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 16000));
@@ -1901,6 +1947,26 @@ app.use((req, res, next) => {
   return next();
 });
 
+const drainController = createWorkerDrainController();
+const requiredDrainToken = String(process.env.BROWSER_MCP_WORKER_DRAIN_TOKEN || '');
+function authorizedDrainRequest(req) {
+  if (requiredDrainToken.length < 32) return false;
+  const provided = String(req.get('x-browser-worker-drain-token') || '');
+  const expectedDigest = createHash('sha256').update(requiredDrainToken).digest();
+  const suppliedDigest = createHash('sha256').update(provided).digest();
+  return timingSafeEqual(expectedDigest, suppliedDigest);
+}
+for (const [route, method] of [['/worker-drain', 'drain'], ['/worker-resume', 'resume']]) {
+  app.post(route, (req, res) => {
+    if (!authorizedDrainRequest(req)) return res.status(403).json({ ok: false, status: 'WORKER_DRAIN_CONTROL_UNAVAILABLE' });
+    return res.json({ ok: true, ...drainController[method](), mutation_attempted: false, browser_mutated: false });
+  });
+}
+app.post('/worker-drain-status', (req, res) => {
+  if (!authorizedDrainRequest(req)) return res.status(403).json({ ok: false, status: 'WORKER_DRAIN_CONTROL_UNAVAILABLE' });
+  return res.json({ ok: true, ...drainController.snapshot(), mutation_attempted: false, browser_mutated: false });
+});
+
 const visibleRequest = new AsyncLocalStorage();
 let visibleOperationInFlight = false;
 let boundVisibleRuntime;
@@ -1915,9 +1981,14 @@ app.use(async (req, res, next) => {
   if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
   }
-  if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+  const releaseDrainOperation = drainController.beginOperation();
+  if (!releaseDrainOperation) return res.status(409).json({ ok: false, status: 'WORKER_DRAINING', mutation_attempted: false });
+  if (visibleOperationInFlight) {
+    releaseDrainOperation();
+    return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
+  }
   visibleOperationInFlight = true;
-  const release = () => { visibleOperationInFlight = false; };
+  const release = () => { visibleOperationInFlight = false; releaseDrainOperation(); };
   res.once('finish', release);
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
@@ -2230,7 +2301,8 @@ app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (re
     const artifact = await capturePageArtifact(target, {
       screenshot: req.body?.screenshot === true,
       allowLoginInspection: true,
-      allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true
+      allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true,
+      allowConsentInspection: captureView === 'dom' && req.body?.screenshot !== true
     });
     if (captureView === 'dom') {
       const dom = await target.evaluate(() => {
@@ -2366,6 +2438,8 @@ app.post('/propose', async (req, res) => {
 
 app.post('/fill-after-approval', async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
+  let quotaReservation = null;
+  let fillMutationAttempted = false;
   try {
     const policy = getPolicy();
     const approved = req.body?.approved === true;
@@ -2375,13 +2449,13 @@ app.post('/fill-after-approval', async (req, res) => {
     }
 
     const requestedFields = Array.isArray(req.body?.fields) ? req.body.fields : [];
-    if (formFillCount >= policy.maxFormFills) {
-      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Form fill limit reached for this supervised session.', { limit: policy.maxFormFills, kind: 'form-fill' });
-    }
-
-    if (fieldWriteCount + requestedFields.length > policy.maxFieldWrites) {
-      throw revisionError('WEB_OPERATION_LIMIT_REACHED', 'Field write limit would be exceeded for this supervised session.', { limit: policy.maxFieldWrites, kind: 'field-write', requestedWrites: requestedFields.length });
-    }
+    quotaReservation = fillRateLimiter.reserve({
+      requestedWrites: requestedFields.length,
+      maxFieldsPerOperation: policy.maxFieldsPerOperation,
+      maxFormFills: policy.maxFormFills,
+      maxFieldWrites: policy.maxFieldWrites,
+      windowMs: policy.fillRateWindowMs,
+    });
 
     const target = await ensurePage();
     await ensureNotChallenge(target);
@@ -2408,6 +2482,7 @@ app.post('/fill-after-approval', async (req, res) => {
     const filled = [];
     for (const item of requestedFields) {
       const resolved = await resolveRequestedFieldLocator(target, item, fields);
+      fillMutationAttempted = true;
       const evidence = await writeField(target, resolved.locator, item.value, resolved.field);
       filled.push({
         controlId: resolved.field.controlId || item.controlId || null,
@@ -2416,6 +2491,8 @@ app.post('/fill-after-approval', async (req, res) => {
       });
     }
 
+    fillRateLimiter.commit(quotaReservation);
+    quotaReservation = null;
     formFillCount += 1;
     fieldWriteCount += requestedFields.length;
     const after = await capturePageArtifact(target, { screenshot: false });
@@ -2439,6 +2516,11 @@ app.post('/fill-after-approval', async (req, res) => {
       },
     });
   } catch (error) {
+    // A write that started may have partially completed: retain its rate budget.
+    if (quotaReservation !== null) {
+      if (fillMutationAttempted) fillRateLimiter.commit(quotaReservation);
+      else fillRateLimiter.release(quotaReservation);
+    }
     sendWebError(res, error, 'WEB_FORM_MUTATION_FAILED', correlation);
   }
 });

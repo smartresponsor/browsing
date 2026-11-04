@@ -29,6 +29,13 @@ assert.ok(externalAttach >= 0 && managedFallback > externalAttach, "Existing CDP
 assert.ok(profileMkdir > managedFallback, "Profile creation may occur only for the locally owned browser fallback");
 assert.equal(ensurePage.slice(0, managedFallback).includes("await mkdir(userDataDir"), false, "External Edge attach must not write the owner's profile");
 assert.ok(ensurePage.includes("connectExternalVisibleChrome(policy, userDataDir)"), "CDP attachment must remain in place");
+// A broken Playwright/CDP transport may retain an object-valued browser context.
+// Invalidate stale context before normal attach, without a second Chromium launch
+// and without retrying writes whose outcome is unknown.
+assert.ok(ensurePage.includes("connectedBrowser && !connectedBrowser.isConnected()"), "Disconnected CDP transport must be detected");
+assert.ok(ensurePage.includes("browser = undefined;"), "Stale context must be discarded");
+assert.ok(ensurePage.includes("page = undefined;"), "Stale selected page must be discarded");
+assert.ok(ensurePage.indexOf("connectedBrowser && !connectedBrowser.isConnected()") < externalAttach, "Stale CDP connection must be invalidated before attach");
 
 // An externally owned Edge must not be closed or force a worker restart
 // solely because the worker's observation window elapsed.
