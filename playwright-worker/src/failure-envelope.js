@@ -39,7 +39,7 @@ export function failureEnvelope({ code, message, subsystem = 'browser', host, ta
 
 export function classifyVisibleFailure(result = {}) {
   const reason = String(result.reason || result.status || '');
-  if (/DESKTOP|WINDOW_NOT_DETECTED/.test(reason)) return 'WEB_VISIBLE_DESKTOP_MISSING';
+  if (/DESKTOP|WINDOW_NOT_DETECTED|NATIVE_WINDOW_EVIDENCE_UNAVAILABLE/.test(reason)) return 'WEB_VISIBLE_DESKTOP_MISSING';
   if (/FOREGROUND|TARGET_MISMATCH|TARGET_STALE/.test(reason)) return 'WEB_FOREGROUND_TARGET_MISMATCH';
   if (/PROMPT|MODAL|CONSENT/.test(reason)) return 'WEB_COOKIE_ACTION_REQUIRED';
   if (/DRAIN/.test(reason)) return 'WEB_WORKER_DRAINING';

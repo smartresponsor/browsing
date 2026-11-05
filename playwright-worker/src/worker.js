@@ -2024,11 +2024,15 @@ app.use(async (req, res, next) => {
     if (!targetId && page && !page.isClosed()) targetId = await getPageTargetId(page);
     // An exact read-only observation verifies the requested target independently:
     // the shared bound target may belong to another concurrently managed consumer.
-    const before = grants
+    const observedBefore = grants
       ? await grantsPolicy.inspectGrantsTarget({ targetId, expected: preserveActiveTarget ? undefined : boundVisibleRuntime })
       : boundVisibleRuntime && targetId && !preserveActiveTarget
         ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
         : await selectVisibleTarget([port], targetId, correlationId, background);
+    const before = observedBefore.reason === 'VISIBILITY_UNKNOWN'
+      && observedBefore.states?.includes('BROWSER_TARGET_EXISTS')
+      ? { ...observedBefore, reason: 'NATIVE_WINDOW_EVIDENCE_UNAVAILABLE' }
+      : observedBefore;
     if (!before.ok) return res.status(409).json({ ...before, ...failureEnvelope({ code: classifyVisibleFailure(before), message: before.reason || before.status, targetId, evidence: before }), mutation_attempted: false });
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);

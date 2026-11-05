@@ -16,7 +16,7 @@ try {
  const post=async(route,body={})=>(await fetch(url+route,{method:'POST',headers:{authorization:'Bearer fixture-token','content-type':'application/json'},body:JSON.stringify(body)})).json();
  for(const route of ['/browser-bind','/open','/open-job','/page-capture','/inspect','/extract-form','/propose','/fill-after-approval','/upload-artifact','/click','/review-before-submit','/submit-after-approval']){
   const r=await post(route,{targetId:'invisible-target',url:'https://example.invalid',approved:false});
-  assert.equal(r.ok,false,route);assert.equal(r.status,'WEB_FOREGROUND_TARGET_MISMATCH',route);assert.equal(r.reason,'BROWSER_TARGET_STALE',route);assert.equal(r.visibility_verified,false,route);assert.equal(r.user_interaction_ready,false,route);assert.equal(r.mutation_attempted,false,route);
+  assert.equal(r.ok,false,route);assert.equal(r.status,'WEB_VISIBLE_DESKTOP_MISSING',route);assert.equal(r.reason,'NATIVE_WINDOW_EVIDENCE_UNAVAILABLE',route);assert.equal(r.visibility_verified,false,route);assert.equal(r.user_interaction_ready,false,route);assert.equal(r.mutation_attempted,false,route);
  }
  for(const route of ['/browser-restart','/browser-kill','/open-fresh']){
   const r=await post(route);assert.equal(r.reason,'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION');
