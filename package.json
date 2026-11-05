@@ -15,7 +15,7 @@
     "dev:watch-tick": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 watch-tick",
     "dev:watch-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 watch-status",
     "dev:smoke": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 runtime-doctor",
-    "smoke": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 runtime-doctor",
+    "smoke": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./tool/dev-browser.ps1 runtime-doctor",
     "dev:watch-once": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\watch-browser.ps1 -Once",
     "dev:watch": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\watch-browser.ps1",
     "dev:shared-browser-status": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\shared-browser.ps1 status",
@@ -44,6 +44,6 @@
     "dev:mcp-task-stop": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 stop-mcp-startup-task",
     "dev:mcp-task-uninstall": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 uninstall-mcp-startup-task",
     "dev:mcp-task-show": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 show-mcp-startup-task",
-    "test:browser-cdp-cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File .\\tool\\dev-browser.ps1 browser-cdp-cleanup-confirmed"
+    "test:browser-cdp-cleanup": "pwsh -NoProfile -ExecutionPolicy Bypass -File ./tool/dev-browser.ps1 browser-cdp-cleanup-confirmed"
   }
 }
