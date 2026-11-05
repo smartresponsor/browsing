@@ -60,7 +60,7 @@ function Get-McpState {
 function Get-TunnelState {
     $pidProcess = Get-ProcessFromPidFile -PidFile $TunnelPidFile
     $commandLineProcess = $null
-    if (-not $pidProcess) {
+    if ($IsWindows -and -not $pidProcess) {
         $commandLineProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -and $_.CommandLine -match 'cloudflared\b.*\btunnel\b.*\b--url\b.*127\.0\.0\.1' } |
             Select-Object -First 1
@@ -100,7 +100,7 @@ function Read-TunnelUrl {
 function Get-NamedTunnelState {
     $pidProcess = Get-ProcessFromPidFile -PidFile $NamedTunnelPidFile
     $commandLineProcess = $null
-    if (-not $pidProcess) {
+    if ($IsWindows -and -not $pidProcess) {
         $tunnelName = [regex]::Escape((Get-NamedTunnelName))
         $commandLineProcess = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -and $_.CommandLine -match "cloudflared.*tunnel.*run.*$tunnelName" } |

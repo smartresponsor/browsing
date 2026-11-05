@@ -29,6 +29,11 @@ function Get-PwshCommand {
 function Test-TcpListener {
     param([Parameter(Mandatory = $true)][int]$Port)
 
+    if ($IsLinux) {
+        $listeners = & ss -H -ltn "sport = :$Port" 2>$null
+        return [bool]$listeners
+    }
+
     return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 }
 
@@ -79,6 +84,17 @@ function Get-ProcessFromPidFile {
 function Get-ListeningProcessOnPort {
     param([Parameter(Mandatory = $true)][int]$Port)
 
+    if ($IsLinux) {
+        $ss = Get-Command ss -ErrorAction SilentlyContinue
+        if (-not $ss) { return $null }
+        $entries = & $ss.Source -H -ltnp "sport = :$Port" 2>$null
+        foreach ($entry in @($entries)) {
+            if ($entry -match 'pid=(\d+),') {
+                return Get-Process -Id ([int]$Matches[1]) -ErrorAction SilentlyContinue
+            }
+        }
+        return $null
+    }
     $connection = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
         Where-Object { $_.LocalAddress -in @('127.0.0.1', '0.0.0.0', '::1', '::') } |
         Select-Object -First 1
@@ -93,6 +109,17 @@ function Get-ListeningProcessOnPort {
 function Get-CommandLine {
     param([Parameter(Mandatory = $true)][int]$ProcessId)
 
+    if ($IsLinux) {
+        $path = "/proc/$ProcessId/cmdline"
+        if (-not (Test-Path -LiteralPath $path)) { return $null }
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($path)
+            if ($bytes.Length -eq 0) { return $null }
+            return [System.Text.Encoding]::UTF8.GetString($bytes).Replace([char]0, ' ').Trim()
+        } catch {
+            return $null
+        }
+    }
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
     if (-not $process) {
         return $null
