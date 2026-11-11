@@ -70,6 +70,9 @@ export const webCapabilityContract = Object.freeze({
     tool('web.browser_cdp_targets', '/browser-cdp-targets', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'target-inventory'
     }),
+    tool('web.browser_cdp_attach_admission', '/browser-cdp-attach-admission', 'read', {
+      riskClass: 'observation', binding: 'optional', visibility: 'internal', postcondition: 'cdp-attach-inventory-only'
+    }),
     tool('web.browser_cdp_verify_chatgpt_home', '/browser-cdp-verify-chatgpt-home', 'read', {
       riskClass: 'observation', binding: 'optional', postcondition: 'candidate-verification'
     }),

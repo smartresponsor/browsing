@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { WebToolRegistry } from "../mcp-server/src/tool-registry.js";
 import { createWebToolBundle } from "../mcp-server/src/web-tool-bundle.js";
-import { webCapabilityAliases } from "../mcp-server/src/capability-contract.js";
+import { webCapabilityAliases, webCapabilityContract } from "../mcp-server/src/capability-contract.js";
 
 const registry = new WebToolRegistry("http://127.0.0.1:8791");
 const publicTools = registry.listTools();
@@ -30,7 +30,7 @@ const expectedMergedCapabilities = [
   "web.submit_after_approval",
 ];
 
-assert.equal(workerCapabilities.length, 28, "worker capability contract should preserve all canonical worker routes without duplicate capture endpoints");
+assert.deepEqual([...workerCapabilities].sort(), webCapabilityContract.tools.map(tool => tool.name).sort(), "worker capability contract should preserve all canonical worker routes without duplicate capture endpoints");
 assert.equal(publicTools.length > workerCapabilities.length, true, "public Browsing surface should expose canonical Web aliases in addition to worker ABI capability names");
 for (const name of ["web.browser.targets", "web.browser.bind", "web.target.open", "web.page.capture", "web.page.wait", "web.page.click", "web.form.inspect", "web.form.fill", "web.form.upload", "web.form.submit", "web.job.open"]) {
   assert.equal(publicTools.includes(name), true, `public Browser MCP surface must include canonical tool: ${name}`);
