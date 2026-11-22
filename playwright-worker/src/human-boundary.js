@@ -1,3 +1,15 @@
+// A text-only CAPTCHA mention does not establish an active challenge.
+export function suppressUnverifiedCaptcha(boundary, hasVisibleChallengeWidget = false) {
+  if (boundary?.type === 'captcha' && hasVisibleChallengeWidget !== true) return null;
+  if (hasVisibleChallengeWidget === true && (!boundary || boundary.type === 'captcha_service_unavailable')) {
+    return {
+      type: 'captcha',
+      requestedAction: 'Complete the visible human-verification challenge manually in the bound browser target.'
+    };
+  }
+  return boundary;
+}
+
 export function classifyChallengeText(text) {
   const normalized = String(text || '');
   // A failed reCAPTCHA loader is not proof of an active verification widget.

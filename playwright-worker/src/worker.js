@@ -1,10 +1,15 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { inspectVisibleTarget, selectVisibleTarget } from '../../../../console-mcp/dist/service/visible-browser-session.js';
-// Isolated grants runtime is opt-in. Existing visible/isolated workers never depend
-// on the extra Console grants module or its runtime permissions.
+// Resolve the Console build explicitly in isolated worktrees; retain the
+// canonical sibling layout as the default in production.
+const consoleDist = process.env.BROWSER_MCP_CONSOLE_DIST_URL
+  || new URL('../../../../console-mcp/dist/', import.meta.url).href;
+const consoleModule = name => new URL('service/' + name, consoleDist).href;
+const { inspectVisibleTarget, selectVisibleTarget } =
+  await import(consoleModule('visible-browser-session.js'));
+// Isolated grants runtime is opt-in.
 const grantsPolicy = process.env.BROWSER_MCP_GRANTS_WORKER === 'true'
-  ? await import('../../../../console-mcp/dist/service/grants-browser-session.js') : null;
+  ? await import(consoleModule('grants-browser-session.js')) : null;
 import express from 'express';
 import { chromium } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -45,7 +50,7 @@ import {
 } from './revision-contract.js';
 import { resolveGuardedUploadArtifact } from './upload-artifact.js';
 import { assertSafeUploadActivator, chooseUploadField, selectGuardedUploadFile } from './upload-control.js';
-import { classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from './human-boundary.js';
+import { classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError, suppressUnverifiedCaptcha } from './human-boundary.js';
 import { enumerateFrameTree, resolveFrameByPath } from './frame-path.js';
 import { settleSubmitPostcondition } from './submit-postcondition.js';
 import {
@@ -544,16 +549,15 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
       .slice(0, 2000);
 
     const hasVisibleChallengeWidget = Array.from(document.querySelectorAll([
-      'iframe[src*="recaptcha" i]',
-      'iframe[title*="captcha" i]',
-      'iframe[src*="hcaptcha" i]',
-      'iframe[src*="challenges.cloudflare.com" i]',
-      '[class*="h-captcha" i]',
-      '[class*="cf-turnstile" i]',
-      '[id*="captcha" i]',
-      '[class*="captcha" i]',
-      '[data-captcha]',
-      '[data-sitekey]'
+      // Passive reCAPTCHA badges/anchor frames are not interactive challenges.
+      'iframe[src*="recaptcha" i][src*="bframe" i]',
+      'iframe[src*="hcaptcha" i][title*="challenge" i]',
+      'iframe[src*="challenges.cloudflare.com" i][title*="challenge" i]',
+      '[class*="h-captcha" i] iframe[title*="challenge" i]',
+      '[class*="cf-turnstile" i] iframe[title*="challenge" i]',
+      '[role="dialog"][aria-label*="captcha" i]',
+      '[role="dialog"][aria-label*="verification" i]',
+      '[role="alertdialog"][aria-label*="captcha" i]'
     ].join(', '))).some(isVisible);
 
     return {
@@ -588,12 +592,8 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
     consentText: snapshot.consentText,
     alertDialogText: snapshot.alertDialogText,
   });
-  if (boundary?.type === 'captcha_service_unavailable' && snapshot.hasVisibleChallengeWidget) {
-    boundary = {
-      type: 'captcha',
-      requestedAction: 'Complete the visible human-verification challenge manually in the bound browser target.'
-    };
-  }
+  // Page copy alone is not evidence of an active CAPTCHA challenge.
+  boundary = suppressUnverifiedCaptcha(boundary, snapshot.hasVisibleChallengeWidget);
   const safeReadOnlyServiceInspection = canInspectCaptchaServiceError({
     boundary,
     hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget,
@@ -604,14 +604,23 @@ async function ensureNotChallenge(target, { allowLoginInspection = false, allowC
   // consent and modal boundaries; do not block ordinary navigation on a footer warning.
   const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;
   if (boundary && !(allowLoginInspection && boundary.type === 'login_required') && !safeReadOnlyServiceInspection && !nonBlockingLoaderWarning) {
+    const humanStatus = ({
+      captcha: 'WEB_CAPTCHA_ACTION_REQUIRED',
+      consent_required: 'WEB_COOKIE_ACTION_REQUIRED',
+      login_required: 'WEB_AUTH_ACTION_REQUIRED',
+      two_factor: 'WEB_MFA_ACTION_REQUIRED'
+    })[boundary.type] || 'WEB_BOUNDARY_REINSPECTION_REQUIRED';
     throw revisionError(
-      'WEB_HUMAN_ACTION_REQUIRED',
-      'A human-action boundary was detected. Resolve it manually before Web resumes.',
+      humanStatus,
+      'A typed browser boundary was observed. Inspect the attached evidence before resuming.',
       {
         boundary: {
           type: boundary.type,
           requestedAction: boundary.requestedAction,
           targetUrl: target.url(),
+          source: 'playwright-visible-dom',
+          observedAt: new Date().toISOString(),
+          visibleChallengeWidget: snapshot.hasVisibleChallengeWidget === true,
           title: String(snapshot.title || '').slice(0, 300),
           resumeCondition: 'Re-run page capture or the intended Web operation after the human step is complete.'
         }
@@ -1605,8 +1614,8 @@ function assertSafeMutableField(field, identityEvidence = {}) {
       }
     });
     throw revisionError(
-      'WEB_HUMAN_ACTION_REQUIRED',
-      'An unsupported form control requires manual completion before Web can continue.',
+      'WEB_BOUNDARY_REINSPECTION_REQUIRED',
+      'An unsupported form control requires target-bound inspection before a manual action can be determined.',
       {
         boundary: {
           type: boundary?.type || 'unsupported_control',

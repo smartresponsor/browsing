@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError } from "../playwright-worker/src/human-boundary.js";
+import { classifyChallengeText, classifyHumanBoundary, isSafeGoogleSsoTrigger, canInspectCaptchaServiceError, suppressUnverifiedCaptcha } from "../playwright-worker/src/human-boundary.js";
 
 assert.equal(classifyChallengeText("Welcome to the application"), null);
+const candidateCaptcha = classifyChallengeText("Please verify you are human");
+assert.equal(suppressUnverifiedCaptcha(candidateCaptcha, false), null);
+assert.equal(suppressUnverifiedCaptcha(candidateCaptcha, true)?.type, "captcha");
+assert.equal(suppressUnverifiedCaptcha(null, true)?.type, "captcha", "Visible challenge without text must block");
+assert.equal(suppressUnverifiedCaptcha(classifyChallengeText("Could not connect to the reCAPTCHA service. Please check your internet connection and reload to get a reCAPTCHA challenge."), true)?.type, "captcha");
+assert.equal(suppressUnverifiedCaptcha(null, false), null);
+assert.equal(suppressUnverifiedCaptcha({type: "two_factor"}, false)?.type, "two_factor");
 assert.equal(classifyChallengeText("Please verify you are human to continue")?.type, "captcha");
 
 // The real Nellis Won page contained this exact reCAPTCHA loader error as
@@ -95,7 +102,7 @@ assert.equal(classifyHumanBoundary({ text: "Enter verification code", url: "http
 
 const workerSource = fs.readFileSync(new URL("../playwright-worker/src/worker.js", import.meta.url), "utf8");
 for (const token of [
-  "'WEB_HUMAN_ACTION_REQUIRED'",
+  "'WEB_BOUNDARY_REINSPECTION_REQUIRED'",
   "requestedAction: boundary.requestedAction",
   "hasPasswordField: Array.from(document.querySelectorAll('input[type=\"password\"]')).some(element => {",
   "hasCredentialIdentifierField: Boolean(document.querySelector([",
@@ -117,7 +124,7 @@ for (const token of [
   "allowLoginInspection: true",
   "allowCaptchaServiceErrorInspection: captureView === 'dom' && req.body?.screenshot !== true",
   "readOnlyDomCapture: allowCaptchaServiceErrorInspection",
-  "boundary?.type === 'captcha_service_unavailable' && snapshot.hasVisibleChallengeWidget",
+  "suppressUnverifiedCaptcha(boundary, snapshot.hasVisibleChallengeWidget)",
   "hasVisibleChallengeWidget: snapshot.hasVisibleChallengeWidget",
   "canInspectCaptchaServiceError({",
   "const nonBlockingLoaderWarning = boundary?.type === 'captcha_service_unavailable' && !snapshot.hasVisibleChallengeWidget;",
@@ -129,4 +136,17 @@ for (const token of [
   assert.equal(workerSource.includes(token), true, `Human-boundary propagation invariant missing: ${token}`);
 }
 
+for (const token of [
+  "'WEB_CAPTCHA_ACTION_REQUIRED'",
+  "'WEB_COOKIE_ACTION_REQUIRED'",
+  "'WEB_AUTH_ACTION_REQUIRED'",
+  "'WEB_MFA_ACTION_REQUIRED'",
+  "'WEB_BOUNDARY_REINSPECTION_REQUIRED'",
+  "targetUrl: target.url()",
+  "source: 'playwright-visible-dom'",
+  "observedAt: new Date().toISOString()",
+  "visibleChallengeWidget: snapshot.hasVisibleChallengeWidget === true"
+]) {
+  assert.ok(workerSource.includes(token), `Evidence-backed producer contract missing: ${token}`);
+}
 console.log("Web human-boundary regression passed.");
