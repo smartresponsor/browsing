@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const cdpRequests=[];
-const cdp=createServer((req,res)=>{cdpRequests.push({method:req.method,url:req.url});res.setHeader('content-type','application/json');res.end(JSON.stringify(req.url==='/json/list'?[{id:'invisible-target',type:'page',url:'about:blank'}]:{webSocketDebuggerUrl:`ws://127.0.0.1:${cdp.address().port}/devtools/browser/invisible-instance`}));});
+let includeTargetSocket=true;
+const cdp=createServer((req,res)=>{cdpRequests.push({method:req.method,url:req.url});res.setHeader('content-type','application/json');res.end(JSON.stringify(req.url==='/json/list'?[{id:'invisible-target',type:'page',url:'about:blank',...(includeTargetSocket?{webSocketDebuggerUrl:`ws://127.0.0.1:${cdp.address().port}/devtools/page/invisible-target`}:{})}]:{webSocketDebuggerUrl:`ws://127.0.0.1:${cdp.address().port}/devtools/browser/invisible-instance`}));});
 cdp.listen(0,'127.0.0.1');await once(cdp,'listening');
 const reserve=createServer();reserve.listen(0,'127.0.0.1');await once(reserve,'listening');const workerPort=reserve.address().port;reserve.close();await once(reserve,'close');
 const worker=spawn(process.execPath,[fileURLToPath(new URL('../playwright-worker/src/worker.js',import.meta.url))],{env:{...process.env,PORT:String(workerPort),BROWSER_MCP_REMOTE_DEBUGGING_PORT:String(cdp.address().port),BROWSER_MCP_BROWSER_WORKER_TOKEN:'fixture-token',BROWSER_MCP_HEADLESS:'true'},stdio:['ignore','pipe','pipe']});
@@ -18,6 +19,12 @@ try {
   const r=await post(route,{targetId:'invisible-target',url:'https://example.invalid',approved:false});
   assert.equal(r.ok,false,route);assert.equal(r.status,'WEB_VISIBLE_DESKTOP_MISSING',route);assert.equal(r.reason,'NATIVE_WINDOW_EVIDENCE_UNAVAILABLE',route);assert.equal(r.visibility_verified,false,route);assert.equal(r.user_interaction_ready,false,route);assert.equal(r.mutation_attempted,false,route);
  }
+ // Missing advertised target socket must fail at target identity, not desktop admission.
+ includeTargetSocket=false;
+ const malformed=await post('/browser-bind',{targetId:'invisible-target'});
+ assert.equal(malformed.ok,false);assert.equal(malformed.status,'WEB_FOREGROUND_TARGET_MISMATCH');
+ assert.equal(malformed.reason,'BROWSER_TARGET_STALE');assert.equal(malformed.mutation_attempted,false);
+ includeTargetSocket=true;
  for(const route of ['/browser-restart','/browser-kill','/open-fresh']){
   const r=await post(route);assert.equal(r.reason,'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION');
  }
