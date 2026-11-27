@@ -1895,9 +1895,20 @@ app.use((req, res, next) => {
 const visibleRequest = new AsyncLocalStorage();
 let visibleOperationInFlight = false;
 let boundVisibleRuntime;
+// Execute delegated calls under the same Console-owned kernel lease.
+const guardedRoutes = new Set(['/connector-sync-execute','/browser-bind','/open','/open-job','/chatgpt-snapshot','/page-capture','/page-capture-dom','/page-capture-form','/wait-for-ready','/inspect','/extract-form','/propose','/fill-after-approval','/upload-artifact','/click','/review-before-submit','/submit-after-approval']);
+const leaseRequired = () => process.platform === 'linux' && getPolicy().remoteDebuggingPort === 9223 && process.env.CONSOLE_MCP_VISIBLE_OS_LEASES === 'required';
 const diagnosticRoutes = new Set(['/browser-status', '/health-full', '/shared-browser-status', '/connector-sync-plan', '/browser-cdp-targets', '/browser-targets', '/browser-cdp-verify-chatgpt-home', '/browser-cdp-cleanup-plan-chatgpt-home']);
 app.use(async (req, res, next) => {
   if (req.path === '/healthz') return next();
+  const delegated = req.path.startsWith('/lease-v1/');
+  if (delegated) {
+    if (!leaseRequired() || !parseBrowserWorkerToken()) return res.status(409).json({ok:false,status:'WEB_SHARED_LEASE_UNAVAILABLE',mutation_attempted:false});
+    req.url = req.url.slice('/lease-v1'.length);
+    if (!guardedRoutes.has(req.path)) return res.status(404).json({ok:false,status:'WEB_SHARED_LEASE_ROUTE_DENIED',mutation_attempted:false});
+  } else if (leaseRequired() && guardedRoutes.has(req.path)) {
+    return res.status(409).json({ok:false,status:'WEB_SHARED_LEASE_PROTOCOL_REQUIRED',mutation_attempted:false});
+  }
   if (diagnosticRoutes.has(req.path)) {
     const send = res.json.bind(res);
     res.json = body => send({ ...body, visibility_verified: false, user_interaction_ready: false });
@@ -1906,10 +1917,18 @@ app.use(async (req, res, next) => {
   if (['/browser-restart', '/browser-kill', '/open-fresh', '/browser-cdp-cleanup-chatgpt-home'].includes(req.path)) {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'RECOVERY_REQUIRES_CONSOLE_ORCHESTRATION', launches_browser: false });
   }
+  if (req.method !== 'POST' || !guardedRoutes.has(req.path)) return res.status(404).json({ok:false,status:'WEB_ROUTE_DENIED',mutation_attempted:false});
   if (visibleOperationInFlight) return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBLE_SESSION_BUSY', mutation_attempted: false });
   visibleOperationInFlight = true;
-  const release = () => { visibleOperationInFlight = false; };
-  res.once('finish', release);
+  let lease;
+  let dispatched = false;
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    try { if (lease?.ok) await lease.release(); }
+    finally { visibleOperationInFlight = false; }
+  };
   try {
     const correlationId = req.body?.correlation?.invocationId || randomUUID();
     const port = getPolicy().remoteDebuggingPort;
@@ -1929,10 +1948,23 @@ app.use(async (req, res, next) => {
         ? await inspectVisibleTarget({ port, targetId, correlationId, expected: boundVisibleRuntime, background })
         : await selectVisibleTarget([port], targetId, correlationId, background);
     if (!before.ok) return res.status(409).json({ ...before, mutation_attempted: false });
+    if (delegated) {
+      const { acquireVisibleProcessLease, inspectVisibleProcessLeaseRoot } = await import('../../../../console-mcp/dist/service/visible-browser-process-lock.js');
+      const leaseRoot = inspectVisibleProcessLeaseRoot();
+      if (!leaseRoot || req.headers['x-console-browser-lease-root'] !== leaseRoot.identity) return res.status(409).json({ok:false,status:'WEB_SHARED_LEASE_ROOT_MISMATCH',mutation_attempted:false});
+      const { endpoint, browserInstance } = before.evidence;
+      if (endpoint !== 'http://127.0.0.1:9223' || !browserInstance) return res.status(409).json({ok:false,status:'WEB_SHARED_LEASE_UNAVAILABLE',mutation_attempted:false});
+      lease = await acquireVisibleProcessLease(JSON.stringify([endpoint,browserInstance]), 'browser', null);
+      if (!lease.ok) return res.status(409).json({ok:false,status:lease.reason,mutation_attempted:false});
+      const fresh = await inspectVisibleTarget({port,targetId:before.evidence.targetId,expected:before.evidence,correlationId,background});
+      if (!fresh.ok || !lease.isHeld() || inspectVisibleProcessLeaseRoot()?.identity !== leaseRoot.identity) return res.status(409).json({ok:false,status:'WEB_SHARED_LEASE_ADMISSION_LOST',mutation_attempted:false});
+    }
     if (req.path === '/browser-bind') req.body.targetId = before.evidence.targetId;
     const send = res.json.bind(res);
+    const state = { ...before, preserveActiveTarget, release, responsePromise: null };
     res.json = body => {
-      void (async () => {
+      if (state.responsePromise) return res;
+      state.responsePromise = (async () => {
         let after;
         try {
           const activeTargetId = page && !page.isClosed() ? await getPageTargetId(page) : null;
@@ -1941,26 +1973,42 @@ app.use(async (req, res, next) => {
             ? await grantsPolicy.inspectGrantsTarget({ targetId: afterId, expected: before.evidence })
             : await inspectVisibleTarget({ port, targetId: afterId, expected: before.evidence, correlationId, background });
         } catch { after = { ...before, ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', visibility_verified: false, user_interaction_ready: false }; }
+        if (lease?.ok && !lease.isHeld()) after = { ...after, ok:false, status:'WEB_SHARED_LEASE_LOST', visibility_verified:false, user_interaction_ready:false };
         if (after.ok && !preserveActiveTarget) boundVisibleRuntime = after.evidence;
-        send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
-      })().catch(() => send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false })).finally(release);
+        if (!res.destroyed && !res.headersSent) send({ ...body, ...(after.ok ? {} : { ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', outcome_unknown: true, automatic_retry_allowed: false }), visible_session: after });
+      })().catch(() => {
+        if (!res.destroyed && !res.headersSent) send({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'POST_OPERATION_VISIBILITY_UNKNOWN', outcome_unknown: true, automatic_retry_allowed: false });
+      });
       return res;
     };
-    return visibleRequest.run({ ...before, preserveActiveTarget }, next);
+    dispatched = true;
+    return visibleRequest.run(state, next);
   } catch {
     return res.status(409).json({ ok: false, status: 'WEB_VISIBLE_SESSION_REQUIRED', reason: 'VISIBILITY_UNKNOWN', mutation_attempted: false });
-  }
+  } finally { if (!dispatched) await release(); }
 });
 
-app.post('/browser-status', async (_req, res) => {
+// Await the actual handler and asynchronous postcondition, not HTTP connection events.
+const guardedPost = handler => async (req, res) => {
+  const state = visibleRequest.getStore();
+  try {
+    await handler(req, res);
+    if (state?.responsePromise) await state.responsePromise;
+  } catch {
+    if (!res.destroyed && !res.headersSent) res.status(409).json({ok:false,status:'WEB_WORKER_OPERATION_FAILED',outcome_unknown:true,automatic_retry_allowed:false});
+    if (state?.responsePromise) await state.responsePromise;
+  } finally { if (state) await state.release(); }
+};
+
+app.post('/browser-status', guardedPost(async (_req, res) => {
   try {
     res.json(await getBrowserStatus());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-restart', async (req, res) => {
+app.post('/browser-restart', guardedPost(async (req, res) => {
   try {
     const force = req.body?.force === true;
     const reopen = req.body?.reopen !== false;
@@ -1969,9 +2017,9 @@ app.post('/browser-restart', async (req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-kill', async (req, res) => {
+app.post('/browser-kill', guardedPost(async (req, res) => {
   try {
     const policy = getPolicy();
     const reason = String(req.body?.reason || '').slice(0, 200);
@@ -1990,49 +2038,49 @@ app.post('/browser-kill', async (req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/health-full', async (_req, res) => {
+app.post('/health-full', guardedPost(async (_req, res) => {
   try {
     res.json(await getFullHealthStatus());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/shared-browser-status', async (_req, res) => {
+app.post('/shared-browser-status', guardedPost(async (_req, res) => {
   try {
     res.json(await getSharedBrowserRuntimeStatus());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/connector-sync-plan', async (req, res) => {
+app.post('/connector-sync-plan', guardedPost(async (req, res) => {
   try {
     res.json(planWebConnectorRefresh({ connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/connector-sync-execute', async (req, res) => {
+app.post('/connector-sync-execute', guardedPost(async (req, res) => {
   try {
     res.json(await executeWebConnectorRefresh({ confirmRefresh: req.body?.confirmRefresh === true || req.body?.confirmSync === true, connectorName: req.body?.connectorName, connectorId: req.body?.connectorId, timeoutMs: req.body?.timeoutMs }));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-cdp-targets', async (_req, res) => {
+app.post('/browser-cdp-targets', guardedPost(async (_req, res) => {
   try {
     res.json(await listRawCdpTargets(getPolicy()));
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
+app.post('/browser-cdp-verify-chatgpt-home', guardedPost(async (req, res) => {
   try {
     const inventory = await listRawCdpTargets(getPolicy());
     const timeoutMs = Number.isInteger(req.body?.timeoutMs) ? Math.min(Math.max(req.body.timeoutMs, 250), 10000) : 5000;
@@ -2061,9 +2109,9 @@ app.post('/browser-cdp-verify-chatgpt-home', async (req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-cdp-cleanup-plan-chatgpt-home', async (req, res) => {
+app.post('/browser-cdp-cleanup-plan-chatgpt-home', guardedPost(async (req, res) => {
   try {
     res.json(await buildChatGptHomeCleanupPlan(getPolicy(), {
       maxVerify: req.body?.maxVerify,
@@ -2073,9 +2121,9 @@ app.post('/browser-cdp-cleanup-plan-chatgpt-home', async (req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-cdp-cleanup-chatgpt-home', async (req, res) => {
+app.post('/browser-cdp-cleanup-chatgpt-home', guardedPost(async (req, res) => {
   try {
     res.json(await cleanupChatGptHomeTargets(getPolicy(), {
       confirmCleanup: req.body?.confirmCleanup === true,
@@ -2086,17 +2134,17 @@ app.post('/browser-cdp-cleanup-chatgpt-home', async (req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-targets', async (_req, res) => {
+app.post('/browser-targets', guardedPost(async (_req, res) => {
   try {
     res.json(await listBrowserTargets());
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
-app.post('/browser-bind', async (req, res) => {
+app.post('/browser-bind', guardedPost(async (req, res) => {
   try {
     res.json(await bindBrowserTarget({
       targetId: typeof req.body?.targetId === 'string' ? req.body.targetId.trim() : undefined,
@@ -2107,9 +2155,9 @@ app.post('/browser-bind', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_TARGET_BIND_FAILED');
   }
-});
+}));
 
-app.post('/open-fresh', async (req, res) => {
+app.post('/open-fresh', guardedPost(async (req, res) => {
   try {
     const policy = getPolicy();
     const requestedUrl = String(req.body?.url || '').trim();
@@ -2142,9 +2190,9 @@ app.post('/open-fresh', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_OPEN_FRESH_FAILED');
   }
-});
+}));
 
-app.post('/open', async (req, res) => {
+app.post('/open', guardedPost(async (req, res) => {
   try {
     const policy = getPolicy();
     const target = await ensurePage();
@@ -2172,9 +2220,9 @@ app.post('/open', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_OPEN_FAILED');
   }
-});
+}));
 
-app.post('/open-job', async (req, res) => {
+app.post('/open-job', guardedPost(async (req, res) => {
   try {
     const policy = getPolicy();
     const target = await ensurePage();
@@ -2198,9 +2246,9 @@ app.post('/open-job', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_OPEN_JOB_FAILED');
   }
-});
+}));
 
-app.post('/chatgpt-snapshot', async (_req, res) => {
+app.post('/chatgpt-snapshot', guardedPost(async (_req, res) => {
   try {
     const target = await ensurePage();
     await target.bringToFront().catch(() => {});
@@ -2208,11 +2256,11 @@ app.post('/chatgpt-snapshot', async (_req, res) => {
   } catch (error) {
     res.status(409).json({ ok: false, error: normalizeError(error) });
   }
-});
+}));
 
 // Legacy aliases remain accepted for an already-running Console MCP connector.
 // New canonical definitions route DOM/form capture through /page-capture.
-app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (req, res) => {
+app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], guardedPost(async (req, res) => {
   try {
     const captureView = req.path === '/page-capture-dom' ? 'dom'
       : req.path === '/page-capture-form' ? 'form' : req.body?.captureView;
@@ -2264,9 +2312,9 @@ app.post(['/page-capture', '/page-capture-dom', '/page-capture-form'], async (re
   } catch (error) {
     sendWebError(res, error, 'WEB_PAGE_CAPTURE_FAILED');
   }
-});
+}));
 
-app.post('/wait-for-ready', async (req, res) => {
+app.post('/wait-for-ready', guardedPost(async (req, res) => {
   try {
     const target = await ensurePage();
     const allowedStates = new Set(['domcontentloaded', 'load', 'networkidle', 'selector-visible', 'selector-attached', 'mutation-quiet']);
@@ -2280,9 +2328,9 @@ app.post('/wait-for-ready', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_READINESS_WAIT_FAILED');
   }
-});
+}));
 
-app.post('/inspect', async (_req, res) => {
+app.post('/inspect', guardedPost(async (_req, res) => {
   try {
     const target = await ensurePage();
     await ensureNotChallenge(target, { allowLoginInspection: true });
@@ -2296,9 +2344,9 @@ app.post('/inspect', async (_req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_INSPECT_FAILED');
   }
-});
+}));
 
-app.post('/extract-form', async (_req, res) => {
+app.post('/extract-form', guardedPost(async (_req, res) => {
   try {
     const target = await ensurePage();
     await ensureNotChallenge(target, { allowLoginInspection: true });
@@ -2311,9 +2359,9 @@ app.post('/extract-form', async (_req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_FORM_EXTRACT_FAILED');
   }
-});
+}));
 
-app.post('/propose', async (req, res) => {
+app.post('/propose', guardedPost(async (req, res) => {
   try {
     const policy = getPolicy();
     const target = await ensurePage();
@@ -2353,9 +2401,9 @@ app.post('/propose', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_PROPOSAL_FAILED');
   }
-});
+}));
 
-app.post('/fill-after-approval', async (req, res) => {
+app.post('/fill-after-approval', guardedPost(async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
@@ -2432,9 +2480,9 @@ app.post('/fill-after-approval', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_FORM_MUTATION_FAILED', correlation);
   }
-});
+}));
 
-app.post('/upload-artifact', async (req, res) => {
+app.post('/upload-artifact', guardedPost(async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
@@ -2514,9 +2562,9 @@ app.post('/upload-artifact', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_UPLOAD_FAILED', correlation);
   }
-});
+}));
 
-app.post('/click', async (req, res) => {
+app.post('/click', guardedPost(async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const target = await ensurePage();
@@ -2591,9 +2639,9 @@ app.post('/click', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_CLICK_FAILED', correlation);
   }
-});
+}));
 
-app.post('/review-before-submit', async (_req, res) => {
+app.post('/review-before-submit', guardedPost(async (_req, res) => {
   try {
     const policy = getPolicy();
     const target = await ensurePage();
@@ -2619,9 +2667,9 @@ app.post('/review-before-submit', async (_req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_REVIEW_CAPTURE_FAILED');
   }
-});
+}));
 
-app.post('/submit-after-approval', async (req, res) => {
+app.post('/submit-after-approval', guardedPost(async (req, res) => {
   const correlation = normalizeExecutionCorrelation(req.body);
   try {
     const policy = getPolicy();
@@ -2707,7 +2755,7 @@ app.post('/submit-after-approval', async (req, res) => {
   } catch (error) {
     sendWebError(res, error, 'WEB_SUBMIT_FAILED', correlation);
   }
-});
+}));
 
 async function listManagedBrowserProcesses(policy = getPolicy()) {
   if (process.platform !== 'win32') {
